@@ -17,8 +17,10 @@
 | ConPTY | 公开 API 路径在 PSEC 和两种固定非 AppContainer 受限令牌中通过交互回归 |
 | 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
 | 非 AppContainer 完整 restricting SID 检查令牌 | 同一固定夹具通过上述工作负载与边界回归 |
-| 任意外部 restricted token harness | 尚未集成验收；实际令牌、ACL、完整性等级、创建参数及控制台条件需要分别验证 |
+| 验收依据 | 参照相关配置构造的 PSEC 与两种受限令牌模型；按有效安全策略与进程创建条件判断适用性 |
 | 只复制旁置文件即可自动生效 | 尚未提供可靠通用加载入口 |
+
+验证按底层隔离机制与配置组织；在相关安全策略、进程创建与控制台条件一致时，现有模型可代表上层启动环境。当前验收不要求先接入上层 harness，也不按产品名称分别建立兼容实现。
 
 识别覆盖普通导入及常规应用目录、模块目录和运行时目录的传递依赖。纯原生根在启动后才 LoadLibrary MSYS、仅 delay import，以及任意 SxS 或自定义 DLL 搜索规则不在当前预先识别保证内。
 

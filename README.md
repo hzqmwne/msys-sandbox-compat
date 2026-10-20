@@ -1,6 +1,6 @@
 # MSYS Compat
 
-让未修改的 MSYS 程序在 Windows 受限执行环境中运行。当前验证覆盖 **Windows 原生 PSEC / AMD64**，以及固定测试夹具创建的 write-restricted 和完整 restricting SID 检查两种非 AppContainer 令牌；外部 harness 尚未集成验收。
+让未修改的 MSYS 程序在 Windows 受限执行环境中运行。当前验证覆盖 **Windows 原生 PSEC / AMD64**，以及参照相关配置构造的 write-restricted 和完整 restricting SID 检查两种非 AppContainer 令牌。这些底层隔离模型是当前代表性验收基础，适用范围依据有效安全策略与进程创建条件判断。
 
 项目直接启动真实的 `usr/bin/bash.exe`、Perl 与 GNU 命令，使用原安装位置的 `msys-2.0.dll`，不修改 MSYS2/Git for Windows 分发包中的磁盘文件、安装目录 ACL 或 rebase 数据。当前验证组合为 Windows 26300.9711 x64、PSEC 1.0、MSYS 3.6.10。
 
