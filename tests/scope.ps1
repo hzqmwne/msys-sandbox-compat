@@ -40,5 +40,31 @@ $report=Join-Path $evidence 'native-child.report.txt'
 $command='"'+$probe.Replace('\','/')+'" --inspect-parent "'+$report.Replace('\','/')+'"; s=$?; echo PROBE-EXIT:$s; exit "$s"'
 Run 'native-child-parent-check' @($compat,'--trace',$bash,'--noprofile','--norc','-c',$command) $report
 Run 'native-root-explicit-reentry' @($compat,'--trace',$probe,'--reenter',$compat,$bash)
+$before = Join-Path $evidence 'msys-native-context-before.report.txt'
+$after = Join-Path $evidence 'msys-native-context-after.report.txt'
+$runtime = Join-Path $GitRoot 'usr\bin\msys-2.0.dll'
+$command = 'export MSYS2_ARG_CONV_EXCL="*"; "' + $probe.Replace('\','/') +
+    '" "' + $before.Replace('\','/') + '" || exit $?; "' + $compat.Replace('\','/') +
+    '" --trace --runtime "' + $runtime.Replace('\','/') + '" "' + $probe.Replace('\','/') +
+    '" "' + $after.Replace('\','/') + '"'
+Run 'msys-native-host-reentry' @($compat,'--trace',$bash,'--noprofile','--norc','-c',$command) $after
+$beforeDacl = @(Get-Content -LiteralPath $before | Where-Object { $_ -like 'token-default-dacl=*' })
+$afterDacl = @(Get-Content -LiteralPath $after | Where-Object { $_ -like 'token-default-dacl=*' })
+if ($beforeDacl.Count -ne 1 -or $afterDacl.Count -ne 1 -or $beforeDacl[0] -ne $afterDacl[0]) {
+    throw 'Native reentry changed token default DACL'
+}
+
+$command = 'export MSYS2_ARG_CONV_EXCL="*"; "' + $probe.Replace('\','/') +
+    '" --reenter "' + $compat.Replace('\','/') + '" "' + $bash.Replace('\','/') + '"'
+$info = New-TestProcessInfo $launcher @(
+    $policy,$compat,'--runtime',$runtime,$bash,'--noprofile','--norc','-c',$command
+) $state
+$result = Invoke-TestProcess $info 10000
+Save-TestOutput $result $evidence 'msys-native-msys-token-boundary'
+if ($result.ExitCode -eq 0 -or $result.Output -match 'EXPLICIT-REENTRY' -or
+    $result.Error -notmatch 'query MSYS root token before initialization: Win32 5') {
+    throw 'MSYS token boundary did not fail before initialization'
+}
+Write-Output 'msys-native-msys-token-boundary EXPECTED-REJECTION'
 Run 'token-default-dacl' @((Join-Path $BinaryDirectory 'token-dacl-probe.exe'))
 Write-Output 'SCOPE-ALL-PASS'

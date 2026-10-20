@@ -24,7 +24,7 @@ target_link_options(msys-compat-agent PRIVATE /NODEFAULTLIB /NOENTRY /INCREMENTA
 # frame on MSYS-managed secondary-thread stacks.
 target_compile_options(msys-compat-agent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Gs4096>)
 add_executable(msys-compat src/host/main.cpp src/host/platform.cpp src/host/runtime.cpp src/host/bootstrap.cpp src/agent/injector.cpp src/agent/identify.cpp)
-target_link_libraries(msys-compat PRIVATE advapi32)
+target_link_libraries(msys-compat PRIVATE advapi32 userenv)
 add_dependencies(msys-compat msys-compat-agent)
 add_executable(psec-run src/psec/main.cpp)
 target_include_directories(psec-run PRIVATE third_party)

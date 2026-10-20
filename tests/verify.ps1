@@ -9,7 +9,7 @@ if($EvidenceDirectory){$evidence=[IO.Path]::GetFullPath($EvidenceDirectory)}
 New-Item -ItemType Directory -Force $state,$evidence,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $canary=Join-Path $PSScriptRoot 'denied.txt'
 $allowed=Join-Path $PSScriptRoot 'allowed.txt'
-'read-ok' | Set-Content -Encoding utf8NoBOM -LiteralPath $allowed
+[IO.File]::WriteAllText($allowed, "read-ok`n")
 $canaryHash=(Get-FileHash -LiteralPath $canary).Hash
 $allowedHash=(Get-FileHash -LiteralPath $allowed).Hash
 $policy=Join-Path $state 'verify-policy.json'

@@ -1,6 +1,7 @@
 add_executable(token-dacl-probe token-dacl.cpp)
 target_link_libraries(token-dacl-probe PRIVATE advapi32)
 add_executable(native-probe native-probe.cpp)
+target_link_libraries(native-probe PRIVATE advapi32)
 foreach(target token-dacl-probe native-probe)
   target_compile_options(${target} PRIVATE /EHsc)
 endforeach()

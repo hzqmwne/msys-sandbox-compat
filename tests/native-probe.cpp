@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <winternl.h>
+#include <sddl.h>
 #include <cstdio>
 #include <initializer_list>
 #include <string>
@@ -29,6 +30,27 @@ int wmain(int argc, wchar_t **argv) {
         return 2;
     setvbuf(report, nullptr, _IONBF, 0);
     fprintf(report, "pid=%lu\n", GetCurrentProcessId());
+    HANDLE token = nullptr;
+    BOOL opened = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+    fprintf(report, "token-reopen=%d error=%lu\n", opened, opened ? 0 : GetLastError());
+    if (opened)
+        CloseHandle(token);
+    BYTE token_bytes[4096]{};
+    DWORD token_size = 0;
+    if (!GetTokenInformation(GetCurrentProcessToken(), TokenDefaultDacl, token_bytes,
+                             sizeof(token_bytes), &token_size))
+        return 5;
+    SECURITY_DESCRIPTOR token_descriptor{};
+    InitializeSecurityDescriptor(&token_descriptor, SECURITY_DESCRIPTOR_REVISION);
+    SetSecurityDescriptorDacl(&token_descriptor, TRUE,
+                              reinterpret_cast<TOKEN_DEFAULT_DACL *>(token_bytes)->DefaultDacl,
+                              FALSE);
+    LPWSTR token_text = nullptr;
+    if (!ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            &token_descriptor, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &token_text, nullptr))
+        return 5;
+    fprintf(report, "token-default-dacl=%ls\n", token_text);
+    LocalFree(token_text);
     bool clean = true;
     for (auto name : {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
                       "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile", "NtMapViewOfSection",

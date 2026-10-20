@@ -121,6 +121,13 @@ int wmain(int argc, wchar_t **argv) try {
         check_nt(identify_process(state->api, child.hProcess, state->runtime, image),
                  "classify actual root image");
         if (image.related) {
+            // A cold MSYS start needs a real primary-token handle. A token
+            // inherited through an MSYS-created native bridge may deny this,
+            // even though our own read-only pseudo-token queries succeeded.
+            HANDLE root_token = nullptr;
+            check(OpenProcessToken(child.hProcess, TOKEN_QUERY, &root_token),
+                  "query MSYS root token before initialization");
+            CloseHandle(root_token);
             auto directory = std::wstring(image.path);
             directory.resize(directory.rfind(L'\\') + 1);
             memcpy(state->application_directory, directory.c_str(), (directory.size() + 1) * 2);

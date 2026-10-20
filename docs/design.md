@@ -31,11 +31,15 @@ PSEC 创建工具与兼容宿主分别负责隔离策略和运行时兼容。宿
 
 对象路径重定向限于 MSYS 使用的对象；文件安装目录 ACL 和 token 不被修改。仅调整 TokenDefaultDacl 无法覆盖运行时显式传入的对象安全描述符。
 
+宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄；对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化，不改变 token 或其默认 DACL。取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
+
 ## fork 与进程链
 
 MSYS 自身仍负责 fork 的复制、同步和恢复语义。兼容层解决环境导致的对象访问和地址布局障碍，并在相关子进程的初始线程恢复前复制 agent。它保留调用者原有的挂起状态，不用调试事件截获创建。
 
 原生子进程保持原样，其后续创建操作不会经过 MSYS 父进程的 hook。Job 管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
+
+MSYS 创建的原生后代仍可显式调用兼容宿主启动原生目标。若目标是需要全新初始化的 MSYS 根进程，宿主在初始线程恢复前检查其真实 token 的 `TOKEN_QUERY` 访问；拒绝时终止本次挂起目标并明确报错。受测 MSYS 原生后代的 token 对象缺少 package ACE，冷启动 MSYS 会在 token 查询处失败并等待；只绕过宿主只读查询不足以修复该链路。这个前置检查针对已复现的拒绝，不代表通过后所有 MSYS 初始化步骤都必然成功。
 
 ## ConPTY
 

@@ -1,5 +1,6 @@
 #include "host.h"
 #include <sddl.h>
+#include <securityappcontainer.h>
 #include <cstdio>
 #include <stdexcept>
 
@@ -77,14 +78,14 @@ NativeApi resolve_api() {
     return api;
 }
 void configure_security(AgentState &state) {
-    HANDLE token = nullptr;
-    check(OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token), "OpenProcessToken");
+    // MSYS-created native descendants can deny reopening their primary token.
+    // The current-token pseudo handle provides the read-only queries we need.
+    HANDLE token = GetCurrentProcessToken();
     BYTE user[4096], package[4096];
     DWORD size = 0;
     check(GetTokenInformation(token, TokenUser, user, sizeof(user), &size), "TokenUser");
     check(GetTokenInformation(token, TokenAppContainerSid, package, sizeof(package), &size),
           "TokenAppContainerSid");
-    CloseHandle(token);
     auto sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
     check(sid != nullptr, "launcher must run inside PSEC");
     LPWSTR user_text = nullptr, package_text = nullptr;
@@ -104,16 +105,16 @@ void configure_security(AgentState &state) {
     memcpy(state.descriptor, descriptor, bytes);
     LocalFree(descriptor);
 
-    auto event_name = L"msys-compat-probe-" + std::to_wstring(GetCurrentProcessId());
-    HANDLE event = CreateEventW(nullptr, FALSE, FALSE, event_name.c_str());
-    check(event != nullptr, "private namespace probe");
-    alignas(void *) BYTE buffer[4096];
-    check_nt(state.api.query_object(event, 1, buffer, sizeof(buffer), nullptr),
-             "query private namespace");
-    auto name = reinterpret_cast<UNICODE_STRING *>(buffer);
-    std::wstring root(name->Buffer, name->Length / 2);
-    CloseHandle(event);
-    root.resize(root.rfind(L'\\'));
+    // Named Win32 object creation may also reopen that token while resolving
+    // the namespace. Query its path directly instead of creating a probe event.
+    wchar_t relative[object_root_chars]{};
+    ULONG chars = 0;
+    check(GetAppContainerNamedObjectPath(token, nullptr, _countof(relative), relative, &chars),
+          "AppContainer object namespace");
+    DWORD session = 0;
+    check(GetTokenInformation(token, TokenSessionId, &session, sizeof(session), &size),
+          "TokenSessionId");
+    auto root = L"\\Sessions\\" + std::to_wstring(session) + L"\\" + relative;
     check(root.size() < object_root_chars, "namespace capacity");
     memcpy(state.object_root, root.c_str(), (root.size() + 1) * 2);
     state.root_chars = static_cast<uint32_t>(root.size());
