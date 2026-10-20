@@ -47,6 +47,8 @@
 .\tests\process-chain.ps1 -Environment WriteRestricted
 .\tests\process-chain.ps1 -Environment FullRestricted
 .\tests\conpty.ps1
+.\tests\conpty.ps1 -Environment WriteRestricted
+.\tests\conpty.ps1 -Environment FullRestricted
 .\tests\late-package.ps1
 .\tests\integrity.ps1
 ```

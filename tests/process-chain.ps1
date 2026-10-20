@@ -12,13 +12,7 @@ $evidence = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory)
 New-Item -ItemType Directory -Force $state,$evidence,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $sourceBinaries = $BinaryDirectory
 if ($restricted) {
-    $BinaryDirectory = Join-Path $state 'readonly'
-    New-Item -ItemType Directory -Force $BinaryDirectory | Out-Null
-    [IO.File]::WriteAllText((Join-Path $state '.restricted-fixture'),'test-only')
-    foreach ($name in @('msys-compat.exe','msys-compat.dll','native-bridge.exe','restricted-run.exe')) {
-        Copy-Item -LiteralPath (Join-Path $sourceBinaries $name) -Destination $BinaryDirectory
-    }
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'fork.pl') -Destination $BinaryDirectory
+    $BinaryDirectory = Initialize-RestrictedTestFiles $sourceBinaries $state
 }
 $policy = Join-Path $state 'policy.json'
 $canary = if ($restricted) { Join-Path $state 'denied.txt' } else { Join-Path $PSScriptRoot 'denied.txt' }

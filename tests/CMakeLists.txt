@@ -47,6 +47,10 @@ if(MSYS_COMPAT_POWERSHELL)
       -File "${CMAKE_CURRENT_SOURCE_DIR}/process-chain.ps1" -Environment "${mode}"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
     set_tests_properties(token.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+    add_test(NAME token.conpty.${mode} COMMAND "${MSYS_COMPAT_POWERSHELL}" -NoProfile
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/conpty.ps1" -Environment "${mode}"
+      -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
+    set_tests_properties(token.conpty.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   endforeach()
 endif()
 add_executable(identify-test identify-test.cpp ../src/agent/identify.cpp)

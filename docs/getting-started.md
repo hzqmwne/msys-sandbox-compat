@@ -34,7 +34,9 @@ msys-compat.exe [--trace] [--runtime msys-2.0.dll]
 
 `psec-run.exe` 由普通宿主调用，负责创建原生 PSEC。`msys-compat.exe` 在既有 PSEC 或非 AppContainer 受限令牌上下文内调用，负责兼容准备；它从自身目录定位 `msys-compat.dll`。`--runtime` 为传递依赖解析提供运行时所在目录，不进行文件身份认证。
 
-接入受限令牌启动器时，将其启动目标设为 `msys-compat.exe --runtime DLL PROGRAM ...`，保留启动器既有 token、对象和文件策略。兼容 EXE/DLL 应部署在原策略已允许读取/执行的位置；原版 MSYS 安装文件也必须已具备原策略允许的访问。兼容层不修改任何磁盘 ACL、不放宽 restricted token，也不借非受限进程代读被拒绝的文件。缺少访问时记录该配置下的兼容阻碍，不能通过补权把它算作成功。仓库仅对 [兼容范围](compatibility.md) 列出的固定测试配置完成验收，测试用 `restricted-run.exe` 不作为产品启动器分发。
+接入受限令牌启动器时，将其启动目标设为 `msys-compat.exe --runtime DLL PROGRAM ...`，保留启动器既有 token、对象和文件策略。兼容 EXE/DLL 应部署在原策略已允许读取/执行的位置；原版 MSYS 安装文件也必须已具备原策略允许的访问。兼容层不修改任何磁盘 ACL、不放宽 restricted token，也不借非受限进程代读被拒绝的文件。缺少访问时记录该配置下的兼容阻碍，不能通过补权把它算作成功。已验收配置见 [兼容范围](compatibility.md)，测试用 `restricted-run.exe` 不作为产品启动器分发。
+
+在实际 harness 内可直接执行 `tests/conpty.ps1 -Environment Existing` 验证继承的上下文。它不创建新的隔离环境或配置文件 ACL；初始策略与拒绝边界的验收要求见 [测试说明](testing.md)。
 
 兼容宿主通过 job 等待进程树退出并返回根进程退出码。ConPTY 模式收发 VT 字节流，初始尺寸可配置；当前没有终端 GUI、VT 渲染器或宿主窗口 resize 事件循环。
 

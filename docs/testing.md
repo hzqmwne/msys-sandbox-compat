@@ -11,6 +11,8 @@
 .\tests\process-chain.ps1 -Environment WriteRestricted
 .\tests\process-chain.ps1 -Environment FullRestricted
 .\tests\conpty.ps1
+.\tests\conpty.ps1 -Environment WriteRestricted
+.\tests\conpty.ps1 -Environment FullRestricted
 .\tests\late-package.ps1
 .\tests\integrity.ps1
 ```
@@ -24,6 +26,8 @@
 | `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、10 次二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
 | `process-chain.ps1 -Environment WriteRestricted/FullRestricted` | 两种非 AppContainer 令牌下复用完整链路；记录无兼容基线，保持普通 MSYS 会话并存，验证实际受限令牌及文件写入/WRITE_DAC 拒绝 |
 | `conpty.ps1` | TTY、120×40 尺寸、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
+| `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 24 项 Perl 断言（含 10 次线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
+| `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
 | `late-package.ps1` | 运行目标到达屏障后才放置新 EXE/DLL，验证首次识别、动态模块和 fork |
 | `integrity.ps1` | 安装目录文件路径、长度和 SHA-256 与测试前基线相同 |
 
@@ -33,7 +37,7 @@
 
 `scope` 的八项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
 
-CTest 包含独立识别测试；找到 pwsh 后还会注册五个 PSEC 和两个受限令牌集成套件，共八项，串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
+CTest 包含独立识别测试；找到 pwsh 后还会注册五个 PSEC 和四个受限令牌集成套件，共十项，串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
 
 ```powershell
 # 在 tools/msvc-env.ps1 配置过的工具链环境中
@@ -41,6 +45,8 @@ ctest --test-dir build --output-on-failure
 ```
 
 各集成脚本的 `-BinaryDirectory` 默认指向项目根目录的 `build/bin`。从其他构建目录运行时显式指定该参数，CTest 会自动传入。
+
+`Existing` 模式需由实际 harness 在其受限执行上下文内显式运行，不注册为普通宿主的 CTest。调用者原策略应已允许兼容产物、MSYS 安装文件、Perl 夹具的读取/执行及测试工作目录写入；缺少权限时保留拒绝。该模式只验收原上下文中的工作负载，原策略的具体拒绝路径和 ACL/token 保留情况还需按实际配置单独验证。
 
 完整性测试单独运行，避免自动测试覆盖测试前基线。强度更高的线程 fork 测试可通过兼容入口运行 `fork.pl 100`，其中参数是二级线程的重复次数；默认一次，最多 1000 次。
 

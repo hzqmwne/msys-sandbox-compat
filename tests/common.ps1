@@ -34,3 +34,16 @@ function Save-TestOutput($Result, [string]$Directory, [string]$Name) {
     [IO.File]::WriteAllText((Join-Path $Directory "$Name.stdout.txt"), $Result.Output)
     [IO.File]::WriteAllText((Join-Path $Directory "$Name.stderr.txt"), $Result.Error)
 }
+
+# This stages only test files; the test runner establishes their initial ACLs.
+# Production launchers never use this fixture setup.
+function Initialize-RestrictedTestFiles([string]$BinaryDirectory, [string]$WorkingDirectory) {
+    $readonly = Join-Path $WorkingDirectory 'readonly'
+    New-Item -ItemType Directory -Force $readonly | Out-Null
+    [IO.File]::WriteAllText((Join-Path $WorkingDirectory '.restricted-fixture'),'test-only')
+    foreach ($name in @('msys-compat.exe','msys-compat.dll','native-bridge.exe','restricted-run.exe')) {
+        Copy-Item -LiteralPath (Join-Path $BinaryDirectory $name) -Destination $readonly
+    }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'fork.pl') -Destination $readonly
+    return $readonly
+}

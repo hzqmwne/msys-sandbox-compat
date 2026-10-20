@@ -1,14 +1,22 @@
 param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
-      [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'))
+      [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'),
+      [ValidateSet('Psec','WriteRestricted','FullRestricted','Existing')][string]$Environment='Psec')
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 $root=Split-Path $PSScriptRoot -Parent
-$state=Join-Path $root 'unused\runtime'
-$report=Join-Path $root 'unused\evidence\current\conpty'
+$restricted=$Environment -in @('WriteRestricted','FullRestricted')
+$existing=$Environment -eq 'Existing'
+$suite=if($restricted -or $existing){'conpty-'+$Environment.ToLowerInvariant()}else{'conpty'}
+$state=Join-Path $root $(if($restricted -or $existing){'unused\runtime\'+$suite}else{'unused\runtime'})
+$report=Join-Path $root ('unused\evidence\current\'+$suite)
 if($EvidenceDirectory){$report=[IO.Path]::GetFullPath($EvidenceDirectory)}
 New-Item -ItemType Directory -Force $report,$state,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $policy=Join-Path $state 'conpty-policy.json'
-@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+if(!$restricted -and !$existing){
+    @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+}
+$sourceBinaries=$BinaryDirectory
+if($restricted){$BinaryDirectory=Initialize-RestrictedTestFiles $sourceBinaries $state}
 Add-Type -TypeDefinition @"
 using System;
 using System.Diagnostics;
@@ -49,15 +57,32 @@ public sealed class TerminalTest : IDisposable {
     public void Dispose() {if(!P.HasExited) P.Kill(true); P.Dispose();}
 }
 "@
-$arguments=@($policy,(Join-Path $BinaryDirectory 'msys-compat.exe'),'--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),'--conpty','--conpty-size','120x40',(Join-Path $GitRoot 'usr\bin\bash.exe'),'--noprofile','--norc','-i')
-$launcher=Join-Path $BinaryDirectory 'psec-run.exe'
+[string[]]$prefix=if($existing){@()}elseif($restricted){@($(if($Environment -eq 'WriteRestricted'){'write'}else{'full'}),$state)}else{@($policy)}
+$targetArguments=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),'--conpty','--conpty-size','120x40',(Join-Path $GitRoot 'usr\bin\bash.exe'),'--noprofile','--norc','-i')
+$arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirectory 'msys-compat.exe'))+$targetArguments}
+$launcher=Join-Path $sourceBinaries $(if($existing){'msys-compat.exe'}elseif($restricted){'restricted-run.exe'}else{'psec-run.exe'})
 $info=New-TestProcessInfo $launcher $arguments $state
 $info.RedirectStandardInput=$true
 $t=[TerminalTest]::new($info)
+$passed=$false
+$exitCode=$null
 try {
     $t.Send("export PS1='MSYS-COMPAT> '; export PATH=/usr/bin:/bin; /usr/bin/stty -echo; printf '\nREADY-INPUT\n'`r")
     $t.Await("READY-INPUT`r`n")
-    $t.Send('test -t 0 && test -t 1 && test -t 2 || exit 81; test "$(stty size)" = "40 120" || exit 82; test "$(printf redirected)" = redirected || exit 83; (echo CONPTY-FORK-PASS); /c/Windows/System32/cmd.exe /d /c "echo CONPTY-NATIVE-PASS"; echo CONTROL-READY; sleep 30'+"`r")
+    if($restricted -or $existing){
+        $fork=(Join-Path $(if($restricted){$BinaryDirectory}else{$PSScriptRoot}) 'fork.pl').Replace('\','/').Replace("'","'\''")
+        $workload=''
+        if($restricted){
+            $probe=(Join-Path $BinaryDirectory 'restricted-run.exe').Replace('\','/').Replace("'","'\''")
+            $workspace=$state.Replace('\','/').Replace("'","'\''")
+            $workload="'$probe' probe '$workspace' || exit 87; "
+        }
+        $workload+="perl '$fork' 10 || exit 88; " +
+            'printf permitted > terminal-write.txt; test "$(cat terminal-write.txt)" = permitted || exit 89; echo TERMINAL-POLICY-PASS'
+        $t.Send($workload+"`r")
+        $t.Await("TERMINAL-POLICY-PASS`r`n")
+    }
+    $t.Send('test -t 0 && test -t 1 && test -t 2 || exit 81; test "$(stty size)" = "40 120" || exit 82; test "$(printf redirected)" = redirected || exit 83; (echo CONPTY-FORK-PASS); MSYS2_ARG_CONV_EXCL="*" /c/Windows/System32/cmd.exe /d /c "echo CONPTY-NATIVE-PASS"; echo CONTROL-READY; sleep 30'+"`r")
     $t.Await("CONTROL-READY`r`n")
     [Threading.Thread]::Sleep(200); $position=$t.Text.Length; $t.Send([string][char]3)
     $t.AwaitFrom('MSYS-COMPAT> ',$position)
@@ -68,16 +93,31 @@ try {
     $t.Await("BACKGROUND-READY`r`n")
     [Threading.Thread]::Sleep(200); $position=$t.Text.Length; $t.Send([string][char]3)
     $t.AwaitFrom('MSYS-COMPAT> ',$position)
-    $t.Send('s=$?; test "$s" = 130 || exit 85; echo JOB-CONTROL-PASS; exit 37'+"`r")
+    $finish='s=$?; test "$s" = 130 || exit 85; echo JOB-CONTROL-PASS; '
+    if($restricted){$finish+="'$probe' probe '$workspace' || exit 90; "}
+    $t.Send($finish+'exit 37'+"`r")
     $exitCode=$t.Finish()
     if($exitCode -ne 37){throw "Unexpected terminal exit $exitCode"}
     foreach($marker in @('CONPTY-FORK-PASS','CONPTY-NATIVE-PASS','CTRL-C-PASS','JOB-CONTROL-PASS')) {
         if(!$t.Text.Contains($marker)){throw "Missing $marker"}
     }
     if($t.Text -match 'no job control|cannot set terminal process group'){throw 'Job control diagnostics'}
+    if(($t.Text+$t.Error.ToString()) -match 'fatal error|fork: retry|child_copy:|\[fatal\]'){
+        throw 'Terminal runtime diagnostics'
+    }
+    if($restricted -and [regex]::Matches($t.Text,'RESTRICTED-TOKEN-AND-ACL-PASS').Count -ne 2){
+        throw 'Restricted terminal policy probes failed'
+    }
+    if(($restricted -or $existing) -and
+        (!$t.Text.Contains('ok 24 - fork from a secondary POSIX thread works') -or $t.Text -match 'not ok \d')){
+        throw 'Terminal Perl workload failed'
+    }
+    $passed=$true
     Write-Output 'CONPTY-ALL-PASS: tty, size, redirection, fork, native child, Ctrl+C, stop/bg/fg, exit=37'
 } finally {
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stdout.txt'),$t.Text)
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stderr.txt'),$t.Error.ToString())
+    @{Environment=$Environment;Passed=$passed;ExitCode=$exitCode} | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $report 'results.json') -Encoding utf8NoBOM
     $t.Dispose()
 }

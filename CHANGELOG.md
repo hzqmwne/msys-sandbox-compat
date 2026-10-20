@@ -15,6 +15,8 @@
 
 ### 新增
 
+- 两种固定非 AppContainer 受限令牌的 ConPTY 交互验收：TTY、尺寸、Perl/线程 fork、原生命令、Ctrl+C、STOP/bg/fg、退出码与会话前后权限拒绝；复用既有生产实现和原测试策略。
+- 交互测试提供 `Existing` 模式，直接验证调用者已有受限上下文，不创建替代环境或配置文件 ACL；实际策略的拒绝边界另行核验。
 - 兼容宿主接受非 AppContainer 受限令牌，复用启动器默认对象 ACL，并用可沿原生进程链继承的每次启动私有命名空间隔离 MSYS 对象。
 - 两种固定受限令牌夹具的端到端回归：Bash/Perl、fork、原生桥接回入、管道、文件写入及 WRITE_DAC 拒绝、普通 MSYS 会话共存；记录原版失败基线。
 - 原生 PSEC 创建工具、现有 PSEC 内的兼容宿主，以及无 CRT 的 AMD64 agent。
