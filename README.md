@@ -43,7 +43,6 @@
 从允许创建 PSEC 的普通 PowerShell 运行：
 
 ```powershell
-.\tests\integrity.ps1 -CaptureBaseline   # 第一次测试前保存安装目录快照
 .\tests\verify.ps1 -Repetitions 10
 .\tests\scope.ps1
 .\tests\process-chain.ps1
@@ -53,10 +52,11 @@
 .\tests\conpty.ps1 -Environment WriteRestricted
 .\tests\conpty.ps1 -Environment FullRestricted
 .\tests\late-package.ps1
-.\tests\integrity.ps1
 ```
 
 测试覆盖 fork、线程中 fork、shell、管道、信号、exec、权限边界、原生进程范围、交互终端和运行中新出现的包。详细用例与 CTest 用法见 [测试说明](docs/testing.md)。
+
+日常按改动选择相关回归，不在每轮重复扫描整个 Git 安装目录。完整性比较脚本保留为按需检查，仅在安装/部署写入逻辑变化、出现异常修改迹象或发布验收需要时运行。
 
 ## 工作范围
 

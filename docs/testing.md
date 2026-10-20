@@ -4,7 +4,6 @@
 
 ```powershell
 .\build.ps1
-.\tests\integrity.ps1 -CaptureBaseline
 .\tests\verify.ps1 -Repetitions 10
 .\tests\scope.ps1
 .\tests\process-chain.ps1
@@ -14,7 +13,6 @@
 .\tests\conpty.ps1 -Environment WriteRestricted
 .\tests\conpty.ps1 -Environment FullRestricted
 .\tests\late-package.ps1
-.\tests\integrity.ps1
 ```
 
 | 测试 | 检查内容 |
@@ -31,9 +29,9 @@
 | `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |
 | `conpty.ps1 -NativeRelay` | 在同一 relay 模式下复用完整交互验收，可与三种环境或 Existing 组合 |
 | `late-package.ps1` | 运行目标到达屏障后才放置新 EXE/DLL，验证首次识别、动态模块和 fork |
-| `integrity.ps1` | 安装目录文件路径、长度和 SHA-256 与测试前基线相同 |
+| `integrity.ps1` | 按需比较安装目录路径、长度和 SHA-256；不属于日常回归 |
 
-基线默认位于 `unused/evidence/git-before.json`。已有历史基线时不要先覆盖，应直接比较；全新检出才需要在第一次测试前捕获。可使用 `-Baseline` 指定单独快照。
+完整性检查仅在安装/部署写入逻辑变化、怀疑分发文件被修改或发布验收确有需要时执行，不在每轮兼容测试或每次提交后重复运行。若需要首次建立比较基线，使用 `tests/integrity.ps1 -CaptureBaseline`；已有基线时不要先覆盖，应直接比较。基线默认位于 `unused/evidence/git-before.json`，可通过 `-Baseline` 指定单独快照。
 
 各脚本默认输出到 `unused/evidence/current/<suite>`，也可使用 `-EvidenceDirectory` 保留不同轮次。状态和 HOME 位于 `unused/runtime`。这些文件不进入 Git 或发布包。
 
@@ -52,7 +50,9 @@ ctest --test-dir build --output-on-failure
 
 relay 链路要求原生桥接只存在一个创建 hook，其余八个入口与 MSYS 地址区保持原样，默认对象 ACL 沿链一致；直接回入必须完成真实 Perl/fork/管道及退出码。挂起用例要求调用者 `ResumeThread` 看到原挂起计数 1。策略负例由原生夹具临时收紧自身默认对象 DACL，要求创建返回访问拒绝、目标未运行，随后恢复夹具初始策略；生产代码只做检查，不进行此收紧/恢复操作。
 
-完整性测试单独运行，避免自动测试覆盖测试前基线。强度更高的线程 fork 测试可通过兼容入口运行 `fork.pl 100`，其中参数是二级线程的重复次数；默认一次，最多 1000 次。
+日常选择与改动相关的套件：进程创建/识别/注入/传播变化检查 fork、作用范围和相关进程链；控制台变化检查交互；文档变化检查文档即可。完整十六项用于涉及多个运行机制的改动或阶段验收，已有通过结果不因无关改动反复重跑。权限拒绝与策略保留检查继续随相关工作负载执行。完整性脚本独立按需运行，不加入 CTest。
+
+强度更高的线程 fork 测试可通过兼容入口运行 `fork.pl 100`，其中参数是二级线程的重复次数；默认一次，最多 1000 次。
 
 夹具 `import-name-runtime` 只在测试输出目录生成同名 `msys-2.0.dll`，用于验证导入名约定，不替换安装目录中的运行时。
 
