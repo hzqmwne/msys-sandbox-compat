@@ -1,9 +1,9 @@
 # 测试说明
 
-构建默认包含测试夹具。测试应从允许创建 PSEC 和受限令牌的普通 PowerShell 7 执行，默认 Git 根为 `C:\Program Files\Git`，可通过各脚本的 `-GitRoot` 修改。
+生产构建默认不包含开发工具与测试夹具，回归前使用 `build.ps1 -Tests`。测试应从允许创建 PSEC 和受限令牌的普通 PowerShell 7 执行，默认 Git 根为 `C:\Program Files\Git`，可通过各脚本的 `-GitRoot` 修改。
 
 ```powershell
-.\build.ps1
+.\build.ps1 -Tests
 .\tests\verify.ps1 -Repetitions 10
 .\tests\scope.ps1
 .\tests\process-chain.ps1
@@ -17,14 +17,14 @@
 
 | 测试 | 检查内容 |
 |---|---|
-| `identify-test` | 直接导入快速路径、共享依赖去重、环、遍历上限及识别/准备失败语义；无需创建 PSEC |
+| `identify-test` | 直接导入快速路径、共享依赖去重、环、节点上限、深依赖链及识别/准备失败语义；无需创建 PSEC |
 | `verify.ps1` | 原版失败基线、重复 fork/shell、读写边界、退出码和原生子进程；10 轮共 25 项 |
 | `fork.pl` | PID、堆、COW、共享文件偏移、管道、EOF、信号、exec、WNOHANG、嵌套及并发 fork、线程中 fork |
-| `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、原生根显式回入、MSYS 原生后代回入及 TokenDefaultDacl 对照 |
-| `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、10 次二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
+| `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、原生根显式回入、MSYS 原生后代回入及默认 Token DACL 保持 |
+| `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
 | `process-chain.ps1 -Environment WriteRestricted/FullRestricted` | 两种非 AppContainer 令牌下复用完整链路；记录无兼容基线，保持普通 MSYS 会话并存，验证实际受限令牌及文件写入/WRITE_DAC 拒绝 |
 | `conpty.ps1` | TTY、120×40 尺寸、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
-| `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 24 项 Perl 断言（含 10 次线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
+| `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 Perl 断言（含线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
 | `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |
 | `conpty.ps1 -NativeRelay` | 在同一 relay 模式下复用完整交互验收，可与三种环境或 Existing 组合 |
@@ -35,7 +35,7 @@
 
 各脚本默认输出到 `unused/evidence/current/<suite>`，也可使用 `-EvidenceDirectory` 保留不同轮次。状态和 HOME 位于 `unused/runtime`。这些文件不进入 Git 或发布包。
 
-`scope` 的八项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
+`scope` 的七项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
 
 CTest 包含独立识别测试；找到 pwsh 后注册原有五个 PSEC、四个受限令牌套件，以及三个环境各两项 relay 套件，共十六项，串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
 
@@ -44,7 +44,7 @@ CTest 包含独立识别测试；找到 pwsh 后注册原有五个 PSEC、四个
 ctest --test-dir build --output-on-failure
 ```
 
-各集成脚本的 `-BinaryDirectory` 默认指向项目根目录的 `build/bin`。从其他构建目录运行时显式指定该参数，CTest 会自动传入。
+各集成脚本的 `-BinaryDirectory` 默认指向项目根目录的 `build/bin`，并从同一构建根定位 `tools/psec-run.exe` 和 `tests/bin` 下的夹具。从其他构建目录运行时显式指定该参数，CTest 会自动传入。源负载位于 `tests/fixtures`，独立单测位于 `tests/unit`。生产安装包不包含这些文件。
 
 `Existing` 模式需由实际 harness 在其受限执行上下文内显式运行，不注册为普通宿主的 CTest。调用者原策略应已允许兼容产物、MSYS 安装文件、Perl 夹具的读取/执行及测试工作目录写入；缺少权限时保留拒绝。该模式只验收原上下文中的工作负载，原策略的具体拒绝路径和 ACL/token 保留情况还需按实际配置单独验证。
 
@@ -52,7 +52,7 @@ relay 链路要求原生桥接只存在一个创建 hook，其余八个入口与
 
 日常选择与改动相关的套件：进程创建/识别/注入/传播变化检查 fork、作用范围和相关进程链；控制台变化检查交互；文档变化检查文档即可。完整十六项用于涉及多个运行机制的改动或阶段验收，已有通过结果不因无关改动反复重跑。权限拒绝与策略保留检查继续随相关工作负载执行。完整性脚本独立按需运行，不加入 CTest。
 
-强度更高的线程 fork 测试可通过兼容入口运行 `fork.pl 100`，其中参数是二级线程的重复次数；默认一次，最多 1000 次。
+常规 `verify` 默认一轮；重复 fork/shell 使用 `verify.ps1 -Repetitions 10`。进程链与 ConPTY 的线程 fork 默认一次，压力验收显式使用 `-ThreadRepetitions 10`（最多 1000）。也可通过兼容入口运行 `tests/fixtures/fork.pl 100`。各环境、权限边界、32 个并发子进程及交互语义仍保留，减少的是常规重复次数。测试以退出码、TAP 成败和真实工作负载为准，不依赖固定 TAP 序号或 agent trace 文案。
 
 夹具 `import-name-runtime` 只在测试输出目录生成同名 `msys-2.0.dll`，用于验证导入名约定，不替换安装目录中的运行时。
 

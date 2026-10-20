@@ -1,25 +1,9 @@
+#include "msys_compat/command_line.h"
+using msys_compat::quote;
 #include <windows.h>
 #include <sddl.h>
 #include <cstdio>
 #include <string>
-
-static std::wstring quote(const std::wstring &value) {
-    std::wstring result = L"\"";
-    size_t slashes = 0;
-    for (wchar_t c : value) {
-        if (c == L'\\') {
-            ++slashes;
-            continue;
-        }
-        result.append(slashes * (c == L'"' ? 2 : 1), L'\\');
-        slashes = 0;
-        if (c == L'"')
-            result += L'\\';
-        result += c;
-    }
-    result.append(slashes * 2, L'\\');
-    return result + L'"';
-}
 
 int wmain(int argc, wchar_t **argv) {
     int first = 1;

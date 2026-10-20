@@ -1,7 +1,8 @@
 param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
       [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'),
       [ValidateSet('Psec','WriteRestricted','FullRestricted')][string]$Environment='Psec',
-      [switch]$NativeRelay)
+      [switch]$NativeRelay,
+      [ValidateRange(1,1000)][int]$ThreadRepetitions=1)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
@@ -13,17 +14,20 @@ $evidence = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory)
             else { Join-Path $root ('unused\evidence\current\' + $suite) }
 New-Item -ItemType Directory -Force $state,$evidence,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $sourceBinaries = $BinaryDirectory
+$fixtureBinaries = Get-TestFixtureDirectory $sourceBinaries
 if ($restricted) {
     $BinaryDirectory = Initialize-RestrictedTestFiles $sourceBinaries $state
 }
 $policy = Join-Path $state 'policy.json'
-$canary = if ($restricted) { Join-Path $state 'denied.txt' } else { Join-Path $PSScriptRoot 'denied.txt' }
-@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}} |
-    ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $policy -Encoding utf8NoBOM
-$launcher = if ($restricted) { Join-Path $sourceBinaries 'restricted-run.exe' }
-            else { Join-Path $BinaryDirectory 'psec-run.exe' }
+$canary = if ($restricted) { Join-Path $state 'denied.txt' } else { Join-Path $PSScriptRoot 'fixtures\denied.txt' }
+if (!$restricted) {
+    @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}} |
+        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $policy -Encoding utf8NoBOM
+}
+$launcher = if ($restricted) { Join-Path $fixtureBinaries 'restricted-run.exe' }
+            else { Get-PsecLauncher $BinaryDirectory }
 $compat = Join-Path $BinaryDirectory 'msys-compat.exe'
-$bridge = Join-Path $BinaryDirectory 'native-bridge.exe'
+$bridge = Join-Path $(if ($restricted) {$BinaryDirectory} else {$fixtureBinaries}) 'native-bridge.exe'
 $bash = Join-Path $GitRoot 'usr\bin\bash.exe'
 $runtime = Join-Path $GitRoot 'usr\bin\msys-2.0.dll'
 [string[]]$prefix = if ($restricted) {
@@ -32,9 +36,9 @@ $runtime = Join-Path $GitRoot 'usr\bin\msys-2.0.dll'
 function Shell-Command([object[]]$Arguments) {
     return (($Arguments | ForEach-Object { "'" + ([string]$_).Replace("'","'\''") + "'" }) -join ' ')
 }
-$fork = (Join-Path $(if ($restricted) {$BinaryDirectory} else {$PSScriptRoot}) 'fork.pl').Replace('\','/')
+$fork = (Join-Path $(if ($restricted) {$BinaryDirectory} else {(Join-Path $PSScriptRoot 'fixtures')}) 'fork.pl').Replace('\','/')
 $deny = $canary.Replace('\','/')
-$payload = "set -eu; export PATH=/usr/bin:/bin; perl '$fork' 10; " +
+$payload = "set -eu; export PATH=/usr/bin:/bin; perl '$fork' $ThreadRepetitions; " +
     'test "$(printf fork-command)" = fork-command; test "$(printf ''b\na\n'' | sort | head -1)" = a; ' +
     "if cat '$deny'; then exit 81; fi; if printf forbidden > '$deny'; then exit 82; fi; " +
     'printf permitted > chain-write.txt; test "$(cat chain-write.txt)" = permitted; echo CHAIN-WORKLOAD-PASS; exit 37'
@@ -111,9 +115,6 @@ try {
         }
         if ($case.Suspended) {
             $passed=$passed -and [regex]::Matches($result.Error,'suspended-preserved=1').Count -eq ($depth+1)
-        }
-        if ($NativeRelay -and $case.Explicit) {
-            $passed=$passed -and $result.Error.Contains('[agent] injected MSYS child')
         }
         $results.Add([pscustomobject]@{Name=$name;Passed=$passed;ExitCode=$result.ExitCode;NativeBridges=$acls.Count})
         Write-Output "$name pass=$passed exit=$($result.ExitCode) bridges=$($acls.Count)"

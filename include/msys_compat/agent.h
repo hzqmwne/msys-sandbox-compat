@@ -1,11 +1,9 @@
 #pragma once
 
-#include "native_api.h"
-#include <stdint.h>
+#include "identify.h"
 
 namespace msys_compat {
 
-constexpr size_t image_path_chars = 1024;
 constexpr size_t object_root_chars = 512;
 constexpr size_t descriptor_bytes = 1024;
 
@@ -14,27 +12,6 @@ constexpr uintptr_t relocated_cygheap = 0x80000000000ULL;
 constexpr size_t cygheap_extent = 0x200000000ULL;
 constexpr uintptr_t original_userheap = 0xa00000000ULL;
 constexpr uintptr_t relocated_userheap = relocated_cygheap + 0x400000000ULL;
-
-enum class ImageKind : uint32_t { executable = 1, library = 2, runtime = 3 };
-
-struct ImageRecord {
-    uint64_t preferred_base;
-    uint32_t image_size;
-    ImageKind kind;
-};
-
-// Search hints for indirect imports. Runtime membership is determined by the
-// declared msys-2.0.dll import name, without authenticating a particular file.
-struct RuntimePaths {
-    wchar_t directory[image_path_chars];
-    wchar_t system_directory[image_path_chars];
-};
-
-struct ProcessImage {
-    ImageRecord record;
-    wchar_t path[image_path_chars];
-    bool related;
-};
 
 enum class HookId : size_t {
     directory,
@@ -81,5 +58,14 @@ struct AgentState {
 };
 
 static_assert(sizeof(void *) == 8, "The agent supports AMD64 only");
+
+NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, AgentState &state);
+NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys);
+NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state);
+NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state);
+NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
+                         const ProcessImage &image, AgentState &state);
+NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source);
+void agent_log(const AgentState &state, const char *event, ULONG_PTR number = 0);
 
 } // namespace msys_compat

@@ -1,12 +1,10 @@
 #pragma once
 #include <windows.h>
 #include <winternl.h>
-#include <fstream>
 #include <string>
 #include <thread>
 #include <stdexcept>
 #include <cstdio>
-#include <filesystem>
 #include <atomic>
 
 // The default path creates ConPTY in PSEC and connects a native session host.
@@ -21,11 +19,16 @@ class Pseudoconsole {
     std::atomic<bool> stopping{false};
     DWORD original_input_mode = 0;
     bool restore_input_mode = false;
+    HANDLE input_source = nullptr;
+    bool owns_input = false;
     void create(const std::wstring &script, COORD dimensions = {100, 30}) {
+        input_source = GetStdHandle(STD_INPUT_HANDLE);
         if (!script.empty()) {
-            std::ifstream input{std::filesystem::path(script), std::ios::binary};
-            if (!input.good())
+            input_source = CreateFileW(script.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (input_source == INVALID_HANDLE_VALUE)
                 throw std::runtime_error("open ConPTY input script");
+            owns_input = true;
         } else if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &original_input_mode)) {
             restore_input_mode =
                 SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE),
@@ -49,25 +52,14 @@ class Pseudoconsole {
                     break;
             }
         });
-        writer = std::thread([this, script] {
+        writer = std::thread([this] {
             char buffer[4096];
             DWORD count = 0;
-            if (!script.empty()) {
-                std::ifstream file{std::filesystem::path(script), std::ios::binary};
-                while (!stopping && (file.read(buffer, sizeof(buffer)) || file.gcount())) {
-                    if (!WriteFile(input_write, buffer, static_cast<DWORD>(file.gcount()), &count,
-                                   nullptr))
-                        break;
-                }
-            } else {
-                while (!stopping &&
-                       ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer), &count,
-                                nullptr) &&
-                       count) {
-                    DWORD written = 0;
-                    if (!WriteFile(input_write, buffer, count, &written, nullptr))
-                        break;
-                }
+            while (!stopping && ReadFile(input_source, buffer, sizeof(buffer), &count, nullptr) &&
+                   count) {
+                DWORD written = 0;
+                if (!WriteFile(input_write, buffer, count, &written, nullptr))
+                    break;
             }
         });
     }
@@ -91,6 +83,8 @@ class Pseudoconsole {
         }
         if (restore_input_mode)
             SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), original_input_mode);
+        if (owns_input)
+            CloseHandle(input_source);
         if (input_write)
             CloseHandle(input_write);
         if (handle)

@@ -1,3 +1,11 @@
+# Product, fixture and tool outputs share the same CMake build root.
+function Get-TestFixtureDirectory([string]$BinaryDirectory) {
+    return Join-Path (Split-Path $BinaryDirectory -Parent) 'tests\bin'
+}
+function Get-PsecLauncher([string]$BinaryDirectory) {
+    return Join-Path (Split-Path $BinaryDirectory -Parent) 'tools\psec-run.exe'
+}
+
 # Shared process setup for the isolation integration suites.
 function New-TestProcessInfo([string]$Program, [string[]]$Arguments, [string]$WorkingDirectory) {
     $info = [Diagnostics.ProcessStartInfo]::new($Program)
@@ -41,9 +49,13 @@ function Initialize-RestrictedTestFiles([string]$BinaryDirectory, [string]$Worki
     $readonly = Join-Path $WorkingDirectory 'readonly'
     New-Item -ItemType Directory -Force $readonly | Out-Null
     [IO.File]::WriteAllText((Join-Path $WorkingDirectory '.restricted-fixture'),'test-only')
-    foreach ($name in @('msys-compat.exe','msys-compat.dll','native-bridge.exe','restricted-run.exe')) {
+    foreach ($name in @('msys-compat.exe','msys-compat.dll')) {
         Copy-Item -LiteralPath (Join-Path $BinaryDirectory $name) -Destination $readonly
     }
-    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'fork.pl') -Destination $readonly
+    $fixtures = Get-TestFixtureDirectory $BinaryDirectory
+    foreach ($name in @('native-bridge.exe','restricted-run.exe')) {
+        Copy-Item -LiteralPath (Join-Path $fixtures $name) -Destination $readonly
+    }
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'fixtures\fork.pl') -Destination $readonly
     return $readonly
 }

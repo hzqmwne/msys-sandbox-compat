@@ -13,10 +13,11 @@ $dll=Join-Path $package 'new-module.dll'
 $helper=Join-Path $package 'late-msys-helper.dll'
 $policy=Join-Path $state 'late-policy.json'
 @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@()}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM $policy
+$fixtureBinaries=Get-TestFixtureDirectory $BinaryDirectory
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
-$moduleTest=(Join-Path $PSScriptRoot 'late-module.pl').Replace('\','/')
+$moduleTest=(Join-Path $PSScriptRoot 'fixtures\late-module.pl').Replace('\','/')
 $command='export PATH=/usr/bin:/bin; echo WAITING-FOR-PACKAGE; read -r ready; test "$ready" = installed || exit 80; export PATH="'+$package.Replace('\','/')+':/usr/bin:/bin"; "'+$exe.Replace('\','/')+'" "LATE-EXE-PASS\n" || exit 81; /usr/bin/perl "'+$moduleTest+'" "'+$dll.Replace('\','/')+'" "'+$helper.Replace('\','/')+'" || exit $?; echo LATE-PACKAGE-PASS'
-$info=New-TestProcessInfo (Join-Path $BinaryDirectory 'psec-run.exe') @() $state
+$info=New-TestProcessInfo (Get-PsecLauncher $BinaryDirectory) @() $state
 $info.RedirectStandardInput=$true
 foreach($a in @($policy,(Join-Path $BinaryDirectory 'msys-compat.exe'),'--trace','--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$bash,'--noprofile','--norc','-c',$command)){$info.ArgumentList.Add($a)}
 $p=[Diagnostics.Process]::Start($info)
@@ -26,8 +27,8 @@ try {
     if(!$first.Wait(30000) -or $first.Result -ne 'WAITING-FOR-PACKAGE'){throw 'Target did not reach installation barrier'}
     if((Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $dll) -or (Test-Path -LiteralPath $helper)){throw 'Package files must not exist before target is ready'}
     Copy-Item -LiteralPath (Join-Path $GitRoot 'usr\bin\printf.exe') -Destination $exe
-    Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'late-msys-module.dll') -Destination $dll
-    Copy-Item -LiteralPath (Join-Path $BinaryDirectory 'late-msys-helper.dll') -Destination $helper
+    Copy-Item -LiteralPath (Join-Path $fixtureBinaries 'late-msys-module.dll') -Destination $dll
+    Copy-Item -LiteralPath (Join-Path $fixtureBinaries 'late-msys-helper.dll') -Destination $helper
     $p.StandardInput.Write("installed`n");$p.StandardInput.Flush()
     $output=$p.StandardOutput.ReadToEndAsync()
     if(!$p.WaitForExit(60000)){throw 'Late package timeout'}

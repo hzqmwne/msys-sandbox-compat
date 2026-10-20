@@ -13,7 +13,8 @@
 需要 PowerShell 7、Visual Studio C++ AMD64 工具和 Windows SDK。构建脚本通过 vswhere 定位工具链，第三方头文件已包含在仓库内。
 
 ```powershell
-.\build.ps1 -Install
+.\build.ps1 -Install       # 生产兼容 EXE/DLL，安装到 build/package
+.\build.ps1 -Tests         # 开发工具和回归夹具
 .\run.ps1
 
 # 启动内部真实 Bash
@@ -28,13 +29,14 @@
 .\run.ps1 -NativeRelay
 ```
 
-正式产物位于 `build/bin`，安装布局位于 `unused/package`：
+生产兼容层在既有受限环境中使用，必需产物只有 `build/bin` 中的 EXE/DLL；安装布局位于 `build/package`：
 
 | 文件 | 职责 |
 |---|---|
-| `psec-run.exe` | 从普通宿主按策略创建 PSEC |
 | `msys-compat.exe` | 在既有受限环境中启动目标、识别、准备和等待进程树 |
 | `msys-compat.dll` | MSYS 完整兼容模块；显式 relay 模式也映射到原生进程，只启用创建 hook |
+
+`psec-run.exe` 是按需构建的开发验证工具，输出到 `build/tools`，不随生产包安装。`run.ps1` 使用它创建演示 PSEC；外部隔离启动器直接运行兼容宿主，无需这个工具。测试夹具位于 `build/tests/bin`。
 
 兼容宿主在既有 PSEC 或受限令牌上下文中运行，不创建非隔离回退进程。受测令牌配置、版本和集成边界见 [兼容范围](docs/compatibility.md)。
 
@@ -67,14 +69,16 @@
 ## 仓库结构
 
 ```text
-src/                    兼容宿主、agent、PSEC 创建代码
-include/msys_compat/    Native API、识别和注入协议
+src/core/               宿主与 agent 共享的识别、进程准备和安全上下文检查
+src/agent/              hook 入口与无 CRT 支持
+src/host/               兼容宿主、首次映射与 ConPTY
+include/msys_compat/    内部 Native API、识别类型与 agent 状态
 tests/                  可提交的回归脚本与测试夹具
 third_party/            固定的第三方头文件及许可
-tools/                  构建工具链定位
+tools/                  构建工具链定位和可选 PSEC 开发工具
 docs/                   当前设计、使用、兼容范围、测试与架构决策
 build/                  CMake 缓存、中间文件、二进制和测试夹具，不提交
-unused/                 本地专题笔记、证据、实验、包与运行状态，不提交
+unused/                 本地专题笔记、证据、实验与运行状态，不提交
 ```
 
 [文档索引](docs/README.md) · [使用说明](docs/getting-started.md) · [当前设计](docs/design.md) · [兼容范围](docs/compatibility.md) · [测试说明](docs/testing.md) · [架构决策](docs/decisions/README.md) · [变更记录](CHANGELOG.md)

@@ -1,5 +1,5 @@
 #include "host.h"
-#include "msys_compat/injector.h"
+#include "msys_compat/agent.h"
 #include <cstdio>
 #include <stdexcept>
 #include "pseudoconsole.h"
@@ -51,16 +51,16 @@ int wmain(int argc, wchar_t **argv) try {
         return 2;
     }
     auto executable = fs::absolute(argv[first]);
-    auto state = std::make_unique<AgentState>();
+    std::unique_ptr<AgentState> state;
     auto inherited = inherited_agent();
     std::unique_ptr<void, decltype(&CloseHandle)> object_directory(nullptr, CloseHandle);
     if (inherited) {
         if (trace)
             inherited->trace = 1;
-        *state = *inherited;
-        trace = state->trace != 0;
+        trace = inherited->trace != 0;
         native_relay = true;
     } else {
+        state = std::make_unique<AgentState>();
         state->trace = trace;
         state->native_relay = native_relay;
         state->api = resolve_api();
@@ -134,33 +134,39 @@ int wmain(int argc, wchar_t **argv) try {
     }
     try {
         check(AssignProcessToJobObject(job, child.hProcess), "assign tree job");
-        ProcessImage image{};
-        check_nt(identify_process(state->api, child.hProcess, state->runtime, image),
-                 "classify actual root image");
-        if (image.related && !inherited) {
-            // A cold MSYS start needs a real primary-token handle. A token
-            // inherited through an MSYS-created native bridge may deny this,
-            // even though our own read-only pseudo-token queries succeeded.
-            HANDLE root_token = nullptr;
-            check(OpenProcessToken(child.hProcess, TOKEN_QUERY, &root_token),
-                  "query MSYS root token before initialization");
-            CloseHandle(root_token);
-        }
-        if (!inherited && (image.related || native_relay)) {
-            auto directory = std::wstring(image.path);
-            directory.resize(directory.rfind(L'\\') + 1);
-            memcpy(state->application_directory, directory.c_str(), (directory.size() + 1) * 2);
-            wchar_t own_path[32768];
-            check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0, "locate agent");
-            inject_root(child.hProcess, child.hThread, image, *state,
-                        fs::path(own_path).parent_path() / L"msys-compat.dll");
-        }
-        fprintf(stderr,
+        if (inherited) {
+            fprintf(stderr, "[launcher] pid=%lu prepared-by=inherited-relay\n", child.dwProcessId);
+        } else {
+            ProcessImage image{};
+            check_nt(identify_process(state->api, child.hProcess, state->runtime, image),
+                     "classify actual root image");
+            if (image.related) {
+                // A cold MSYS start needs a real primary-token handle. A token
+                // inherited through an MSYS-created native bridge may deny this,
+                // even though our own read-only pseudo-token queries succeeded.
+                HANDLE root_token = nullptr;
+                check(OpenProcessToken(child.hProcess, TOKEN_QUERY, &root_token),
+                      "query MSYS root token before initialization");
+                CloseHandle(root_token);
+            }
+            if (image.related || native_relay) {
+                auto directory = std::wstring(image.path);
+                directory.resize(directory.rfind(L'\\') + 1);
+                memcpy(state->application_directory, directory.c_str(), (directory.size() + 1) * 2);
+                wchar_t own_path[32768];
+                check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
+                      "locate agent");
+                inject_root(child.hProcess, child.hThread, image, *state,
+                            fs::path(own_path).parent_path() / L"msys-compat.dll");
+            }
+            fprintf(
+                stderr,
                 "[launcher] pid=%lu classification=live-imports root=%s hooks=%zu debugger=none\n",
                 child.dwProcessId, image.related ? "msys" : "native",
                 image.related  ? hook_count
                 : native_relay ? 1
                                : 0);
+        }
         check(::ResumeThread(child.hThread) != static_cast<DWORD>(-1), "resume root");
         CloseHandle(child.hThread);
         child.hThread = nullptr;

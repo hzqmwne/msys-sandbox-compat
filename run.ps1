@@ -20,7 +20,7 @@ New-Item -ItemType Directory -Force $state,(Join-Path $state 'tmp'),(Join-Path $
 $policy = @{ filesystem = @{
     readonlyPaths = @($env:SystemRoot, $GitRoot)
     readwritePaths = @($PSScriptRoot)
-    deniedPaths = @((Join-Path $PSScriptRoot 'tests\denied.txt'))
+    deniedPaths = @((Join-Path $PSScriptRoot 'tests\fixtures\denied.txt'))
 } }
 $policyPath = Join-Path $state 'policy.json'
 $policy | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policyPath
@@ -39,7 +39,7 @@ try {
     }
     $launchArgs += $Program
     $launchArgs += $CommandArguments
-    & (Join-Path $PSScriptRoot 'build\bin\psec-run.exe') @launchArgs
+    & (Join-Path $PSScriptRoot 'build\tools\psec-run.exe') @launchArgs
     $result=$LASTEXITCODE
 } finally { $env:TEMP=$previousTemp; $env:TMP=$previousTmp; $env:HOME=$previousHome }
 exit $result

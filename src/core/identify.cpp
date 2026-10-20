@@ -1,4 +1,4 @@
-#include "msys_compat/injector.h"
+#include "msys_compat/identify.h"
 #include "msys_compat/pe_view.h"
 #include "msys_compat/native_buffer.h"
 #include <string.h>
@@ -177,7 +177,6 @@ struct Dependency {
 // once, then released; traversal never nests mappings or C++ calls.
 struct ImportNode {
     wchar_t path[image_path_chars];
-    unsigned depth;
 };
 struct ImportWalk {
     ImportNode nodes[128];
@@ -228,11 +227,10 @@ struct ImportWalk {
                 continue;
             if (status < 0)
                 return status;
-            if (count == _countof(nodes) || importer.depth == 15)
+            if (count == _countof(nodes))
                 return status_not_supported;
             auto &node = nodes[count++];
             memcpy(node.path, candidate, (used + 1) * sizeof(wchar_t));
-            node.depth = importer.depth + 1;
             return status_success;
         }
         return status_success; // Remaining bindings are outside the supported search directories.

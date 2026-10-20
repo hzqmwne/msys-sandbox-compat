@@ -1,3 +1,5 @@
+#include "msys_compat/command_line.h"
+using msys_compat::quote;
 // Minimal native PSEC 1.0 launcher. No AppContainer/DACL fallback.
 #include "ProcessSecurityEnvironment_generated.h"
 #include <nlohmann/json.hpp>
@@ -19,23 +21,6 @@ static void hrcheck(HRESULT hr, const char *what) {
         fprintf(stderr, "%s: HRESULT %08lx\n", what, (DWORD)hr);
         throw std::runtime_error(what);
     }
-}
-static std::wstring quote(const std::wstring &s) {
-    std::wstring o = L"\"";
-    size_t n = 0;
-    for (auto c : s) {
-        if (c == L'\\') {
-            ++n;
-            continue;
-        }
-        o.append(n * (c == L'"' ? 2 : 1), L'\\');
-        n = 0;
-        if (c == L'"')
-            o += L'\\';
-        o += c;
-    }
-    o.append(n * 2, L'\\');
-    return o + L'"';
 }
 using CloseEnvironment = void(WINAPI *)(HANDLE);
 struct Resources {

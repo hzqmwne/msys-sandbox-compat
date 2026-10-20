@@ -1,7 +1,8 @@
 param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
       [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'),
       [ValidateSet('Psec','WriteRestricted','FullRestricted','Existing')][string]$Environment='Psec',
-      [switch]$NativeRelay)
+      [switch]$NativeRelay,
+      [ValidateRange(1,1000)][int]$ThreadRepetitions=1)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 $root=Split-Path $PSScriptRoot -Parent
@@ -15,9 +16,10 @@ if($EvidenceDirectory){$report=[IO.Path]::GetFullPath($EvidenceDirectory)}
 New-Item -ItemType Directory -Force $report,$state,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $policy=Join-Path $state 'conpty-policy.json'
 if(!$restricted -and !$existing){
-    @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+    @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
 }
 $sourceBinaries=$BinaryDirectory
+$fixtureBinaries=Get-TestFixtureDirectory $sourceBinaries
 if($restricted){$BinaryDirectory=Initialize-RestrictedTestFiles $sourceBinaries $state}
 Add-Type -TypeDefinition @"
 using System;
@@ -63,7 +65,7 @@ public sealed class TerminalTest : IDisposable {
 $targetArguments=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),'--conpty','--conpty-size','120x40',(Join-Path $GitRoot 'usr\bin\bash.exe'),'--noprofile','--norc','-i')
 if($NativeRelay){$targetArguments=@('--native-relay')+$targetArguments}
 $arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirectory 'msys-compat.exe'))+$targetArguments}
-$launcher=Join-Path $sourceBinaries $(if($existing){'msys-compat.exe'}elseif($restricted){'restricted-run.exe'}else{'psec-run.exe'})
+$launcher=if($existing){Join-Path $sourceBinaries 'msys-compat.exe'}elseif($restricted){Join-Path $fixtureBinaries 'restricted-run.exe'}else{Get-PsecLauncher $sourceBinaries}
 $info=New-TestProcessInfo $launcher $arguments $state
 $info.RedirectStandardInput=$true
 $t=[TerminalTest]::new($info)
@@ -73,14 +75,14 @@ try {
     $t.Send("export PS1='MSYS-COMPAT> '; export PATH=/usr/bin:/bin; /usr/bin/stty -echo; printf '\nREADY-INPUT\n'`r")
     $t.Await("READY-INPUT`r`n")
     if($restricted -or $existing){
-        $fork=(Join-Path $(if($restricted){$BinaryDirectory}else{$PSScriptRoot}) 'fork.pl').Replace('\','/').Replace("'","'\''")
+        $fork=(Join-Path $(if($restricted){$BinaryDirectory}else{(Join-Path $PSScriptRoot 'fixtures')}) 'fork.pl').Replace('\','/').Replace("'","'\''")
         $workload=''
         if($restricted){
             $probe=(Join-Path $BinaryDirectory 'restricted-run.exe').Replace('\','/').Replace("'","'\''")
             $workspace=$state.Replace('\','/').Replace("'","'\''")
             $workload="'$probe' probe '$workspace' || exit 87; "
         }
-        $workload+="perl '$fork' 10 || exit 88; " +
+        $workload+="perl '$fork' $ThreadRepetitions || exit 88; " +
             'printf permitted > terminal-write.txt; test "$(cat terminal-write.txt)" = permitted || exit 89; echo TERMINAL-POLICY-PASS'
         $t.Send($workload+"`r")
         $t.Await("TERMINAL-POLICY-PASS`r`n")
@@ -112,7 +114,7 @@ try {
         throw 'Restricted terminal policy probes failed'
     }
     if(($restricted -or $existing) -and
-        (!$t.Text.Contains('ok 24 - fork from a secondary POSIX thread works') -or $t.Text -match 'not ok \d')){
+        (!$t.Text.Contains('fork from a secondary POSIX thread works') -or $t.Text -match 'not ok \d')){
         throw 'Terminal Perl workload failed'
     }
     $passed=$true
@@ -120,7 +122,7 @@ try {
 } finally {
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stdout.txt'),$t.Text)
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stderr.txt'),$t.Error.ToString())
-    @{Environment=$Environment;NativeRelay=[bool]$NativeRelay;Passed=$passed;ExitCode=$exitCode} | ConvertTo-Json |
+    @{Environment=$Environment;NativeRelay=[bool]$NativeRelay;ThreadRepetitions=$ThreadRepetitions;Passed=$passed;ExitCode=$exitCode} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $report 'results.json') -Encoding utf8NoBOM
     $t.Dispose()
 }

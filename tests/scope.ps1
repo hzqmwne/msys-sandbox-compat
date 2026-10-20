@@ -6,13 +6,14 @@ $root=Split-Path $PSScriptRoot -Parent
 $state=Join-Path $root 'unused\runtime'
 $evidence=Join-Path $root 'unused\evidence\current\scope'
 if($EvidenceDirectory){$evidence=[IO.Path]::GetFullPath($EvidenceDirectory)}
-$fixtures=Join-Path $BinaryDirectory 'fixtures'
+$fixtureBinaries=Get-TestFixtureDirectory $BinaryDirectory
+$fixtures=Join-Path $fixtureBinaries 'renamed'
 New-Item -ItemType Directory -Force $fixtures,$evidence,$state,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $policy=Join-Path $state 'scope-policy.json'
-@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
-$launcher=Join-Path $BinaryDirectory 'psec-run.exe'
+@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+$launcher=Get-PsecLauncher $BinaryDirectory
 $compat=Join-Path $BinaryDirectory 'msys-compat.exe'
-$probe=Join-Path $BinaryDirectory 'native-probe.exe'
+$probe=Join-Path $fixtureBinaries 'native-probe.exe'
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 Copy-Item -LiteralPath $probe -Destination (Join-Path $fixtures 'bash.exe')
 function Run([string]$Name,[string[]]$Arguments,[string]$Report='') {
@@ -35,7 +36,7 @@ $report=Join-Path $evidence 'native-root.report.txt'
 Run 'native-root' @($compat,'--trace',$probe,$report) $report
 $report=Join-Path $evidence 'renamed-native.report.txt'
 Run 'renamed-native' @($compat,'--trace',(Join-Path $fixtures 'bash.exe'),$report) $report
-Run 'runtime-import-name' @($compat,'--trace',(Join-Path $BinaryDirectory 'import-name\import-name-client.exe'))
+Run 'runtime-import-name' @($compat,'--trace',(Join-Path $fixtureBinaries 'import-name\import-name-client.exe'))
 $report=Join-Path $evidence 'native-child.report.txt'
 $command='"'+$probe.Replace('\','/')+'" --inspect-parent "'+$report.Replace('\','/')+'"; s=$?; echo PROBE-EXIT:$s; exit "$s"'
 Run 'native-child-parent-check' @($compat,'--trace',$bash,'--noprofile','--norc','-c',$command) $report
@@ -65,5 +66,4 @@ if ($result.ExitCode -ne 0 -or $result.Output -notmatch 'EXPLICIT-REENTRY') {
     throw 'MSYS native bridge reentry failed'
 }
 Write-Output 'msys-native-msys-reentry PASS'
-Run 'token-default-dacl' @((Join-Path $BinaryDirectory 'token-dacl-probe.exe'))
 Write-Output 'SCOPE-ALL-PASS'

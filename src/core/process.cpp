@@ -1,4 +1,4 @@
-#include "msys_compat/injector.h"
+#include "msys_compat/agent.h"
 #include "msys_compat/pe_view.h"
 #include "msys_compat/native_buffer.h"
 #include <string.h>
@@ -10,7 +10,11 @@ namespace msys_compat {
 // of two whole instructions: mov r10,rcx; mov eax,imm32. Refuse other builds or
 // an existing hook instead of guessing instruction lengths or overwriting it.
 NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys) {
-    for (auto &hook : state.hooks) {
+    // The new image is still writable and its initial thread is suspended.
+    // Build the contiguous thunk table once, before final section protection.
+    BYTE trampolines[hook_count][32]{};
+    for (size_t index = 0; index < hook_count; ++index) {
+        const auto &hook = state.hooks[index];
         BYTE original[8];
         auto status = api.read(process, reinterpret_cast<void *>(hook.target), original,
                                sizeof(original), nullptr);
@@ -23,34 +27,28 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, 
         if (delta < INT32_MIN || delta > INT32_MAX)
             return status_not_supported;
 
-        BYTE trampoline[32]{};
+        auto trampoline = trampolines[index];
         memcpy(trampoline, original, 8);
         trampoline[8] = 0xff;
         trampoline[9] = 0x25;
         auto tail = hook.target + 8;
         memcpy(trampoline + 14, &tail, sizeof(tail));
-        // The thunk section is writable only during installation.
-        PVOID region = reinterpret_cast<void *>(hook.trampoline);
-        SIZE_T extent = sizeof(trampoline);
-        ULONG previous = 0, ignored = 0;
-        status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &previous);
-        if (status < 0)
-            return status;
-        status = api.write(process, reinterpret_cast<void *>(hook.trampoline), trampoline,
-                           sizeof(trampoline), nullptr);
-        api.protect(process, &region, &extent, previous, &ignored);
-        if (status < 0)
-            return status;
-
+    }
+    auto status = api.write(process, reinterpret_cast<void *>(state.hooks[0].trampoline),
+                            trampolines, sizeof(trampolines), nullptr);
+    if (status < 0)
+        return status;
+    for (const auto &hook : state.hooks) {
         // Relays need original trampolines for classification/preparation,
         // but only process creation is intercepted in a native image.
         if (!msys && &hook != &state.hooks[static_cast<size_t>(HookId::create_process)])
             continue;
         BYTE patch[8] = {0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90};
-        auto relative = static_cast<int32_t>(delta);
+        auto relative = static_cast<int32_t>(hook.handler - (hook.target + 5));
         memcpy(patch + 1, &relative, sizeof(relative));
-        region = reinterpret_cast<void *>(hook.target);
-        extent = sizeof(patch);
+        PVOID region = reinterpret_cast<void *>(hook.target);
+        SIZE_T extent = sizeof(patch);
+        ULONG previous = 0, ignored = 0;
         status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &previous);
         if (status < 0)
             return status;
@@ -207,10 +205,10 @@ NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, A
     status = api.write(process, &source.local, &local, sizeof(local), nullptr);
     if (status < 0)
         return status;
-    status = protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);
+    status = install_hooks(api, process, source, image.related);
     if (status < 0)
         return status;
-    return install_hooks(api, process, source, image.related);
+    return protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);
 }
 
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number) {

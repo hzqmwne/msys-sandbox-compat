@@ -1,5 +1,6 @@
 #pragma once
-#include "msys_compat/protocol.h"
+#include "msys_compat/agent.h"
+#include "msys_compat/command_line.h"
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -8,7 +9,6 @@
 namespace msys_compat {
 void check(bool success, const char *operation);
 void check_nt(NTSTATUS status, const char *operation);
-std::wstring quote(const std::wstring &text);
 std::wstring file_path(HANDLE file);
 NativeApi resolve_api();
 AgentState *inherited_agent();

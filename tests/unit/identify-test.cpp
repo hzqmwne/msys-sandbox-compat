@@ -1,4 +1,4 @@
-#include "msys_compat/injector.h"
+#include "msys_compat/identify.h"
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -153,7 +153,7 @@ int main() {
     auto first_result = inspect("shared_graph_target_first", first);
     expect(first_result.first >= 0 && first_result.second, "shared graph, target first");
     auto native_result = inspect("shared_graph_native", imports);
-    expect(native_result.first >= 0 && !native_result.second && maps == 24,
+    expect(native_result.first >= 0 && !native_result.second && maps == imports.size() + 8,
            "each shared dependency is mapped once");
     auto direct = inspect("direct_runtime_import", {"MSYS-2.0.DLL"});
     expect(direct.first >= 0 && direct.second && allocation_bytes == 0,
@@ -197,8 +197,8 @@ int main() {
         image(L"deep" + std::to_wstring(i) + L".dll",
               i == 16 ? std::vector<std::string>{"msys-2.0.dll"}
                       : std::vector<std::string>{"deep" + std::to_string(i + 1) + ".dll"});
-    auto depth = inspect("depth_limit", {"deep0.dll"});
-    expect(depth.first == status_not_supported && !depth.second, "depth limit is observable");
+    auto depth = inspect("deep_dependency_chain", {"deep0.dll"});
+    expect(depth.first >= 0 && depth.second, "deep chains fit the node budget");
     printf("IDENTIFY-%s failures=%d\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

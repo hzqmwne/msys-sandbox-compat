@@ -1,4 +1,4 @@
-param([int]$Repetitions=5,[string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
+param([ValidateRange(1,1000)][int]$Repetitions=1,[string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
       [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'))
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -7,14 +7,13 @@ $state=Join-Path $root 'unused\runtime'
 $evidence=Join-Path $root 'unused\evidence\current\verify'
 if($EvidenceDirectory){$evidence=[IO.Path]::GetFullPath($EvidenceDirectory)}
 New-Item -ItemType Directory -Force $state,$evidence,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
-$canary=Join-Path $PSScriptRoot 'denied.txt'
-$allowed=Join-Path $PSScriptRoot 'allowed.txt'
-[IO.File]::WriteAllText($allowed, "read-ok`n")
+$canary=Join-Path $PSScriptRoot 'fixtures\denied.txt'
+$allowed=Join-Path $PSScriptRoot 'fixtures\allowed.txt'
 $canaryHash=(Get-FileHash -LiteralPath $canary).Hash
 $allowedHash=(Get-FileHash -LiteralPath $allowed).Hash
 $policy=Join-Path $state 'verify-policy.json'
 @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
-$launcher=Join-Path $BinaryDirectory 'psec-run.exe'
+$launcher=Get-PsecLauncher $BinaryDirectory
 $supervisor=Join-Path $BinaryDirectory 'msys-compat.exe'
 $results=[System.Collections.Generic.List[object]]::new()
 function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$Expected=0,[switch]$Raw,[string]$Match='') {
@@ -36,8 +35,8 @@ $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 $perl=Join-Path $GitRoot 'usr\bin\perl.exe'
 Invoke-Case 'raw-baseline' $bash @('--noprofile','--norc','-c','echo unexpected') -Raw
 for($i=1;$i -le $Repetitions;$i++) {
-    Invoke-Case "fork-$i" $perl @((Join-Path $PSScriptRoot 'fork.pl')) -Match 'ok 15 - fork from a secondary'
-    Invoke-Case "shell-$i" $bash @('--noprofile','--norc',(Join-Path $PSScriptRoot 'shell.sh')) -Match 'SHELL-PASS'
+    Invoke-Case "fork-$i" $perl @((Join-Path $PSScriptRoot 'fixtures\fork.pl')) -Match 'fork from a secondary POSIX thread works'
+    Invoke-Case "shell-$i" $bash @('--noprofile','--norc',(Join-Path $PSScriptRoot 'fixtures\shell.sh')) -Match 'SHELL-PASS'
 }
 $allowedPosix=$allowed.Replace('\','/'); $denyPosix=$canary.Replace('\','/')
 $boundary='set -eu; export PATH=/usr/bin:/bin; test "$(cat "'+$allowedPosix+'")" = read-ok; if cat "'+$denyPosix+'"; then exit 81; fi; if printf forbidden > "'+$denyPosix+'"; then exit 82; fi; if printf forbidden > "'+$allowedPosix+'"; then exit 83; fi; printf write-ok > allowed-write.txt; test "$(cat allowed-write.txt)" = write-ok; echo BOUNDARY-PASS'

@@ -1,3 +1,5 @@
+#include "msys_compat/command_line.h"
+using msys_compat::quote;
 // Test-only restricted-token runner. It changes ACLs only in a marked fixture directory.
 #include <windows.h>
 #include <sddl.h>
@@ -54,24 +56,6 @@ static void fixture_file(const std::filesystem::path &path, const std::wstring &
     check(WriteFile(file, "fixture-original\n", 17, &written, nullptr), "write fixture");
     CloseHandle(file);
     file_security(path, sddl);
-}
-
-static std::wstring quote(const std::wstring &value) {
-    std::wstring result = L"\"";
-    size_t slashes = 0;
-    for (wchar_t c : value) {
-        if (c == L'\\') {
-            ++slashes;
-            continue;
-        }
-        result.append(slashes * (c == L'"' ? 2 : 1), L'\\');
-        slashes = 0;
-        if (c == L'"')
-            result += L'\\';
-        result += c;
-    }
-    result.append(slashes * 2, L'\\');
-    return result + L'"';
 }
 
 static int probe(const std::filesystem::path &workspace) {
