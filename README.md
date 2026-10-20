@@ -4,7 +4,7 @@
 
 项目直接启动真实的 `usr/bin/bash.exe`、Perl 与 GNU 命令，使用原安装位置的 `msys-2.0.dll`，不修改 MSYS2/Git for Windows 分发包中的磁盘文件、安装目录 ACL 或 rebase 数据。当前验证组合为 Windows 26300.9711 x64、PSEC 1.0、MSYS 3.6.10。
 
-兼容层在初始线程恢复前识别 MSYS 映像并准备其内存，通过 8 个有条件的 inline hook 处理对象授权、地址布局和子进程传播。原生进程保持原样。
+兼容层在初始线程恢复前识别 MSYS 映像并准备其内存，通过 9 个有条件的 inline hook 处理对象授权、隔离环境默认对象 ACL、地址布局和子进程传播。原生进程保持原样。
 
 ## 构建与运行
 
@@ -41,6 +41,7 @@
 .\tests\integrity.ps1 -CaptureBaseline   # 第一次测试前保存安装目录快照
 .\tests\verify.ps1 -Repetitions 10
 .\tests\scope.ps1
+.\tests\process-chain.ps1
 .\tests\conpty.ps1
 .\tests\late-package.ps1
 .\tests\integrity.ps1
@@ -52,7 +53,7 @@
 
 识别依据是实际映像内存中的普通导入表：直接或间接导入 `msys-2.0.dll` 即命中，忽略大小写；不依赖目录扫描、文件指纹或安装时建立的名单。新包在第一次创建或映射时识别。
 
-支持连续的 MSYS 子进程链，以及原生根显式调用兼容入口。其他进程链和版本边界见 [兼容范围](docs/compatibility.md)。
+支持连续的 MSYS 子进程链，以及经过原生工具后显式调用兼容入口再次运行 Bash、Perl 和 fork。其他进程链和版本边界见 [兼容范围](docs/compatibility.md)。
 
 ## 仓库结构
 

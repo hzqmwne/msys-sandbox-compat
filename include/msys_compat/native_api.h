@@ -39,6 +39,8 @@ using ReadFile = NTSTATUS(NTAPI *)(HANDLE, HANDLE, void *, void *, PIO_STATUS_BL
 using FlushCode = NTSTATUS(NTAPI *)(HANDLE, const void *, SIZE_T);
 using Close = NTSTATUS(NTAPI *)(HANDLE);
 using SetSecurity = NTSTATUS(NTAPI *)(HANDLE, SECURITY_INFORMATION, PSECURITY_DESCRIPTOR);
+using QueryToken = NTSTATUS(NTAPI *)(HANDLE, TOKEN_INFORMATION_CLASS, void *, ULONG, PULONG);
+using SetToken = NTSTATUS(NTAPI *)(HANDLE, TOKEN_INFORMATION_CLASS, void *, ULONG);
 using CreateUserProcess = NTSTATUS(NTAPI *)(PHANDLE, PHANDLE, ACCESS_MASK, ACCESS_MASK,
                                             POBJECT_ATTRIBUTES, POBJECT_ATTRIBUTES, ULONG, ULONG,
                                             PRTL_USER_PROCESS_PARAMETERS, void *, void *);
@@ -50,7 +52,7 @@ using CreatePipe = NTSTATUS(NTAPI *)(PHANDLE, ULONG, POBJECT_ATTRIBUTES, PIO_STA
                                      ULONG, ULONG, ULONG, ULONG, ULONG, ULONG, ULONG, ULONG,
                                      PLARGE_INTEGER);
 
-// Early-loader calls use ntdll. The eight intercepted entries point to original
+// Early-loader calls use ntdll. Intercepted entries point to original
 // trampolines in an activated agent. Console ownership stays in the native host.
 struct NativeApi {
     AllocateMemory allocate;
@@ -75,6 +77,8 @@ struct NativeApi {
     FlushCode flush_code;
     Close close;
     SetSecurity set_security;
+    QueryToken query_token;
+    SetToken set_token;
     CreateUserProcess create_process;
     CreateDirectory create_directory;
     CreateMutant create_mutant;

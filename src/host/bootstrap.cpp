@@ -94,6 +94,7 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
     bind(HookId::map_view, "hook_map", api.map_section);
     bind(HookId::allocate, "hook_allocate", api.allocate);
     bind(HookId::create_process, "hook_process", api.create_process);
+    bind(HookId::set_token, "hook_set_token", api.set_token);
     memcpy(mapped.data() + state_rva, &state, sizeof(state));
     check_nt(originals.write(process, remote, mapped.data(), mapped.size(), nullptr),
              "write agent");

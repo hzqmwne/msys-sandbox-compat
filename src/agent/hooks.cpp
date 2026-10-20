@@ -274,6 +274,31 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_allocate(HANDLE process, PV
     return state.api.allocate(process, base, zero, size, allocation, protection);
 }
 
+extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
+                                                               TOKEN_INFORMATION_CLASS kind,
+                                                               void *information, ULONG bytes) {
+    auto &state = g_agent_state;
+    if (kind == TokenDefaultDacl && information && bytes == sizeof(TOKEN_DEFAULT_DACL)) {
+        TOKEN_STATISTICS target{}, primary{};
+        ULONG returned = 0;
+        if (state.api.query_token(token, TokenStatistics, &target, sizeof(target), &returned) >=
+                0 &&
+            state.api.query_token(reinterpret_cast<HANDLE>(-4), TokenStatistics, &primary,
+                                  sizeof(primary), &returned) >= 0 &&
+            target.TokenId.LowPart == primary.TokenId.LowPart &&
+            target.TokenId.HighPart == primary.TokenId.HighPart) {
+            // MSYS replaces the default ACL during cold initialization. Keep
+            // the runner's original policy so native descendants retain IPC
+            // and token reopen rights in this same sandbox.
+            TOKEN_DEFAULT_DACL preserved{state.token_default_dacl_bytes
+                                             ? reinterpret_cast<ACL *>(state.token_default_dacl)
+                                             : nullptr};
+            return state.api.set_token(token, kind, &preserved, sizeof(preserved));
+        }
+    }
+    return state.api.set_token(token, kind, information, bytes);
+}
+
 extern "C" __declspec(dllexport) NTSTATUS NTAPI
 hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS_MASK thread_access,
              POBJECT_ATTRIBUTES process_attributes, POBJECT_ATTRIBUTES thread_attributes,

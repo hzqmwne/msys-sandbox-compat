@@ -16,7 +16,7 @@ PSEC 创建工具与兼容宿主分别负责隔离策略和运行时兼容。宿
 
 准备工作包括 EXE/DLL 首选地址、MSYS 堆预留与地址修正、私有对象路径及安全描述符。root 和 child 使用同一套 agent 节保护规则；child 只重置进程局部状态。
 
-## 八个 hook 的职责
+## 九个 hook 的职责
 
 | 入口 | 兼容职责 |
 |---|---|
@@ -28,8 +28,9 @@ PSEC 创建工具与兼容宿主分别负责隔离策略和运行时兼容。宿
 | `NtMapViewOfSection` | 按需识别并固定相关映像地址 |
 | `NtAllocateVirtualMemory` | 修正 MSYS 私有堆地址及 fork 提交范围 |
 | `NtCreateUserProcess` | 子进程初始挂起、识别、准备和传播 |
+| `NtSetInformationToken` | MSYS 重设当前主 token 默认 DACL 时保留隔离启动器配置的初始 ACL |
 
-对象路径重定向限于 MSYS 使用的对象；文件安装目录 ACL 和 token 不被修改。仅调整 TokenDefaultDacl 无法覆盖运行时显式传入的对象安全描述符。
+对象路径重定向限于 MSYS 使用的对象，文件安装目录 ACL 不被修改。兼容层保留隔离启动器传入的默认对象 ACL，避免 MSYS 冷启动将 package/logon 等授权替换为普通用户模板；仅对当前主 token 的 `TokenDefaultDacl` 设置调用生效，其他 token 与信息类原样传递。调用仍由原 Native API 执行，不改变 token 身份、权限、受限 SID 或文件策略。取舍见 [ADR-0004](decisions/0004-preserve-sandbox-object-policy.md)。显式传入的对象描述符仍需相应创建 hook 处理，保留默认 ACL 不替代它们。
 
 宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄；对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化，不改变 token 或其默认 DACL。取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
 
@@ -39,7 +40,7 @@ MSYS 自身仍负责 fork 的复制、同步和恢复语义。兼容层解决环
 
 原生子进程保持原样，其后续创建操作不会经过 MSYS 父进程的 hook。Job 管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
 
-MSYS 创建的原生后代仍可显式调用兼容宿主启动原生目标。若目标是需要全新初始化的 MSYS 根进程，宿主在初始线程恢复前检查其真实 token 的 `TOKEN_QUERY` 访问；拒绝时终止本次挂起目标并明确报错。受测 MSYS 原生后代的 token 对象缺少 package ACE，冷启动 MSYS 会在 token 查询处失败并等待；只绕过宿主只读查询不足以修复该链路。这个前置检查针对已复现的拒绝，不代表通过后所有 MSYS 初始化步骤都必然成功。
+MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时保留，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。宿主仍在 MSYS 根进程恢复前检查真实 token 查询权限；从未受兼容处理的祖先继承了不兼容 token 时明确拒绝，这个错误检查不是成功验收。
 
 ## ConPTY
 

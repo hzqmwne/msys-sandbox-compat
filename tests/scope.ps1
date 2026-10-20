@@ -59,12 +59,11 @@ $command = 'export MSYS2_ARG_CONV_EXCL="*"; "' + $probe.Replace('\','/') +
 $info = New-TestProcessInfo $launcher @(
     $policy,$compat,'--runtime',$runtime,$bash,'--noprofile','--norc','-c',$command
 ) $state
-$result = Invoke-TestProcess $info 10000
-Save-TestOutput $result $evidence 'msys-native-msys-token-boundary'
-if ($result.ExitCode -eq 0 -or $result.Output -match 'EXPLICIT-REENTRY' -or
-    $result.Error -notmatch 'query MSYS root token before initialization: Win32 5') {
-    throw 'MSYS token boundary did not fail before initialization'
+$result = Invoke-TestProcess $info 30000
+Save-TestOutput $result $evidence 'msys-native-msys-reentry'
+if ($result.ExitCode -ne 0 -or $result.Output -notmatch 'EXPLICIT-REENTRY') {
+    throw 'MSYS native bridge reentry failed'
 }
-Write-Output 'msys-native-msys-token-boundary EXPECTED-REJECTION'
+Write-Output 'msys-native-msys-reentry PASS'
 Run 'token-default-dacl' @((Join-Path $BinaryDirectory 'token-dacl-probe.exe'))
 Write-Output 'SCOPE-ALL-PASS'

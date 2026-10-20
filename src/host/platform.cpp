@@ -68,6 +68,8 @@ NativeApi resolve_api() {
     RESOLVE(flush_code, "NtFlushInstructionCache");
     RESOLVE(close, "NtClose");
     RESOLVE(set_security, "NtSetSecurityObject");
+    RESOLVE(query_token, "NtQueryInformationToken");
+    RESOLVE(set_token, "NtSetInformationToken");
     RESOLVE(create_process, "NtCreateUserProcess");
     RESOLVE(create_directory, "NtCreateDirectoryObject");
     RESOLVE(create_mutant, "NtCreateMutant");
@@ -86,6 +88,19 @@ void configure_security(AgentState &state) {
     check(GetTokenInformation(token, TokenUser, user, sizeof(user), &size), "TokenUser");
     check(GetTokenInformation(token, TokenAppContainerSid, package, sizeof(package), &size),
           "TokenAppContainerSid");
+    DWORD default_bytes = 0;
+    GetTokenInformation(token, TokenDefaultDacl, nullptr, 0, &default_bytes);
+    std::vector<BYTE> default_info(default_bytes);
+    check(default_bytes && GetTokenInformation(token, TokenDefaultDacl, default_info.data(),
+                                               default_bytes, &default_bytes),
+          "TokenDefaultDacl");
+    auto acl = reinterpret_cast<TOKEN_DEFAULT_DACL *>(default_info.data())->DefaultDacl;
+    if (acl) {
+        check(IsValidAcl(acl) && acl->AclSize <= sizeof(state.token_default_dacl),
+              "sandbox default DACL capacity");
+        memcpy(state.token_default_dacl, acl, acl->AclSize);
+        state.token_default_dacl_bytes = acl->AclSize;
+    }
     auto sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
     check(sid != nullptr, "launcher must run inside PSEC");
     LPWSTR user_text = nullptr, package_text = nullptr;

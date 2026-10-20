@@ -45,6 +45,7 @@ enum class HookId : size_t {
     map_view,
     allocate,
     create_process,
+    set_token,
     count
 };
 constexpr size_t hook_count = static_cast<size_t>(HookId::count);
@@ -70,6 +71,9 @@ struct AgentState {
     wchar_t object_root[object_root_chars];
     unsigned char descriptor[descriptor_bytes];
     uint32_t root_chars;
+    // Preserve the sandbox's initial default object ACL across MSYS init.
+    unsigned char token_default_dacl[2048];
+    uint32_t token_default_dacl_bytes;
     HookSlot hooks[hook_count];
     // Process-local fields are reset when cloning into a new suspended child.
     ProcessState local;

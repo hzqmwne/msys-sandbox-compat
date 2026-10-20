@@ -54,7 +54,7 @@ int wmain(int argc, wchar_t **argv) {
     bool clean = true;
     for (auto name : {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
                       "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile", "NtMapViewOfSection",
-                      "NtAllocateVirtualMemory", "NtCreateUserProcess"}) {
+                      "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
         auto code =
             reinterpret_cast<const BYTE *>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name));
         bool original =
@@ -85,9 +85,10 @@ int wmain(int argc, wchar_t **argv) {
             return 3;
         }
         unsigned jumps = 0;
-        for (auto name : {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
-                          "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile",
-                          "NtMapViewOfSection", "NtAllocateVirtualMemory", "NtCreateUserProcess"}) {
+        for (auto name :
+             {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
+              "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile", "NtMapViewOfSection",
+              "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
             BYTE code[8]{};
             auto address = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name);
             if (ReadProcessMemory(parent, address, code, sizeof(code), nullptr) &&
@@ -98,7 +99,7 @@ int wmain(int argc, wchar_t **argv) {
         status = query(parent, static_cast<PROCESSINFOCLASS>(7), &port, sizeof(port), nullptr);
         fprintf(report, "parent-inline-jumps=%u parent-debug-status=%08lx parent-debug-port=%llu\n",
                 jumps, static_cast<ULONG>(status), port);
-        clean = clean && jumps == 8 && status >= 0 && port == 0;
+        clean = clean && jumps == 9 && status >= 0 && port == 0;
         CloseHandle(parent);
     }
     for (DWORD id : {STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE}) {

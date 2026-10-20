@@ -7,5 +7,6 @@
 | [0001](0001-suspended-msys-preparation.md) | 挂起创建、按导入名识别与严格原生边界 | Accepted |
 | [0002](0002-native-console-handle-owner.md) | PSEC 内公开 ConPTY 与原生标准句柄所有者 | Accepted |
 | [0003](0003-read-only-security-context.md) | 只读安全上下文查询与冷启动 MSYS 的 token 前置检查 | Accepted |
+| [0004](0004-preserve-sandbox-object-policy.md) | 保留隔离启动器默认对象策略，恢复真实 MSYS 原生桥接回入 | Accepted |
 
 Accepted ADR 的正文不重写。决定变化时新增 ADR，在新旧记录中补充替代关系；小型实现细节由 Git 历史和变更记录表达。研究计划与未验证候选不写成 Accepted 决定。

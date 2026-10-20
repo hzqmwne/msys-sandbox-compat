@@ -7,6 +7,7 @@
 .\tests\integrity.ps1 -CaptureBaseline
 .\tests\verify.ps1 -Repetitions 10
 .\tests\scope.ps1
+.\tests\process-chain.ps1
 .\tests\conpty.ps1
 .\tests\late-package.ps1
 .\tests\integrity.ps1
@@ -17,7 +18,8 @@
 | `identify-test` | 直接导入快速路径、共享依赖去重、环、遍历上限及识别/准备失败语义；无需创建 PSEC |
 | `verify.ps1` | 原版失败基线、重复 fork/shell、读写边界、退出码和原生子进程；10 轮共 25 项 |
 | `fork.pl` | PID、堆、COW、共享文件偏移、管道、EOF、信号、exec、WNOHANG、嵌套及并发 fork、线程中 fork |
-| `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、原生根显式回入、MSYS 原生后代启动原生目标时默认 DACL 不变、冷启动 MSYS 的 token 拒绝及 TokenDefaultDacl 对照 |
+| `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、原生根显式回入、MSYS 原生后代回入及 TokenDefaultDacl 对照 |
+| `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、10 次二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
 | `conpty.ps1` | TTY、120×40 尺寸、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
 | `late-package.ps1` | 运行目标到达屏障后才放置新 EXE/DLL，验证首次识别、动态模块和 fork |
 | `integrity.ps1` | 安装目录文件路径、长度和 SHA-256 与测试前基线相同 |
@@ -26,9 +28,9 @@
 
 各脚本默认输出到 `unused/evidence/current/<suite>`，也可使用 `-EvidenceDirectory` 保留不同轮次。状态和 HOME 位于 `unused/runtime`。这些文件不进入 Git 或发布包。
 
-`scope` 包含七项成功场景与一项明确的预期拒绝。`msys-native-msys-token-boundary` 要求在 10 秒内报告恢复前 token 访问错误，且未输出目标执行标记；它验证错误边界，不表示支持 MSYS 原生桥接回入。
+`scope` 的八项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
 
-CTest 包含独立识别测试；找到 pwsh 后还会注册四个 PSEC 集成套件，串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
+CTest 包含独立识别测试；找到 pwsh 后还会注册五个 PSEC 集成套件，串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
 
 ```powershell
 # 在 tools/msvc-env.ps1 配置过的工具链环境中

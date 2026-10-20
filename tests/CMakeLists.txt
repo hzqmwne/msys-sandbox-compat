@@ -1,8 +1,10 @@
 add_executable(token-dacl-probe token-dacl.cpp)
 target_link_libraries(token-dacl-probe PRIVATE advapi32)
 add_executable(native-probe native-probe.cpp)
+add_executable(native-bridge native-bridge.cpp)
+target_link_libraries(native-bridge PRIVATE advapi32)
 target_link_libraries(native-probe PRIVATE advapi32)
-foreach(target token-dacl-probe native-probe)
+foreach(target token-dacl-probe native-probe native-bridge)
   target_compile_options(${target} PRIVATE /EHsc)
 endforeach()
 
@@ -32,7 +34,7 @@ endforeach()
 # sandbox that forbids their creation. They share runtime fixtures, so serialize.
 find_program(MSYS_COMPAT_POWERSHELL NAMES pwsh)
 if(MSYS_COMPAT_POWERSHELL)
-  foreach(suite verify scope conpty late-package)
+  foreach(suite verify scope conpty late-package process-chain)
     add_test(NAME psec.${suite} COMMAND "${MSYS_COMPAT_POWERSHELL}" -NoProfile
       -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
