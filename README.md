@@ -1,6 +1,6 @@
 # MSYS Compat
 
-让未修改的 MSYS 程序在 Windows 受限执行环境中运行。当前实现和验证范围是 **Windows 原生 PSEC / AMD64**；restricted token 集成仍在研究。
+让未修改的 MSYS 程序在 Windows 受限执行环境中运行。当前验证覆盖 **Windows 原生 PSEC / AMD64**，以及固定测试夹具创建的 write-restricted 和完整 restricting SID 检查两种非 AppContainer 令牌；外部 harness 尚未集成验收。
 
 项目直接启动真实的 `usr/bin/bash.exe`、Perl 与 GNU 命令，使用原安装位置的 `msys-2.0.dll`，不修改 MSYS2/Git for Windows 分发包中的磁盘文件、安装目录 ACL 或 rebase 数据。当前验证组合为 Windows 26300.9711 x64、PSEC 1.0、MSYS 3.6.10。
 
@@ -28,10 +28,10 @@
 | 文件 | 职责 |
 |---|---|
 | `psec-run.exe` | 从普通宿主按策略创建 PSEC |
-| `msys-compat.exe` | 在既有 PSEC 中启动目标、识别、准备和等待进程树 |
+| `msys-compat.exe` | 在既有受限环境中启动目标、识别、准备和等待进程树 |
 | `msys-compat.dll` | 只映射到确认的 MSYS 进程中的兼容模块 |
 
-兼容宿主在既有 PSEC 中运行。受测版本和集成边界见 [兼容范围](docs/compatibility.md)。
+兼容宿主在既有 PSEC 或受限令牌上下文中运行，不创建非隔离回退进程。受测令牌配置、版本和集成边界见 [兼容范围](docs/compatibility.md)。
 
 ## 验证
 
@@ -42,6 +42,8 @@
 .\tests\verify.ps1 -Repetitions 10
 .\tests\scope.ps1
 .\tests\process-chain.ps1
+.\tests\process-chain.ps1 -Environment WriteRestricted
+.\tests\process-chain.ps1 -Environment FullRestricted
 .\tests\conpty.ps1
 .\tests\late-package.ps1
 .\tests\integrity.ps1

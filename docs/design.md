@@ -4,7 +4,7 @@
 
 ## 进程创建与识别
 
-PSEC 创建工具与兼容宿主分别负责隔离策略和运行时兼容。宿主以 `CREATE_SUSPENDED` 创建目标，在初始线程恢复前读取实际映像内存中的普通导入表。直接或间接导入 `msys-2.0.dll` 即按 MSYS 处理，文件名比较忽略大小写；运行时 DLL 自身按该文件名识别。
+PSEC 创建工具或外部受限令牌启动器负责隔离策略，兼容宿主负责运行时兼容。宿主要求已有 AppContainer SID 或实际受限令牌，以 `CREATE_SUSPENDED` 创建目标，在初始线程恢复前读取实际映像内存中的普通导入表。直接或间接导入 `msys-2.0.dll` 即按 MSYS 处理，文件名比较忽略大小写；运行时 DLL 自身按该文件名识别。
 
 声明此导入名就是选择该 ABI 的兼容处理，不另加文件 ID 或导出指纹认证。先检查当前映像的直接导入，再用有界队列遍历间接依赖。同一次识别按路径去重，每次只映射一个依赖；最多 128 个映像、16 层。原生 EXE 改名为 Bash 不会命中；目标运行后才安装的包可以在首次创建、映射时识别。
 
@@ -32,7 +32,9 @@ PSEC 创建工具与兼容宿主分别负责隔离策略和运行时兼容。宿
 
 对象路径重定向限于 MSYS 使用的对象，文件安装目录 ACL 不被修改。兼容层保留隔离启动器传入的默认对象 ACL，避免 MSYS 冷启动将 package/logon 等授权替换为普通用户模板；仅对当前主 token 的 `TokenDefaultDacl` 设置调用生效，其他 token 与信息类原样传递。调用仍由原 Native API 执行，不改变 token 身份、权限、受限 SID 或文件策略。取舍见 [ADR-0004](decisions/0004-preserve-sandbox-object-policy.md)。显式传入的对象描述符仍需相应创建 hook 处理，保留默认 ACL 不替代它们。
 
-宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄；对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化，不改变 token 或其默认 DACL。取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
+宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄。PSEC 对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化。查询取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
+
+非 AppContainer 受限令牌没有 package 私有命名空间。宿主在当前 session 的 `BaseNamedObjects` 下创建每次启动的目录，沿用启动器默认 DACL 作为 MSYS 对象描述符，不遍历 restricting SID 并全部授权。目录句柄保持到进程树退出；内部环境变量 `MSYS_COMPAT_SESSION` 携带数字启动标记，使原生中间程序后的显式兼容入口复用同一目录。普通 MSYS 和其他兼容会话的对象不会占用该目录。PSEC 路径不使用此标记。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
 
 ## fork 与进程链
 

@@ -32,7 +32,9 @@ msys-compat.exe [--trace] [--runtime msys-2.0.dll]
     program.exe [arguments...]
 ```
 
-`psec-run.exe` 由普通宿主调用，负责创建原生 PSEC。`msys-compat.exe` 在 PSEC 内调用，负责兼容准备；它从自身目录定位 `msys-compat.dll`。`--runtime` 为传递依赖解析提供运行时所在目录，不进行文件身份认证。
+`psec-run.exe` 由普通宿主调用，负责创建原生 PSEC。`msys-compat.exe` 在既有 PSEC 或非 AppContainer 受限令牌上下文内调用，负责兼容准备；它从自身目录定位 `msys-compat.dll`。`--runtime` 为传递依赖解析提供运行时所在目录，不进行文件身份认证。
+
+接入受限令牌启动器时，将其启动目标设为 `msys-compat.exe --runtime DLL PROGRAM ...`，由启动器继续配置 token、默认对象 ACL、文件权限和进程创建策略。完整 restricting SID 检查模式需要同时提供兼容 EXE/DLL 和原版 MSYS 安装文件的读取/执行权限；兼容层不会补授这些文件权限。仓库仅对 [兼容范围](compatibility.md) 列出的固定测试配置完成验收，测试用 `restricted-run.exe` 不作为产品启动器分发。
 
 兼容宿主通过 job 等待进程树退出并返回根进程退出码。ConPTY 模式收发 VT 字节流，初始尺寸可配置；当前没有终端 GUI、VT 渲染器或宿主窗口 resize 事件循环。
 

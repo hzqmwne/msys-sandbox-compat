@@ -41,8 +41,10 @@ int wmain(int argc, wchar_t **argv) try {
             break;
     }
     if (first == argc) {
-        fprintf(stderr, "Usage (inside PSEC): msys-compat [--trace] [--runtime DLL] PROGRAM "
-                        "[arguments...]\n");
+        fprintf(
+            stderr,
+            "Usage (inside a restricted context): msys-compat [--trace] [--runtime DLL] PROGRAM "
+            "[arguments...]\n");
         return 2;
     }
     auto executable = fs::absolute(argv[first]);
@@ -50,7 +52,8 @@ int wmain(int argc, wchar_t **argv) try {
     state->trace = trace;
     state->api = resolve_api();
     configure_runtime_paths(runtime, *state);
-    configure_security(*state);
+    std::unique_ptr<void, decltype(&CloseHandle)> object_directory(configure_security(*state),
+                                                                   CloseHandle);
     Pseudoconsole pty;
     std::vector<BYTE> attribute_buffer;
     if (conpty)

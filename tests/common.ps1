@@ -1,4 +1,4 @@
-# Shared process setup for the PSEC integration suites.
+# Shared process setup for the isolation integration suites.
 function New-TestProcessInfo([string]$Program, [string[]]$Arguments, [string]$WorkingDirectory) {
     $info = [Diagnostics.ProcessStartInfo]::new($Program)
     $info.UseShellExecute = $false

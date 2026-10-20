@@ -2,9 +2,11 @@ add_executable(token-dacl-probe token-dacl.cpp)
 target_link_libraries(token-dacl-probe PRIVATE advapi32)
 add_executable(native-probe native-probe.cpp)
 add_executable(native-bridge native-bridge.cpp)
+add_executable(restricted-run restricted-run.cpp)
+target_link_libraries(restricted-run PRIVATE advapi32)
 target_link_libraries(native-bridge PRIVATE advapi32)
 target_link_libraries(native-probe PRIVATE advapi32)
-foreach(target token-dacl-probe native-probe native-bridge)
+foreach(target token-dacl-probe native-probe native-bridge restricted-run)
   target_compile_options(${target} PRIVATE /EHsc)
 endforeach()
 
@@ -30,8 +32,8 @@ foreach(target import-name-runtime import-name-client)
   endforeach()
 endforeach()
 
-# Integration tests create native PSEC instances and must run outside a parent
-# sandbox that forbids their creation. They share runtime fixtures, so serialize.
+# Integration tests create PSEC instances or restricted tokens and must run in
+# a host that permits their creation. They share runtime fixtures, so serialize.
 find_program(MSYS_COMPAT_POWERSHELL NAMES pwsh)
 if(MSYS_COMPAT_POWERSHELL)
   foreach(suite verify scope conpty late-package process-chain)
@@ -39,6 +41,12 @@ if(MSYS_COMPAT_POWERSHELL)
       -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
     set_tests_properties(psec.${suite} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
+  endforeach()
+  foreach(mode WriteRestricted FullRestricted)
+    add_test(NAME token.${mode} COMMAND "${MSYS_COMPAT_POWERSHELL}" -NoProfile
+      -File "${CMAKE_CURRENT_SOURCE_DIR}/process-chain.ps1" -Environment "${mode}"
+      -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
+    set_tests_properties(token.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   endforeach()
 endif()
 add_executable(identify-test identify-test.cpp ../src/agent/identify.cpp)

@@ -14,10 +14,16 @@
 | 原生中间程序直接创建 MSYS | 默认模式无自动传播，需显式兼容入口 |
 | 运行中新出现的 EXE/DLL | 按首次创建或映射时的实际依赖识别 |
 | ConPTY | PSEC 内公开 API 路径通过交互回归 |
-| 任意 restricted token harness | 尚未实现与集成验证 |
+| 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
+| 非 AppContainer 完整 restricting SID 检查令牌 | 同一固定夹具通过上述工作负载与边界回归 |
+| 任意外部 restricted token harness | 尚未集成验收；令牌、ACL、创建参数及 ConPTY 需要分别验证 |
 | 只复制旁置文件即可自动生效 | 尚未提供可靠通用加载入口 |
 
 识别覆盖普通导入及常规应用目录、模块目录和运行时目录的传递依赖。纯原生根在启动后才 LoadLibrary MSYS、仅 delay import，以及任意 SxS 或自定义 DLL 搜索规则不在当前预先识别保证内。
+
+两种受限令牌夹具均使用 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN`、禁用 Administrators，并将当前 logon SID、Everyone、Builtin Users、Authenticated Users 放入 restricting SID 列表；write 模式另加 `WRITE_RESTRICTED`。启动器为对象保留 logon/SYSTEM 授权和 OWNER RIGHTS 限制。测试只在带标记的独立工作目录配置 ACL，将兼容产物和夹具暂存为只读；Git/MSYS 仍从原安装位置加载。完整检查模式的读取也必须通过 restricting SID 检查，因此外部启动器必须先提供所需文件读取与执行权限。
+
+`restricted-run.exe` 是测试夹具，不随产品安装，也不是通用沙箱工具。回归验证明确配置的只读文件、拒绝文件、可写目录与对象策略，没有认证任意路径、网络或外部产品的隔离策略。两种令牌下的 ConPTY 尚未验收。
 
 兼容实现依赖 AMD64 ntdll 系统调用入口、Native API 和 MSYS 内部地址布局。入口或目标布局变化时需要重新验证，不承诺所有 Windows/MSYS 版本自动适用。
 
