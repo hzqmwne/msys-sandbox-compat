@@ -9,7 +9,7 @@ namespace msys_compat {
 // The only supported entry format is the AMD64 ntdll syscall prefix consisting
 // of two whole instructions: mov r10,rcx; mov eax,imm32. Refuse other builds or
 // an existing hook instead of guessing instruction lengths or overwriting it.
-NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state) {
+NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys) {
     for (auto &hook : state.hooks) {
         BYTE original[8];
         auto status = api.read(process, reinterpret_cast<void *>(hook.target), original,
@@ -42,6 +42,10 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state) 
         if (status < 0)
             return status;
 
+        // Relays need original trampolines for classification/preparation,
+        // but only process creation is intercepted in a native image.
+        if (!msys && &hook != &state.hooks[static_cast<size_t>(HookId::create_process)])
+            continue;
         BYTE patch[8] = {0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90};
         auto relative = static_cast<int32_t>(delta);
         memcpy(patch + 1, &relative, sizeof(relative));
@@ -164,9 +168,17 @@ NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, 
 
 NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source) {
     auto &api = source.api;
-    auto status = prepare_process(api, process, thread, image, source);
-    if (status < 0)
-        return status;
+    auto status = status_success;
+    if (source.native_relay) {
+        status = check_child_context(api, process, source);
+        if (status < 0)
+            return status;
+    }
+    if (image.related) {
+        status = prepare_process(api, process, thread, image, source);
+        if (status < 0)
+            return status;
+    }
     PVOID remote = reinterpret_cast<void *>(source.self_base);
     SIZE_T size = source.self_size;
     status = api.allocate(process, &remote, 0, &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
@@ -198,7 +210,7 @@ NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, A
     status = protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);
     if (status < 0)
         return status;
-    return install_hooks(api, process, source);
+    return install_hooks(api, process, source, image.related);
 }
 
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number) {

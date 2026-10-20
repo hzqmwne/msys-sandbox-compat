@@ -18,6 +18,7 @@ CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构
 ```powershell
 .\run.ps1 -GitRoot 'C:\Program Files\Git'
 .\run.ps1 -ConPty -TerminalSize '120x40'
+.\run.ps1 -NativeRelay
 .\run.ps1 -Raw  # 不启用兼容层，用于失败基线对照
 ```
 
@@ -27,7 +28,7 @@ CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构
 
 ```text
 psec-run.exe policy.json program.exe [arguments...]
-msys-compat.exe [--trace] [--runtime msys-2.0.dll]
+msys-compat.exe [--trace] [--native-relay] [--runtime msys-2.0.dll]
     [--conpty | --conpty-script input.txt] [--conpty-size WIDTHxHEIGHT]
     program.exe [arguments...]
 ```
@@ -39,6 +40,8 @@ msys-compat.exe [--trace] [--runtime msys-2.0.dll]
 在实际 harness 内可直接执行 `tests/conpty.ps1 -Environment Existing` 验证继承的上下文。它不创建新的隔离环境或配置文件 ACL；初始策略与拒绝边界的验收要求见 [测试说明](testing.md)。
 
 兼容宿主通过 job 等待进程树退出并返回根进程退出码。ConPTY 模式收发 VT 字节流，初始尺寸可配置；当前没有终端 GUI、VT 渲染器或宿主窗口 resize 事件循环。
+
+`--native-relay` 是显式选择的进程树传播模式，也可由 `run.ps1 -NativeRelay` 启用，并可与 ConPTY 组合。原生进程仅保留创建 hook，直接启动后续 MSYS 时自动完成兼容准备；默认仍不注入原生进程。已处于该树中的嵌套兼容入口复用已有 relay，无需重复加选项。该模式不修改磁盘 ACL 或放宽 token，遇到安全上下文或默认对象策略变化时拒绝传播。覆盖入口和限制见 [兼容范围](compatibility.md)。`-Raw` 与 `-NativeRelay` 不能同时使用。
 
 ## 创建环境失败
 

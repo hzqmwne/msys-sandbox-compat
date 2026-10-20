@@ -7,11 +7,12 @@
 | 原版 EXE 与 `msys-2.0.dll` | 使用原安装文件，不修改分发包 |
 | fork、exec、管道、信号及线程中 fork | 受测组合通过回归与压力测试 |
 | MSYS 连续子进程链 | 通过创建 hook 传播 |
-| 进程链中的原生子进程 | 不注入，不安装兼容补丁 |
+| 进程链中的原生子进程 | 默认不注入；显式 relay 模式仅安装创建 hook |
 | 原生根显式调用兼容入口 | 已由公开作用范围测试验证 |
 | MSYS 原生后代调用兼容入口启动原生目标 | 已验证；原生目标无兼容补丁，继承的 token 默认 DACL 不变 |
 | MSYS 创建原生中间程序后显式回入 MSYS | 一层/三层原生桥接后 Bash、Perl、线程中 fork、管道与退出码通过回归 |
-| 原生中间程序直接创建 MSYS | 默认模式无自动传播，需显式兼容入口 |
+| 原生中间程序直接创建 MSYS | `--native-relay` 下，一层/三层原生桥接后直接进入 Bash/Perl 已通过；默认模式仍需显式入口 |
+| relay 的原生根、显式嵌套入口及挂起创建 | 受测 PSEC 和两种固定令牌均通过；原生八个其余入口不变、MSYS 地址区空闲、退出码与挂起状态保留 |
 | 运行中新出现的 EXE/DLL | 按首次创建或映射时的实际依赖识别 |
 | ConPTY | 公开 API 路径在 PSEC 和两种固定非 AppContainer 受限令牌中通过交互回归 |
 | 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
@@ -20,6 +21,8 @@
 | 只复制旁置文件即可自动生效 | 尚未提供可靠通用加载入口 |
 
 识别覆盖普通导入及常规应用目录、模块目录和运行时目录的传递依赖。纯原生根在启动后才 LoadLibrary MSYS、仅 delay import，以及任意 SxS 或自定义 DLL 搜索规则不在当前预先识别保证内。
+
+relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，不接管已有进程、树外进程、绕过该入口的直接系统调用或纯原生进程运行后才动态加载 MSYS 的场景。它依赖同一安全上下文和默认对象策略；子进程切换凭据、限制、完整性、package 或默认 DACL，或无法完成必要只读查询时，传播明确失败，不沿用父进程授权。被改变的默认对象策略在创建前拒绝，其余已创建目标在恢复前回收。原生中间进程会驻留 agent 代码，但仅一个创建入口被修改；关闭该模式的默认行为保持不变。
 
 两种受限令牌夹具均使用 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN`、禁用 Administrators，并将当前 logon SID、Everyone、Builtin Users、Authenticated Users 放入 restricting SID 列表；write 模式另加 `WRITE_RESTRICTED`。启动器为对象保留 logon/SYSTEM 授权和 OWNER RIGHTS 限制。测试只在带标记的独立工作目录配置 ACL，将兼容产物和夹具暂存为只读；Git/MSYS 仍从原安装位置加载。完整检查模式的读取也必须通过 restricting SID 检查，生产所需文件读取与执行必须在原策略允许范围内。
 

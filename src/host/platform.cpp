@@ -1,10 +1,55 @@
 #include "host.h"
+#include "msys_compat/pe_view.h"
 #include <sddl.h>
 #include <securityappcontainer.h>
 #include <cstdio>
 #include <stdexcept>
 
 namespace msys_compat {
+AgentState *inherited_agent() {
+    // An explicit launcher inside an opted-in tree already has the relay.
+    // Its CreateProcess call prepares the child; do not inject it a second time.
+    auto entry = reinterpret_cast<const BYTE *>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateUserProcess"));
+    if (!entry || entry[0] != 0xe9 || entry[5] != 0x90 || entry[6] != 0x90 || entry[7] != 0x90)
+        return nullptr;
+    LONG offset = 0;
+    memcpy(&offset, entry + 1, sizeof(offset));
+    auto handler = entry + 5 + offset;
+    MEMORY_BASIC_INFORMATION region{};
+    if (!VirtualQuery(handler, &region, sizeof(region)))
+        return nullptr;
+    auto base = static_cast<const BYTE *>(region.AllocationBase);
+    if (!VirtualQuery(base, &region, sizeof(region)) || region.State != MEM_COMMIT ||
+        (region.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+        return nullptr;
+    auto pe = PeView(base, region.RegionSize).headers();
+    if (!pe || !pe->OptionalHeader.SizeOfImage || pe->OptionalHeader.SizeOfImage > 1024 * 1024)
+        return nullptr;
+    size_t size = pe->OptionalHeader.SizeOfImage;
+    for (size_t at = 0; at < size;) {
+        if (!VirtualQuery(base + at, &region, sizeof(region)) || region.AllocationBase != base ||
+            region.State != MEM_COMMIT || (region.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
+            return nullptr;
+        at = static_cast<const BYTE *>(region.BaseAddress) + region.RegionSize - base;
+    }
+    PeView view(base, size);
+    auto state_rva = view.exported_rva("g_agent_state");
+    auto handler_rva = view.exported_rva("hook_process");
+    if (!state_rva || !handler_rva || base + handler_rva != handler)
+        return nullptr;
+    auto state = view.at<AgentState>(state_rva);
+    if (!state || !state->native_relay || state->self_base != reinterpret_cast<uintptr_t>(base) ||
+        state->self_size != size)
+        return nullptr;
+    auto &slot = state->hooks[static_cast<size_t>(HookId::create_process)];
+    return slot.target == reinterpret_cast<uintptr_t>(entry) &&
+                   slot.handler == reinterpret_cast<uintptr_t>(handler) &&
+                   reinterpret_cast<uintptr_t>(state->api.create_process) == slot.trampoline
+               ? const_cast<AgentState *>(state)
+               : nullptr;
+}
+
 void check(bool success, const char *operation) {
     if (!success) {
         fprintf(stderr, "[error] %s: Win32 %lu\n", operation, GetLastError());
@@ -69,6 +114,7 @@ NativeApi resolve_api() {
     RESOLVE(close, "NtClose");
     RESOLVE(set_security, "NtSetSecurityObject");
     RESOLVE(query_token, "NtQueryInformationToken");
+    RESOLVE(open_token, "NtOpenProcessToken");
     RESOLVE(set_token, "NtSetInformationToken");
     RESOLVE(create_process, "NtCreateUserProcess");
     RESOLVE(create_directory, "NtCreateDirectoryObject");

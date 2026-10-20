@@ -1,7 +1,7 @@
 # ADR-0001：挂起创建、按导入名识别与严格原生边界
 
 Status: Accepted
-Partially superseded by: ADR-0004，更新 token 默认 DACL 的处理；其余决定保留。
+Partially superseded by: ADR-0004，更新 token 默认 DACL 的处理；ADR-0006 增加显式原生 relay，默认原生边界保留。
 Date: 2026-10-20
 
 ## Context

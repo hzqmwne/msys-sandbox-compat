@@ -10,6 +10,7 @@ constexpr NTSTATUS status_success = 0;
 constexpr NTSTATUS status_invalid_image = static_cast<NTSTATUS>(0xc000007b);
 constexpr NTSTATUS status_not_supported = static_cast<NTSTATUS>(0xc00000bb);
 constexpr NTSTATUS status_unsuccessful = static_cast<NTSTATUS>(0xc0000001);
+constexpr NTSTATUS status_access_denied = static_cast<NTSTATUS>(0xc0000022);
 constexpr ULONG thread_create_suspended = 1;
 
 using AllocateMemory = NTSTATUS(NTAPI *)(HANDLE, PVOID *, ULONG_PTR, PSIZE_T, ULONG, ULONG);
@@ -40,6 +41,7 @@ using FlushCode = NTSTATUS(NTAPI *)(HANDLE, const void *, SIZE_T);
 using Close = NTSTATUS(NTAPI *)(HANDLE);
 using SetSecurity = NTSTATUS(NTAPI *)(HANDLE, SECURITY_INFORMATION, PSECURITY_DESCRIPTOR);
 using QueryToken = NTSTATUS(NTAPI *)(HANDLE, TOKEN_INFORMATION_CLASS, void *, ULONG, PULONG);
+using OpenToken = NTSTATUS(NTAPI *)(HANDLE, ACCESS_MASK, PHANDLE);
 using SetToken = NTSTATUS(NTAPI *)(HANDLE, TOKEN_INFORMATION_CLASS, void *, ULONG);
 using CreateUserProcess = NTSTATUS(NTAPI *)(PHANDLE, PHANDLE, ACCESS_MASK, ACCESS_MASK,
                                             POBJECT_ATTRIBUTES, POBJECT_ATTRIBUTES, ULONG, ULONG,
@@ -78,6 +80,7 @@ struct NativeApi {
     Close close;
     SetSecurity set_security;
     QueryToken query_token;
+    OpenToken open_token;
     SetToken set_token;
     CreateUserProcess create_process;
     CreateDirectory create_directory;

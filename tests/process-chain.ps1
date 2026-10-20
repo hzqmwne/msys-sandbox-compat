@@ -1,11 +1,13 @@
 param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
       [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'),
-      [ValidateSet('Psec','WriteRestricted','FullRestricted')][string]$Environment='Psec')
+      [ValidateSet('Psec','WriteRestricted','FullRestricted')][string]$Environment='Psec',
+      [switch]$NativeRelay)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 $root = Split-Path $PSScriptRoot -Parent
 $restricted = $Environment -ne 'Psec'
 $suite = if ($restricted) { 'restricted-' + $Environment.ToLowerInvariant() } else { 'process-chain' }
+if ($NativeRelay) { $suite = 'relay-' + $suite }
 $state = Join-Path $root ('unused\runtime\' + $suite)
 $evidence = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory) }
             else { Join-Path $root ('unused\evidence\current\' + $suite) }
@@ -63,25 +65,68 @@ try {
             throw 'Ordinary MSYS coexistence fixture did not start'
         }
     }
-    foreach ($depth in @(0,2)) {
-        $inner = Shell-Command (@($bridge.Replace('\','/'),$depth,$compat.Replace('\','/'),
-            '--runtime',$runtime.Replace('\','/'),$bash.Replace('\','/'),'--noprofile','--norc','-c',$payload))
+    $cases=@(@{Depth=0;Root='native';Explicit=$false},@{Depth=2;Root='native';Explicit=$false})
+    if ($NativeRelay) {
+        $cases+=@(@{Depth=2;Root='msys';Explicit=$false},@{Depth=0;Root='native';Explicit=$true})
+        $cases+=@(@{Depth=2;Root='native';Explicit=$false;Suspended=$true})
+    }
+    foreach ($case in $cases) {
+        $depth=$case.Depth
+        $nativeArgs=@($bridge.Replace('\','/'))
+        if ($NativeRelay) {$nativeArgs+='--relay'}
+        if ($case.Suspended) {$nativeArgs+='--suspended'}
+        $nativeArgs+=@($depth)
+        if (!$NativeRelay -or $case.Explicit) {
+            $nativeArgs+=@($compat.Replace('\','/'))
+            if ($NativeRelay) {$nativeArgs+='--trace'}
+            $nativeArgs+=@('--runtime',$runtime.Replace('\','/'))
+        }
+        $inner = Shell-Command ($nativeArgs+@($bash.Replace('\','/'),'--noprofile','--norc','-c',$payload))
         $outer = 'export MSYS2_ARG_CONV_EXCL="*"; ' + $inner
         # The first native bridge records the original runner ACL, before MSYS has run.
-        $arguments = $prefix + @($bridge,0,$compat,'--runtime',$runtime,$bash,'--noprofile','--norc','-c',$outer)
+        $expectedBridges=$depth+2
+        $arguments = if ($NativeRelay) {
+            $target=@($compat,'--native-relay','--runtime',$runtime)
+            if ($case.Root -eq 'native') {$target+=@($bridge,'--relay',0)}
+            else {$expectedBridges--}
+            $prefix+$target+@($bash,'--noprofile','--norc','-c',$outer)
+        } else {
+            $prefix+@($bridge,0,$compat,'--runtime',$runtime,$bash,'--noprofile','--norc','-c',$outer)
+        }
         $info = New-TestProcessInfo $launcher $arguments $state
         $result = Invoke-TestProcess $info 60000
         $name = "native-depth-$($depth+1)"
+        if ($NativeRelay) {$name="$($case.Root)-depth-$($depth+1)-explicit-$($case.Explicit)"}
+        if ($case.Suspended) {$name+='-suspended'}
         Save-TestOutput $result $evidence $name
         $acls = @([regex]::Matches($result.Error,'\[bridge\] clean=1 depth=\d+ default=([^\r\n]+)') |
             ForEach-Object { $_.Groups[1].Value })
         $passed = $result.ExitCode -eq 37 -and $result.Output.Contains('CHAIN-WORKLOAD-PASS') -and
             $result.Output.Contains('fork from a secondary POSIX thread works') -and $result.Output -notmatch '(?m)^not ok' -and
-            $acls.Count -eq ($depth+2) -and @($acls | Select-Object -Unique).Count -eq 1 -and
+            $acls.Count -eq $expectedBridges -and @($acls | Select-Object -Unique).Count -eq 1 -and
             $result.Error -notmatch 'fatal error|fork: retry|child_copy:|\[fatal\]'
         if ($restricted) { $passed = $passed -and $result.Output.Contains('RESTRICTED-TOKEN-AND-ACL-PASS') }
+        if ($NativeRelay) {
+            $passed=$passed -and [regex]::Matches($result.Error,'\[bridge-mode\] relay=1 hooks=1').Count -eq $expectedBridges
+        }
+        if ($case.Suspended) {
+            $passed=$passed -and [regex]::Matches($result.Error,'suspended-preserved=1').Count -eq ($depth+1)
+        }
+        if ($NativeRelay -and $case.Explicit) {
+            $passed=$passed -and $result.Error.Contains('[agent] injected MSYS child')
+        }
         $results.Add([pscustomobject]@{Name=$name;Passed=$passed;ExitCode=$result.ExitCode;NativeBridges=$acls.Count})
         Write-Output "$name pass=$passed exit=$($result.ExitCode) bridges=$($acls.Count)"
+    }
+    if ($NativeRelay) {
+        $arguments=$prefix+@($compat,'--trace','--native-relay','--runtime',$runtime,$bridge,'--relay',
+            '--narrow-default',0,$bash,'--noprofile','--norc','-c','echo UNEXPECTED-EXECUTION')
+        $result=Invoke-TestProcess (New-TestProcessInfo $launcher $arguments $state) 30000
+        Save-TestOutput $result $evidence 'narrowed-policy'
+        $passed=$result.ExitCode -eq 0 -and $result.Output.Contains('RELAY-NARROWED-POLICY-REJECTED') -and
+            !$result.Output.Contains('UNEXPECTED-EXECUTION')
+        $results.Add([pscustomobject]@{Name='narrowed-policy';Passed=$passed;ExitCode=$result.ExitCode;NativeBridges=1})
+        Write-Output "narrowed-policy pass=$passed exit=$($result.ExitCode)"
     }
     if ($restricted -and $ordinary.HasExited) { throw 'Ordinary MSYS exited during the restricted workload' }
     $results | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'results.json') -Encoding utf8NoBOM

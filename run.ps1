@@ -4,11 +4,13 @@ param(
     [string[]]$CommandArguments = @('--noprofile', '--norc', '-c', 'echo PSEC-ready; (echo fork-ok); /usr/bin/uname -a'),
     [switch]$Raw,
     [switch]$Trace,
+    [switch]$NativeRelay,
     [switch]$ConPty,
     [string]$ConPtyScript = '',
     [string]$TerminalSize = '100x30'
 )
 $ErrorActionPreference = 'Stop'
+if ($Raw -and $NativeRelay) { throw '-NativeRelay requires the compatibility launcher' }
 if (!$Program) { $Program = Join-Path $GitRoot 'usr\bin\bash.exe' }
 if (($ConPty -or $ConPtyScript) -and !$PSBoundParameters.ContainsKey('CommandArguments')) {
     $CommandArguments = @('--noprofile','--norc','-i')
@@ -28,6 +30,7 @@ try {
     $launchArgs=@($policyPath)
     if (!$Raw) {
         $launchArgs += (Join-Path $PSScriptRoot 'build\bin\msys-compat.exe')
+        if ($NativeRelay) { $launchArgs += '--native-relay' }
         $launchArgs += @('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
         if ($Trace) { $launchArgs += '--trace' }
         if ($ConPtyScript) { $launchArgs += @('--conpty-script',[IO.Path]::GetFullPath($ConPtyScript)) }

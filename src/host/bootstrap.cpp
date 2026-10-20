@@ -85,7 +85,10 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
                 state.self_base + thunk_rva + index * 32};
         entry = reinterpret_cast<std::remove_reference_t<decltype(entry)>>(hook.trampoline);
     };
-    check_nt(prepare_process(originals, process, thread, image, state), "prepare MSYS root");
+    if (state.native_relay)
+        check_nt(check_child_context(originals, process, state), "root relay security context");
+    if (image.related)
+        check_nt(prepare_process(originals, process, thread, image, state), "prepare MSYS root");
     bind(HookId::directory, "hook_directory", api.create_directory);
     bind(HookId::section, "hook_section", api.create_section);
     bind(HookId::mutant, "hook_mutant", api.create_mutant);
@@ -99,7 +102,7 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
     check_nt(originals.write(process, remote, mapped.data(), mapped.size(), nullptr),
              "write agent");
     check_nt(protect_agent(originals, process, mapped.data(), state), "agent section protection");
-    check_nt(install_hooks(originals, process, state), "install root inline hooks");
+    check_nt(install_hooks(originals, process, state, image.related), "install root inline hooks");
     state.api = originals;
 }
 } // namespace msys_compat

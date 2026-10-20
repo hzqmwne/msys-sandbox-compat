@@ -1,7 +1,7 @@
 # ADR-0003：只读安全上下文查询与 MSYS token 前置检查
 
 Status: Accepted
-Partially superseded by: ADR-0004，原生桥接后的 MSYS 冷启动已有成功兼容处理；只读上下文查询和恢复前检查继续保留。
+Partially superseded by: ADR-0004，原生桥接后的 MSYS 冷启动已有成功兼容处理；ADR-0006 增加显式原生 relay。只读上下文查询和恢复前检查继续保留。
 Date: 2026-10-20
 Related: ADR-0001
 

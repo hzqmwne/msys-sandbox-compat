@@ -63,6 +63,7 @@ struct ProcessState {
 
 struct AgentState {
     uint32_t trace;
+    uint32_t native_relay;
     uintptr_t self_base;
     uint32_t self_size;
     NativeApi api;

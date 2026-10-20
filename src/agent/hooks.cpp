@@ -305,6 +305,17 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
              ULONG process_flags, ULONG thread_flags, PRTL_USER_PROCESS_PARAMETERS parameters,
              void *create_info, void *attributes) {
     auto &state = g_agent_state;
+    register_unwind();
+    if (state.native_relay) {
+        auto permitted = check_object_policy(state.api, reinterpret_cast<HANDLE>(-4), state);
+        if (permitted < 0) {
+            if (process)
+                *process = nullptr;
+            if (thread)
+                *thread = nullptr;
+            return permitted;
+        }
+    }
     auto status = state.api.create_process(
         process, thread, process_access, thread_access, process_attributes, thread_attributes,
         process_flags, thread_flags | thread_create_suspended, parameters, create_info, attributes);
@@ -315,15 +326,16 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
     auto prepared =
         image ? identify_process(state.api, *process, state.runtime, *image) : status_unsuccessful;
     if (prepared < 0) {
-        if (image && image->related)
+        if (state.native_relay || (image && image->related))
             goto failed;
         agent_log(state, "child classification unavailable; left uninstrumented",
                   static_cast<ULONG>(prepared));
-    } else if (image->related) {
+    } else if (image->related || state.native_relay) {
         prepared = clone_agent(*process, *thread, *image, state);
         if (prepared < 0)
             goto failed;
-        agent_log(state, "injected child", reinterpret_cast<ULONG_PTR>(*process));
+        agent_log(state, image->related ? "injected MSYS child" : "injected native relay",
+                  reinterpret_cast<ULONG_PTR>(*process));
     } else {
         agent_log(state, "native child left uninstrumented", reinterpret_cast<ULONG_PTR>(*process));
     }

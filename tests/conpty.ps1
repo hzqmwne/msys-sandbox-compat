@@ -1,12 +1,14 @@
 param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
       [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'),
-      [ValidateSet('Psec','WriteRestricted','FullRestricted','Existing')][string]$Environment='Psec')
+      [ValidateSet('Psec','WriteRestricted','FullRestricted','Existing')][string]$Environment='Psec',
+      [switch]$NativeRelay)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
 $root=Split-Path $PSScriptRoot -Parent
 $restricted=$Environment -in @('WriteRestricted','FullRestricted')
 $existing=$Environment -eq 'Existing'
 $suite=if($restricted -or $existing){'conpty-'+$Environment.ToLowerInvariant()}else{'conpty'}
+if($NativeRelay){$suite='relay-'+$suite}
 $state=Join-Path $root $(if($restricted -or $existing){'unused\runtime\'+$suite}else{'unused\runtime'})
 $report=Join-Path $root ('unused\evidence\current\'+$suite)
 if($EvidenceDirectory){$report=[IO.Path]::GetFullPath($EvidenceDirectory)}
@@ -59,6 +61,7 @@ public sealed class TerminalTest : IDisposable {
 "@
 [string[]]$prefix=if($existing){@()}elseif($restricted){@($(if($Environment -eq 'WriteRestricted'){'write'}else{'full'}),$state)}else{@($policy)}
 $targetArguments=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),'--conpty','--conpty-size','120x40',(Join-Path $GitRoot 'usr\bin\bash.exe'),'--noprofile','--norc','-i')
+if($NativeRelay){$targetArguments=@('--native-relay')+$targetArguments}
 $arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirectory 'msys-compat.exe'))+$targetArguments}
 $launcher=Join-Path $sourceBinaries $(if($existing){'msys-compat.exe'}elseif($restricted){'restricted-run.exe'}else{'psec-run.exe'})
 $info=New-TestProcessInfo $launcher $arguments $state
@@ -117,7 +120,7 @@ try {
 } finally {
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stdout.txt'),$t.Text)
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stderr.txt'),$t.Error.ToString())
-    @{Environment=$Environment;Passed=$passed;ExitCode=$exitCode} | ConvertTo-Json |
+    @{Environment=$Environment;NativeRelay=[bool]$NativeRelay;Passed=$passed;ExitCode=$exitCode} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $report 'results.json') -Encoding utf8NoBOM
     $t.Dispose()
 }

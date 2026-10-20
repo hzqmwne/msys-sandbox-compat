@@ -15,7 +15,7 @@ endforeach()
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 include_directories(include)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/W4> $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
-add_library(msys-compat-agent SHARED src/agent/hooks.cpp src/agent/injector.cpp src/agent/identify.cpp src/agent/memory.cpp src/agent/stack_probe.asm)
+add_library(msys-compat-agent SHARED src/agent/hooks.cpp src/agent/injector.cpp src/agent/context.cpp src/agent/identify.cpp src/agent/memory.cpp src/agent/stack_probe.asm)
 set_target_properties(msys-compat-agent PROPERTIES OUTPUT_NAME msys-compat
   ARCHIVE_OUTPUT_NAME msys-compat-agent PDB_NAME msys-compat-agent)
 target_compile_options(msys-compat-agent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/GS-> $<$<COMPILE_LANGUAGE:CXX>:/GR-> $<$<COMPILE_LANGUAGE:CXX>:/Zl> $<$<COMPILE_LANGUAGE:CXX>:/Oi-> $<$<COMPILE_LANGUAGE:CXX>:/EHs-c->)
@@ -23,7 +23,7 @@ target_link_options(msys-compat-agent PRIVATE /NODEFAULTLIB /NOENTRY /INCREMENTA
 # Keep the normal probe threshold: do not call __chkstk in every small hook
 # frame on MSYS-managed secondary-thread stacks.
 target_compile_options(msys-compat-agent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Gs4096>)
-add_executable(msys-compat src/host/main.cpp src/host/platform.cpp src/host/runtime.cpp src/host/bootstrap.cpp src/agent/injector.cpp src/agent/identify.cpp)
+add_executable(msys-compat src/host/main.cpp src/host/platform.cpp src/host/runtime.cpp src/host/bootstrap.cpp src/agent/injector.cpp src/agent/context.cpp src/agent/identify.cpp)
 target_link_libraries(msys-compat PRIVATE advapi32 userenv)
 add_dependencies(msys-compat msys-compat-agent)
 add_executable(psec-run src/psec/main.cpp)
