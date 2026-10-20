@@ -1,0 +1,4 @@
+LIBRARY msys-2.0.dll
+EXPORTS
+    getpid
+    write

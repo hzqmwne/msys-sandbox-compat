@@ -1,0 +1,1 @@
+PSEC denial canary. A compatible MSYS runtime must not read this file.

@@ -1,0 +1,44 @@
+param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
+      [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'))
+$ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'common.ps1')
+$root=Split-Path $PSScriptRoot -Parent
+$state=Join-Path $root 'unused\runtime'
+$evidence=Join-Path $root 'unused\evidence\current\scope'
+if($EvidenceDirectory){$evidence=[IO.Path]::GetFullPath($EvidenceDirectory)}
+$fixtures=Join-Path $BinaryDirectory 'fixtures'
+New-Item -ItemType Directory -Force $fixtures,$evidence,$state,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
+$policy=Join-Path $state 'scope-policy.json'
+@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+$launcher=Join-Path $BinaryDirectory 'psec-run.exe'
+$compat=Join-Path $BinaryDirectory 'msys-compat.exe'
+$probe=Join-Path $BinaryDirectory 'native-probe.exe'
+$bash=Join-Path $GitRoot 'usr\bin\bash.exe'
+Copy-Item -LiteralPath $probe -Destination (Join-Path $fixtures 'bash.exe')
+function Run([string]$Name,[string[]]$Arguments,[string]$Report='') {
+    $info=New-TestProcessInfo $launcher @() $state
+    $info.ArgumentList.Add($policy)
+    for($i=0;$i -lt $Arguments.Count;$i++){
+        $info.ArgumentList.Add($Arguments[$i])
+        if($i -eq 0 -and $Arguments[$i] -eq $compat){
+            $info.ArgumentList.Add('--runtime');$info.ArgumentList.Add((Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
+        }
+    }
+    $result=Invoke-TestProcess $info
+    $err=$result.Error
+    Save-TestOutput $result $evidence $Name
+    if($result.ExitCode -ne 0){throw "$Name exit=$($result.ExitCode): $err"}
+    if($Report -and (Get-Content -Raw -LiteralPath $Report) -notmatch 'clean=1'){throw "$Name not clean"}
+    Write-Output "$Name PASS"
+}
+$report=Join-Path $evidence 'native-root.report.txt'
+Run 'native-root' @($compat,'--trace',$probe,$report) $report
+$report=Join-Path $evidence 'renamed-native.report.txt'
+Run 'renamed-native' @($compat,'--trace',(Join-Path $fixtures 'bash.exe'),$report) $report
+Run 'runtime-import-name' @($compat,'--trace',(Join-Path $BinaryDirectory 'import-name\import-name-client.exe'))
+$report=Join-Path $evidence 'native-child.report.txt'
+$command='"'+$probe.Replace('\','/')+'" --inspect-parent "'+$report.Replace('\','/')+'"; s=$?; echo PROBE-EXIT:$s; exit "$s"'
+Run 'native-child-parent-check' @($compat,'--trace',$bash,'--noprofile','--norc','-c',$command) $report
+Run 'native-root-explicit-reentry' @($compat,'--trace',$probe,'--reenter',$compat,$bash)
+Run 'token-default-dacl' @((Join-Path $BinaryDirectory 'token-dacl-probe.exe'))
+Write-Output 'SCOPE-ALL-PASS'
