@@ -1,6 +1,7 @@
 #include "msys_sandbox_compat/agent.h"
 #include "msys_sandbox_compat/pe_view.h"
 #include "msys_sandbox_compat/native_buffer.h"
+#include "msys_sandbox_compat/object_security.h"
 #include <intrin.h>
 #include <string.h>
 #include <stdlib.h>
@@ -45,6 +46,8 @@ struct ObjectCall {
     UNICODE_STRING name{};
     PVOID scratch = nullptr;
     bool matched = false;
+    SecurityAdaptation security{g_agent_state.api};
+    NTSTATUS status = status_success;
 
     bool storage() {
         SIZE_T bytes = 4096;
@@ -86,9 +89,9 @@ struct ObjectCall {
         } else if (original->RootDirectory && count && value[0] != L'\\') {
             if (!storage())
                 return;
-            auto status =
+            auto queried =
                 state.api.query_object(original->RootDirectory, 1, scratch, 4096, nullptr);
-            if (status < 0)
+            if (queried < 0)
                 return;
             auto root = static_cast<UNICODE_STRING *>(scratch);
             size_t chars = root->Length / 2;
@@ -145,7 +148,9 @@ struct ObjectCall {
     POBJECT_ATTRIBUTES get(POBJECT_ATTRIBUTES original) {
         if (!matched)
             return original;
-        attributes.SecurityDescriptor = g_agent_state.descriptor;
+        status = security.descriptor(attributes.SecurityDescriptor, g_agent_state);
+        if (security.adapted_descriptor())
+            attributes.SecurityDescriptor = security.adapted_descriptor();
         return &attributes;
     }
     ~ObjectCall() {
@@ -191,7 +196,9 @@ NTSTATUS inspect_section(HANDLE section, ImageRecord &image, bool &related) {
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_directory(PHANDLE handle, ACCESS_MASK access,
                                                                POBJECT_ATTRIBUTES attributes) {
     ObjectCall call(attributes, ObjectKind::directory);
-    return g_agent_state.api.create_directory(handle, access, call.get(attributes));
+    auto adjusted = call.get(attributes);
+    return call.status < 0 ? call.status
+                           : g_agent_state.api.create_directory(handle, access, adjusted);
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_section(PHANDLE handle, ACCESS_MASK access,
@@ -199,22 +206,28 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_section(PHANDLE handle, ACC
                                                              PLARGE_INTEGER size, ULONG protection,
                                                              ULONG allocation, HANDLE file) {
     ObjectCall call(attributes);
-    return g_agent_state.api.create_section(handle, access, call.get(attributes), size, protection,
-                                            allocation, file);
+    auto adjusted = call.get(attributes);
+    return call.status < 0 ? call.status
+                           : g_agent_state.api.create_section(handle, access, adjusted, size,
+                                                              protection, allocation, file);
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_mutant(PHANDLE handle, ACCESS_MASK access,
                                                             POBJECT_ATTRIBUTES attributes,
                                                             BOOLEAN owner) {
     ObjectCall call(attributes);
-    return g_agent_state.api.create_mutant(handle, access, call.get(attributes), owner);
+    auto adjusted = call.get(attributes);
+    return call.status < 0 ? call.status
+                           : g_agent_state.api.create_mutant(handle, access, adjusted, owner);
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_link(PHANDLE handle, ACCESS_MASK access,
                                                           POBJECT_ATTRIBUTES attributes,
                                                           PUNICODE_STRING target) {
     ObjectCall call(attributes);
-    return g_agent_state.api.create_link(handle, access, call.get(attributes), target);
+    auto adjusted = call.get(attributes);
+    return call.status < 0 ? call.status
+                           : g_agent_state.api.create_link(handle, access, adjusted, target);
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI
@@ -222,9 +235,12 @@ hook_pipe(PHANDLE handle, ULONG access, POBJECT_ATTRIBUTES attributes, PIO_STATU
           ULONG share, ULONG disposition, ULONG options, ULONG type, ULONG read_mode,
           ULONG completion, ULONG maximum, ULONG inbound, ULONG outbound, PLARGE_INTEGER timeout) {
     ObjectCall call(attributes, ObjectKind::pipe);
-    return g_agent_state.api.create_pipe(handle, access, call.get(attributes), io, share,
-                                         disposition, options, type, read_mode, completion, maximum,
-                                         inbound, outbound, timeout);
+    auto adjusted = call.get(attributes);
+    return call.status < 0
+               ? call.status
+               : g_agent_state.api.create_pipe(handle, access, adjusted, io, share, disposition,
+                                               options, type, read_mode, completion, maximum,
+                                               inbound, outbound, timeout);
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE process,
@@ -278,27 +294,30 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
                                                                TOKEN_INFORMATION_CLASS kind,
                                                                void *information, ULONG bytes) {
     auto &state = g_agent_state;
-    if (kind == TokenDefaultDacl && information && bytes == sizeof(TOKEN_DEFAULT_DACL)) {
-        TOKEN_STATISTICS target{}, primary{};
-        ULONG returned = 0;
-        if (state.api.query_token(token, TokenStatistics, &target, sizeof(target), &returned) >=
-                0 &&
-            state.api.query_token(reinterpret_cast<HANDLE>(-4), TokenStatistics, &primary,
-                                  sizeof(primary), &returned) >= 0 &&
-            target.TokenId.LowPart == primary.TokenId.LowPart &&
-            target.TokenId.HighPart == primary.TokenId.HighPart) {
-            // MSYS replaces the default ACL during cold initialization. Keep
-            // the runner's original policy so native descendants retain IPC
-            // and token reopen rights in this same sandbox.
-            TOKEN_DEFAULT_DACL preserved{state.token_default_dacl_bytes
-                                             ? reinterpret_cast<ACL *>(state.token_default_dacl)
-                                             : nullptr};
-            return state.api.set_token(token, kind, &preserved, sizeof(preserved));
-        }
-    }
-    return state.api.set_token(token, kind, information, bytes);
+    if (kind != TokenDefaultDacl || !information || bytes != sizeof(TOKEN_DEFAULT_DACL))
+        return state.api.set_token(token, kind, information, bytes);
+    PolicyGuard guard(state);
+    HANDLE primary = nullptr;
+    if (state.api.open_token(current_process(), TOKEN_QUERY, &primary) < 0)
+        return state.api.set_token(token, kind, information, bytes);
+    auto same = state.api.compare_objects(token, primary);
+    state.api.close(primary);
+    if (same != 0)
+        return state.api.set_token(token, kind, information, bytes);
+    TOKEN_DEFAULT_DACL input{};
+    if (state.api.read(current_process(), information, &input, sizeof(input), nullptr) < 0)
+        return state.api.set_token(token, kind, information, bytes);
+    SecurityAdaptation adapted(state.api);
+    auto status = adapted.acl(input.DefaultDacl, state);
+    if (status < 0)
+        return status;
+    TOKEN_DEFAULT_DACL replacement{adapted.adapted_acl()};
+    status =
+        state.api.set_token(token, kind, adapted.adapted_acl() ? &replacement : information, bytes);
+    if (status >= 0)
+        remember_object_policy(state);
+    return status;
 }
-
 extern "C" __declspec(dllexport) NTSTATUS NTAPI
 hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS_MASK thread_access,
              POBJECT_ATTRIBUTES process_attributes, POBJECT_ATTRIBUTES thread_attributes,
@@ -306,6 +325,7 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
              void *create_info, void *attributes) {
     auto &state = g_agent_state;
     register_unwind();
+    PolicyGuard guard(state);
     if (state.native_relay) {
         auto permitted = check_object_policy(state.api, reinterpret_cast<HANDLE>(-4), state);
         if (permitted < 0) {

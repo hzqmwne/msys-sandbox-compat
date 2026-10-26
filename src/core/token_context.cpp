@@ -81,11 +81,14 @@ bool same_token_field(TOKEN_INFORMATION_CLASS kind, void *left, void *right) {
 } // namespace
 
 NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state) {
-    NativeBuffer storage(api, 8192);
+    if (!state.object_policy_valid)
+        return status_access_denied;
+    constexpr ULONG capacity = sizeof(state.token_default_dacl) + sizeof(TOKEN_DEFAULT_DACL);
+    NativeBuffer storage(api, capacity);
     if (!storage)
         return status_unsuccessful;
     ULONG returned = 0;
-    auto status = api.query_token(token, TokenDefaultDacl, storage.as<BYTE>(), 8192, &returned);
+    auto status = api.query_token(token, TokenDefaultDacl, storage.as<BYTE>(), capacity, &returned);
     if (status >= 0 && !same_default(storage.as<TOKEN_DEFAULT_DACL>()->DefaultDacl, state)) {
         agent_log(state, "relay default object policy differs");
         return status_access_denied;
@@ -95,9 +98,10 @@ NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentStat
 
 NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state) {
     // A relay must not carry the old sandbox's namespace/ACL into a different
-    // token context, or restore a broader default DACL after an application
-    // deliberately narrows it. Reject this boundary instead of adjusting it.
-    NativeBuffer storage(api, 16384);
+    // token context. This checks the inherited, most recently observed default
+    // policy; unobserved native changes are rejected before creation as well.
+    constexpr ULONG capacity = sizeof(state.token_default_dacl) + sizeof(TOKEN_DEFAULT_DACL);
+    NativeBuffer storage(api, 2 * capacity);
     if (!storage)
         return status_unsuccessful;
     HANDLE child = nullptr;
@@ -105,16 +109,16 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
     if (status < 0)
         return status;
     void *left = storage.as<BYTE>();
-    void *right = storage.as<BYTE>() + 8192;
+    void *right = storage.as<BYTE>() + capacity;
     for (auto kind : {TokenUser, TokenGroups, TokenRestrictedSids, TokenPrivileges, TokenOwner,
                       TokenPrimaryGroup, TokenIntegrityLevel, TokenAppContainerSid,
                       TokenCapabilities, TokenMandatoryPolicy, TokenSessionId, TokenUIAccess,
                       TokenSandBoxInert, TokenStatistics, TokenAccessInformation}) {
         ULONG returned = 0;
-        status = api.query_token(reinterpret_cast<HANDLE>(-4), kind, left, 8192, &returned);
+        status = api.query_token(reinterpret_cast<HANDLE>(-4), kind, left, capacity, &returned);
         if (status < 0)
             break;
-        status = api.query_token(child, kind, right, 8192, &returned);
+        status = api.query_token(child, kind, right, capacity, &returned);
         if (status < 0)
             break;
         if (!same_token_field(kind, left, right)) {
@@ -125,7 +129,7 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
     }
     if (status >= 0) {
         ULONG returned = 0;
-        status = api.query_token(child, TokenDefaultDacl, right, 8192, &returned);
+        status = api.query_token(child, TokenDefaultDacl, right, capacity, &returned);
         if (status >= 0) {
             auto acl = static_cast<TOKEN_DEFAULT_DACL *>(right)->DefaultDacl;
             if (!same_default(acl, state)) {

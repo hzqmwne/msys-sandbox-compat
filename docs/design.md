@@ -6,7 +6,13 @@
 
 兼容层不修改任何磁盘文件或目录 ACL，不为兼容而放宽原 restricted token 的限制。文件读取、执行、写入及其他资源访问继续受原隔离策略约束；遇到拒绝时保留失败，不通过更大权限的 token、非受限代理或预开句柄绕过。兼容产物应位于原策略已允许的位置。
 
-下文的对象描述符处理针对 MSYS IPC 与已识别 MSYS 的进程/线程内核对象；非 AppContainer 路径沿用启动器原默认 DACL，当前主 token 的默认 DACL 拦截保留启动时策略，不改其身份或限制。内核对象处理不构成修改磁盘 ACL 或扩大原资源授权的许可。测试夹具单独建立的文件 ACL 只定义该夹具的初始策略。
+下文的对象描述符处理针对 MSYS IPC 与已识别 MSYS 的进程/线程内核对象；显式 ACL 与当前主 token 默认 DACL 均基于当次输入补充受限主体，不改其身份或限制。内核对象处理不构成修改磁盘 ACL 或扩大原资源授权的许可。测试夹具单独建立的文件 ACL 只定义该夹具的初始策略。
+
+## 适配方向与依赖
+
+兼容层参照合理的受限环境版运行时行为，分别处理对象授权、fork 布局、创建传播和终端会话。残余影响、hook/进程数量及不改默认值均是取舍维度，由维护者结合功能和维护成本决定。保留 ntdll hook 通用接入，不限定 MSYS 模块/IAT/内部 RVA；当前识别和注入范围不因此扩大。
+
+最终仍交付兼容 EXE/DLL。宿主静态链接 CRT；早期 agent 无 CRT、普通导入、TLS、全局构造或 DllMain 依赖。评估第三方 hook 库，以最终产物及初始化条件为准，允许实现复杂度换取确定的早期运行条件。
 
 ## 进程创建与识别
 
@@ -34,13 +40,14 @@
 | `NtMapViewOfSection` | 按需识别并固定相关映像地址 |
 | `NtAllocateVirtualMemory` | 修正 MSYS 私有堆地址及 fork 提交范围 |
 | `NtCreateUserProcess` | 子进程初始挂起、识别、准备和传播 |
-| `NtSetInformationToken` | MSYS 重设当前主 token 默认 DACL 时保留隔离启动器配置的初始 ACL |
+| `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体并更新传播基准 |
 
-对象路径重定向限于 MSYS 使用的对象，文件安装目录 ACL 不被修改。兼容层保留隔离启动器传入的默认对象 ACL，避免 MSYS 冷启动将 package/logon 等授权替换为普通用户模板；仅对当前主 token 的 `TokenDefaultDacl` 设置调用生效，其他 token 与信息类原样传递。调用仍由原 Native API 执行，不改变 token 身份、权限、受限 SID 或文件策略。取舍见 [ADR-0004](decisions/0004-preserve-sandbox-object-policy.md)。显式传入的对象描述符仍需相应创建 hook 处理，保留默认 ACL 不替代它们。
+对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。已识别进程/线程查询实际 DACL 后使用同一转换器。
 
+默认设置同样使用当次 ACL，不恢复启动快照。仅匹配当前主 token 的 TokenDefaultDacl；NtCompareObjects 不要求输入句柄有查询权限，最终由原 NtSetInformationToken 检查设置权限。默认值对后续采用默认 SD 的对象有连带影响，作为已接受的兜底取舍；不修改已有磁盘/注册表 ACL。显式对象仍需创建路径适配。决定见 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
 宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄。PSEC 对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化。查询取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
 
-非 AppContainer 受限令牌没有 package 私有命名空间。宿主在当前 session 的 `BaseNamedObjects` 下创建每次启动的目录，沿用启动器默认 DACL 作为 MSYS 对象描述符，不遍历 restricting SID 并全部授权。目录句柄保持到进程树退出；内部环境变量 `MSYS_SANDBOX_COMPAT_SESSION` 携带数字启动标记，使原生中间程序后的显式兼容入口复用同一目录。普通 MSYS 和其他兼容会话的对象不会占用该目录。PSEC 路径不使用此标记。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
+非 AppContainer 受限令牌没有 package 私有命名空间。宿主在当前 session 的 `BaseNamedObjects` 下创建每次启动的目录，目录初始策略沿用启动器默认 DACL，实际对象按当次输入适配，不遍历 restricting SID 并全部授权。目录句柄保持到进程树退出；内部环境变量 `MSYS_SANDBOX_COMPAT_SESSION` 携带数字启动标记，使原生中间程序后的显式兼容入口复用同一目录。普通 MSYS 和其他兼容会话的对象不会占用该目录。PSEC 路径不使用此标记。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
 
 ## fork 与进程链
 
@@ -48,7 +55,7 @@ MSYS 自身仍负责 fork 的复制、同步和恢复语义。兼容层解决环
 
 默认模式的原生子进程保持原样，其后续创建操作不会经过 MSYS 父进程的 hook。Job 管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
 
-MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时保留，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。宿主仍在 MSYS 根进程恢复前检查真实 token 查询权限；从未受兼容处理的祖先继承了不兼容 token 时明确拒绝，这个错误检查不是成功验收。
+MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时基于当次请求补充受限主体，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。宿主仍在 MSYS 根进程恢复前检查真实 token 查询权限；从未受兼容处理的祖先继承了不兼容 token 时明确拒绝，这个错误检查不是成功验收。
 
 ## 显式原生 relay
 
@@ -56,7 +63,7 @@ MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标
 
 原生创建 hook 在恢复前识别并复制相应模式，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用原运行上下文；其创建调用已准备子进程，宿主不重复识别、复制完整状态或再次注入。首次映射在独立的 agent 状态副本中绑定 trampoline，不临时改写宿主 API。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代，省略嵌套启动器选项不会关闭已有 relay 或替换原上下文。
 
-传播前只读核对当前默认对象策略与启动快照；子进程创建后只读比较父子 token 的用户、组及禁用属性、restricting SID、权限、owner/primary group、完整性、package/capabilities、mandatory/UI/session/sandbox 状态、认证身份和访问 flags，并核对子进程默认 DACL。单项查询缓冲上限为 8 KiB。策略改变、上下文不一致或查询失败时拒绝传播，不改 token 或补授授权。已创建的目标在恢复前回收；默认对象策略已改变的情况在创建前拒绝。该模式不承诺跨凭据或其他安全上下文自动传播。决定见 [ADR-0006](decisions/0006-opt-in-native-relay.md)。
+传播前只读核对当前默认对象策略与最近成功设置后的观测基准；子进程创建后只读比较父子 token 的用户、组及禁用属性、restricting SID、权限、owner/primary group、完整性、package/capabilities、mandatory/UI/session/sandbox 状态、认证身份和访问 flags，并核对子进程默认 DACL。默认策略基准可容纳 8 KiB ACL；完整 agent 的设置 hook 在成功后更新它，设置与创建/克隆在进程内串行化。原生 relay 未被观察的策略改变、上下文不一致或查询失败时拒绝传播，不改 token 或补授授权。已创建的目标在恢复前回收；未被设置 hook 观察的默认对象策略变化在创建前拒绝。该模式不承诺跨凭据或其他安全上下文自动传播。决定见 [ADR-0006](decisions/0006-opt-in-native-relay.md) 及 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
 
 ## ConPTY
 

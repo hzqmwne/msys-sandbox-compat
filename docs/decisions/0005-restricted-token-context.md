@@ -1,6 +1,7 @@
 # ADR-0005：受限令牌使用启动器对象 ACL 与每次启动的 MSYS 命名空间
 
 Status: Accepted
+Partially superseded by: ADR-0008；对象 ACL 改为基于当次输入适配，命名空间和受限令牌路径继续保留。
 Date: 2026-10-20
 Extends: ADR-0001、ADR-0003、ADR-0004；增加非 AppContainer 受限令牌路径，保留 PSEC 处理和严格原生边界。
 

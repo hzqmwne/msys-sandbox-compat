@@ -1,6 +1,7 @@
 # ADR-0006：显式原生创建 relay 覆盖 MSYS 自动回入
 
 Status: Accepted
+Partially superseded by: ADR-0008；默认 DACL 比较基准随已观察设置更新，relay 选择与上下文边界继续保留。
 Date: 2026-10-20
 Partially supersedes: ADR-0001 的所有模式均不注入原生进程的约定；默认行为仍保留。
 Related: ADR-0004、ADR-0005

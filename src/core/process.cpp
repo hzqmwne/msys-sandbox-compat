@@ -1,6 +1,7 @@
 #include "msys_sandbox_compat/agent.h"
 #include "msys_sandbox_compat/pe_view.h"
 #include "msys_sandbox_compat/native_buffer.h"
+#include "msys_sandbox_compat/object_security.h"
 #include <string.h>
 #include <intrin.h>
 
@@ -65,10 +66,10 @@ NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
                          const ProcessImage &image, AgentState &state) {
     // Set only this positively identified child's object ACLs. In particular,
     // do not replace NtCreateUserProcess's attributes for every native child.
-    auto status = api.set_security(process, DACL_SECURITY_INFORMATION, state.descriptor);
+    auto status = adapt_kernel_object(api, process, state);
     if (status < 0)
         return status;
-    status = api.set_security(thread, DACL_SECURITY_INFORMATION, state.descriptor);
+    status = adapt_kernel_object(api, thread, state);
     if (status < 0)
         return status;
 

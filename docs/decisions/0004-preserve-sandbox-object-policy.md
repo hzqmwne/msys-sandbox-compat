@@ -1,6 +1,7 @@
 # ADR-0004：保留隔离启动器的默认对象策略以恢复真实 MSYS 链路
 
 Status: Accepted
+Superseded by: ADR-0008，基于当次输入补充授权，不再整份恢复启动快照。下文保留原决策背景。
 Date: 2026-10-20
 Supersedes: ADR-0001 的完全不干预 token 默认 DACL 约定；ADR-0003 的 MSYS 原生后代只能拒绝回入的能力边界。只读上下文查询及恢复前错误检查继续保留。
 

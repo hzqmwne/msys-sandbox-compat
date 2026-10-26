@@ -1,5 +1,4 @@
 #include "host.h"
-#include <sddl.h>
 #include <securityappcontainer.h>
 
 namespace msys_sandbox_compat {
@@ -27,39 +26,79 @@ HANDLE configure_security(AgentState &state) {
     }
     auto sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
     check(sid != nullptr || IsTokenRestricted(token), "restricted execution context required");
-    if (sid) {
-        LPWSTR user_text = nullptr, package_text = nullptr;
-        check(ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER *>(user)->User.Sid, &user_text),
-              "user SID");
-        check(ConvertSidToStringSidW(sid, &package_text), "package SID");
-        auto sddl = L"D:P(A;;GA;;;" + std::wstring(user_text) + L")(A;;GA;;;SY)(A;;GA;;;" +
-                    package_text + L")";
-        LocalFree(user_text);
-        LocalFree(package_text);
-        PSECURITY_DESCRIPTOR descriptor = nullptr;
-        ULONG bytes = 0;
-        check(ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.c_str(), SDDL_REVISION_1,
-                                                                   &descriptor, &bytes),
-              "private object descriptor");
-        check(bytes <= sizeof(state.descriptor), "descriptor capacity");
-        memcpy(state.descriptor, descriptor, bytes);
-        LocalFree(descriptor);
-    } else {
-        SECURITY_DESCRIPTOR descriptor{};
-        check(InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION),
-              "restricted object descriptor");
-        check(SetSecurityDescriptorDacl(&descriptor, TRUE, acl, FALSE), "restricted object ACL");
-        DWORD bytes = sizeof(state.descriptor);
-        check(MakeSelfRelativeSD(&descriptor, state.descriptor, &bytes),
-              "restricted descriptor capacity");
+    auto user_sid = reinterpret_cast<TOKEN_USER *>(user)->User.Sid;
+    check(IsValidSid(user_sid) && GetLengthSid(user_sid) <= sizeof(state.user_sid),
+          "user SID capacity");
+    state.user_sid_bytes = GetLengthSid(user_sid);
+    memcpy(state.user_sid, user_sid, state.user_sid_bytes);
+    std::vector<BYTE> groups, restricting;
+    if (!sid) {
+        auto query = [&](TOKEN_INFORMATION_CLASS kind, std::vector<BYTE> &buffer) {
+            DWORD bytes = 0;
+            GetTokenInformation(token, kind, nullptr, 0, &bytes);
+            buffer.resize(bytes);
+            check(bytes && GetTokenInformation(token, kind, buffer.data(), bytes, &bytes),
+                  "restricted object SID context");
+        };
+        query(TokenGroups, groups);
+        query(TokenRestrictedSids, restricting);
+        auto enabled = reinterpret_cast<TOKEN_GROUPS *>(groups.data());
+        auto limits = reinterpret_cast<TOKEN_GROUPS *>(restricting.data());
+        // The session logon identity is already both an enabled principal and
+        // a restricting SID in the supported restricted-token environments.
+        for (DWORD i = 0; i < enabled->GroupCount && !sid; ++i) {
+            auto &group = enabled->Groups[i];
+            if ((group.Attributes & SE_GROUP_LOGON_ID) != SE_GROUP_LOGON_ID ||
+                !(group.Attributes & SE_GROUP_ENABLED) ||
+                (group.Attributes & SE_GROUP_USE_FOR_DENY_ONLY))
+                continue;
+            for (DWORD j = 0; j < limits->GroupCount; ++j)
+                if (EqualSid(group.Sid, limits->Groups[j].Sid))
+                    sid = group.Sid;
+        }
+        if (!sid && acl) {
+            // Otherwise accept one unambiguous, already configured restricting
+            // principal. Never grant all restricting groups or a broad alias.
+            for (DWORD i = 0; i < limits->GroupCount; ++i) {
+                auto candidate = limits->Groups[i].Sid;
+                if (IsWellKnownSid(candidate, WinWorldSid) ||
+                    IsWellKnownSid(candidate, WinAuthenticatedUserSid) ||
+                    IsWellKnownSid(candidate, WinBuiltinUsersSid))
+                    continue;
+                for (WORD j = 0; j < acl->AceCount; ++j) {
+                    void *entry = nullptr;
+                    check(GetAce(acl, j, &entry), "initial object ACE");
+                    auto allowed = static_cast<ACCESS_ALLOWED_ACE *>(entry);
+                    if (allowed->Header.AceType == ACCESS_ALLOWED_ACE_TYPE && allowed->Mask &&
+                        EqualSid(&allowed->SidStart, candidate)) {
+                        check(!sid || EqualSid(sid, candidate), "ambiguous restricted object SID");
+                        sid = candidate;
+                    }
+                }
+            }
+        }
+        check(sid != nullptr, "configured restricted object SID required");
     }
-
+    check(IsValidSid(sid) && GetLengthSid(sid) <= sizeof(state.compat_sid),
+          "compatibility SID capacity");
+    state.compat_sid_bytes = GetLengthSid(sid);
+    memcpy(state.compat_sid, sid, state.compat_sid_bytes);
+    state.object_policy_valid = 1;
+    SECURITY_DESCRIPTOR namespace_descriptor{};
+    check(InitializeSecurityDescriptor(&namespace_descriptor, SECURITY_DESCRIPTOR_REVISION),
+          "namespace descriptor");
+    check(SetSecurityDescriptorDacl(&namespace_descriptor, TRUE, acl, FALSE),
+          "namespace default ACL");
+    // Keep the AppContainer namespace choice independent of the selected
+    // non-AppContainer restricting principal above.
+    auto package_sid =
+        reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
     // AppContainer namespaces are supplied by Windows. Restricted tokens need
     // a per-launch directory so unrelated MSYS sessions cannot precreate it
     // with a different ACL. Native intermediaries inherit the launch tag.
     wchar_t relative[object_root_chars]{};
     ULONG chars = 0;
-    if (sid)
+    if (package_sid)
         check(GetAppContainerNamedObjectPath(token, nullptr, _countof(relative), relative, &chars),
               "AppContainer object namespace");
     else
@@ -69,7 +108,7 @@ HANDLE configure_security(AgentState &state) {
           "TokenSessionId");
     auto root = L"\\Sessions\\" + std::to_wstring(session) + L"\\" + relative;
     HANDLE directory = nullptr;
-    if (!sid) {
+    if (!package_sid) {
         wchar_t tag[32]{};
         auto count = GetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", tag, _countof(tag));
         check(count < _countof(tag), "inherited compatibility session");
@@ -84,7 +123,7 @@ HANDLE configure_security(AgentState &state) {
                             static_cast<USHORT>((root.size() + 1) * sizeof(wchar_t)), root.data()};
         OBJECT_ATTRIBUTES attributes{};
         InitializeObjectAttributes(&attributes, &name, OBJ_CASE_INSENSITIVE | OBJ_OPENIF, nullptr,
-                                   state.descriptor);
+                                   &namespace_descriptor);
         check_nt(
             state.api.create_directory(&directory, STANDARD_RIGHTS_REQUIRED | 0xf, &attributes),
             "restricted compatibility namespace");

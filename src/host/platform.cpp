@@ -49,6 +49,8 @@ NativeApi resolve_api() {
     RESOLVE(flush_code, "NtFlushInstructionCache");
     RESOLVE(close, "NtClose");
     RESOLVE(set_security, "NtSetSecurityObject");
+    RESOLVE(query_security, "NtQuerySecurityObject");
+    RESOLVE(compare_objects, "NtCompareObjects");
     RESOLVE(query_token, "NtQueryInformationToken");
     RESOLVE(open_token, "NtOpenProcessToken");
     RESOLVE(set_token, "NtSetInformationToken");

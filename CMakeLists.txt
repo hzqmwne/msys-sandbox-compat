@@ -15,7 +15,7 @@ endforeach()
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/W4> $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
 # Shared sources are compiled separately under each target's CRT/stack rules.
-set(compat_core src/core/identify.cpp src/core/process.cpp src/core/token_context.cpp)
+set(compat_core src/core/identify.cpp src/core/process.cpp src/core/token_context.cpp src/core/object_security.cpp)
 add_library(msys-sandbox-compat-agent SHARED ${compat_core} src/agent/hooks.cpp src/agent/memory.cpp src/agent/stack_probe.asm)
 target_include_directories(msys-sandbox-compat-agent PRIVATE include)
 set_target_properties(msys-sandbox-compat-agent PROPERTIES OUTPUT_NAME msys-sandbox-compat

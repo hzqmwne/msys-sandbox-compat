@@ -13,11 +13,16 @@
 .\tests\conpty.ps1 -Environment WriteRestricted
 .\tests\conpty.ps1 -Environment FullRestricted
 .\tests\late-package.ps1
+.\tests\acl.ps1
+.\tests\acl.ps1 -Environment WriteRestricted
+.\tests\acl.ps1 -Environment FullRestricted
 ```
 
 | 测试 | 检查内容 |
 |---|---|
 | `identify-test` | 直接导入快速路径、共享依赖去重、环、节点上限、深依赖链及识别/准备失败语义；无需创建 PSEC |
+| `object-security-test` | ACL 最小追加、enabled groups、空/NULL、输入不变、absolute/self-relative 的 owner/group/SACL/control 保留 |
+| `acl.ps1` | 真实 MSYS 内显式对象与后续默认设置；有限权限、deny、其他 token、adjust-only/query-only 句柄；-Existing 可直接使用已有受限上下文 |
 | `verify.ps1` | 原版失败基线、重复 fork/shell、读写边界、退出码和原生子进程；10 轮共 25 项 |
 | `fork.pl` | PID、堆、COW、共享文件偏移、管道、EOF、信号、exec、WNOHANG、嵌套及并发 fork、线程中 fork |
 | `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、原生根显式回入、MSYS 原生后代回入及默认 Token DACL 保持 |
@@ -48,9 +53,9 @@ ctest --test-dir build --output-on-failure
 
 `Existing` 模式需由实际 harness 在其受限执行上下文内显式运行，不注册为普通宿主的 CTest。调用者原策略应已允许兼容产物、MSYS 安装文件、Perl 夹具的读取/执行及测试工作目录写入；缺少权限时保留拒绝。该模式只验收原上下文中的工作负载，原策略的具体拒绝路径和 ACL/token 保留情况还需按实际配置单独验证。
 
-relay 链路要求原生桥接只存在一个创建 hook，其余八个入口与 MSYS 地址区保持原样，默认对象 ACL 沿链一致；直接回入必须完成真实 Perl/fork/管道及退出码。挂起用例要求调用者 `ResumeThread` 看到原挂起计数 1。策略负例由原生夹具临时收紧自身默认对象 DACL，要求创建返回访问拒绝、目标未运行，随后恢复夹具初始策略；生产代码只做检查，不进行此收紧/恢复操作。
+relay 链路要求原生桥接只存在一个创建 hook，其余八个入口与 MSYS 地址区保持原样，MSYS 当次设置后的后代默认 ACL 保持一致，允许它与首次 native 入口的启动快照不同；直接回入必须完成真实 Perl/fork/管道及退出码。挂起用例要求调用者 `ResumeThread` 看到原挂起计数 1。策略负例由原生夹具临时收紧自身默认对象 DACL，要求创建返回访问拒绝、目标未运行，随后恢复夹具初始策略；生产代码只做检查，不进行此收紧/恢复操作。
 
-日常选择与改动相关的套件：进程创建/识别/注入/传播变化检查 fork、作用范围和相关进程链；控制台变化检查交互；文档变化检查文档即可。完整十六项用于涉及多个运行机制的改动或阶段验收，已有通过结果不因无关改动反复重跑。权限拒绝与策略保留检查继续随相关工作负载执行。完整性脚本独立按需运行，不加入 CTest。
+日常选择与改动相关的套件：进程创建/识别/注入/传播变化检查 fork、作用范围和相关进程链；控制台变化检查交互；文档变化检查文档即可。完整二十项用于涉及多个运行机制的改动或阶段验收，已有通过结果不因无关改动反复重跑。权限拒绝与策略保留检查继续随相关工作负载执行。完整性脚本独立按需运行，不加入 CTest。
 
 常规 `verify` 默认一轮；重复 fork/shell 使用 `verify.ps1 -Repetitions 10`。进程链与 ConPTY 的线程 fork 默认一次，压力验收显式使用 `-ThreadRepetitions 10`（最多 1000）。也可通过兼容入口运行 `tests/fixtures/fork.pl 100`。各环境、权限边界、32 个并发子进程及交互语义仍保留，减少的是常规重复次数。测试以退出码、TAP 成败和真实工作负载为准，不依赖固定 TAP 序号或 agent trace 文案。
 

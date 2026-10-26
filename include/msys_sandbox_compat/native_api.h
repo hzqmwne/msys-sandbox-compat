@@ -40,6 +40,9 @@ using ReadFile = NTSTATUS(NTAPI *)(HANDLE, HANDLE, void *, void *, PIO_STATUS_BL
 using FlushCode = NTSTATUS(NTAPI *)(HANDLE, const void *, SIZE_T);
 using Close = NTSTATUS(NTAPI *)(HANDLE);
 using SetSecurity = NTSTATUS(NTAPI *)(HANDLE, SECURITY_INFORMATION, PSECURITY_DESCRIPTOR);
+using QuerySecurity = NTSTATUS(NTAPI *)(HANDLE, SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, ULONG,
+                                        PULONG);
+using CompareObjects = NTSTATUS(NTAPI *)(HANDLE, HANDLE);
 using QueryToken = NTSTATUS(NTAPI *)(HANDLE, TOKEN_INFORMATION_CLASS, void *, ULONG, PULONG);
 using OpenToken = NTSTATUS(NTAPI *)(HANDLE, ACCESS_MASK, PHANDLE);
 using SetToken = NTSTATUS(NTAPI *)(HANDLE, TOKEN_INFORMATION_CLASS, void *, ULONG);
@@ -79,6 +82,8 @@ struct NativeApi {
     FlushCode flush_code;
     Close close;
     SetSecurity set_security;
+    QuerySecurity query_security;
+    CompareObjects compare_objects;
     QueryToken query_token;
     OpenToken open_token;
     SetToken set_token;

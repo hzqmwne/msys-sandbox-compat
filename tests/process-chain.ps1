@@ -105,9 +105,13 @@ try {
         Save-TestOutput $result $evidence $name
         $acls = @([regex]::Matches($result.Error,'\[bridge\] clean=1 depth=\d+ default=([^\r\n]+)') |
             ForEach-Object { $_.Groups[1].Value })
+        # A native entry records the runner policy before MSYS explicitly sets
+        # its own ACL. Descendants retain that adapted request, not the runner snapshot.
+        $descendantAcls = if ($case.Root -eq 'native') { @($acls | Select-Object -Skip 1) } else { $acls }
         $passed = $result.ExitCode -eq 37 -and $result.Output.Contains('CHAIN-WORKLOAD-PASS') -and
             $result.Output.Contains('fork from a secondary POSIX thread works') -and $result.Output -notmatch '(?m)^not ok' -and
-            $acls.Count -eq $expectedBridges -and @($acls | Select-Object -Unique).Count -eq 1 -and
+            $acls.Count -eq $expectedBridges -and $descendantAcls.Count -gt 0 -and
+            @($descendantAcls | Select-Object -Unique).Count -eq 1 -and
             $result.Error -notmatch 'fatal error|fork: retry|child_copy:|\[fatal\]'
         if ($restricted) { $passed = $passed -and $result.Output.Contains('RESTRICTED-TOKEN-AND-ACL-PASS') }
         if ($NativeRelay) {
