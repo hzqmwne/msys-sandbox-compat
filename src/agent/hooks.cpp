@@ -13,7 +13,7 @@ __declspec(dllexport) AgentState g_agent_state{};
 __declspec(dllexport) uintptr_t g_native_chkstk = 0;
 #pragma section(".thunks", read, execute)
 __declspec(allocate(".thunks"))
-__declspec(dllexport) BYTE g_agent_thunks[hook_count][32] = {{0x90}};
+__declspec(dllexport) BYTE g_agent_thunks[hook_count][hook_trampoline_bytes] = {{0x90}};
 }
 
 namespace {

@@ -29,8 +29,7 @@ int wmain(int argc, wchar_t **argv) {
           "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
         auto code = reinterpret_cast<const BYTE *>(GetProcAddress(ntdll, name));
         bool create = std::string(name) == "NtCreateUserProcess";
-        bool expected = code && (relay && create ? code[0] == 0xe9 && code[5] == 0x90 &&
-                                                       code[6] == 0x90 && code[7] == 0x90
+        bool expected = code && (relay && create ? code[0] == 0xe9
                                                  : code[0] == 0x4c && code[1] == 0x8b &&
                                                        code[2] == 0xd1 && code[3] == 0xb8);
         if (!expected)

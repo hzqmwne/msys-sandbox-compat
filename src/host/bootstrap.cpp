@@ -11,7 +11,7 @@ AgentState *inherited_agent() {
     // Its CreateProcess call prepares the child; do not inject it a second time.
     auto entry = reinterpret_cast<const BYTE *>(
         GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateUserProcess"));
-    if (!entry || entry[0] != 0xe9 || entry[5] != 0x90 || entry[6] != 0x90 || entry[7] != 0x90)
+    if (!entry || entry[0] != 0xe9)
         return nullptr;
     LONG offset = 0;
     memcpy(&offset, entry + 1, sizeof(offset));
@@ -128,7 +128,7 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
         auto index = static_cast<size_t>(id);
         auto &hook = state.hooks[index];
         hook = {reinterpret_cast<uintptr_t>(entry), state.self_base + handler,
-                state.self_base + thunk_rva + index * 32};
+                state.self_base + thunk_rva + index * hook_trampoline_bytes};
         entry = reinterpret_cast<std::remove_reference_t<decltype(entry)>>(hook.trampoline);
     };
     if (state.native_relay)

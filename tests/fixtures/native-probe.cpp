@@ -77,8 +77,7 @@ int wmain(int argc, wchar_t **argv) {
               "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
             BYTE code[8]{};
             auto address = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name);
-            if (ReadProcessMemory(parent, address, code, sizeof(code), nullptr) &&
-                code[0] == 0xe9 && code[5] == 0x90 && code[6] == 0x90 && code[7] == 0x90)
+            if (ReadProcessMemory(parent, address, code, sizeof(code), nullptr) && code[0] == 0xe9)
                 ++jumps;
         }
         port = 1;

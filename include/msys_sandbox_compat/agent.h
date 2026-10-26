@@ -1,6 +1,7 @@
 #pragma once
 
 #include "identify.h"
+#include "inline_hook.h"
 
 namespace msys_sandbox_compat {
 

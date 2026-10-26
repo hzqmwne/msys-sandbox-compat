@@ -4,6 +4,12 @@
 
 ## 未发布
 
+### ntdll 入口搬迁
+
+- 用固定版本 MinHook 的 HDE64 与适配搬迁核心替代固定八字节 syscall 前导假设，保留已有入口跳转执行路径。
+- 分开纯搬迁计划与远程安装接口，CMake 集中选择后端，为后续切换 Detours 保留边界；无额外运行时 DLL。
+- 增加位移/输入边界检查、源字节复核、失败回滚和执行测试，保留 native relay 的单入口修改范围；随包交付 MinHook/HDE 完整许可证。
+
 ### 对象授权适配
 
 - 显式对象 ACL 与 TokenDefaultDacl 均基于当次输入补受限主体，不再用统一 SD/启动快照覆盖；保留 owner/group/SACL/control，按用户及 enabled groups 的原有权限追加，deny/空/复杂输入不补权。NULL DACL 用 Everyone 与受限主体表达开放意图。

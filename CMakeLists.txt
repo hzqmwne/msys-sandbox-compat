@@ -15,8 +15,20 @@ endforeach()
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/W4> $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
 # Shared sources are compiled separately under each target's CRT/stack rules.
+function(add_compat_hook_backend target)
+  # Select a relocation backend here; its types/dependencies stay out of callers.
+  target_sources(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src/core/hook_minhook.cpp"
+    "${PROJECT_SOURCE_DIR}/third_party/minhook/hde/hde64.c")
+  target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/third_party")
+  # The unchanged C source also compiles as C++ under each caller's CRT rules.
+  # HDE's prefix loop always assigns c on its first iteration (x starts at 16);
+  # MSVC's optimized analysis loses that fact after the switch/goto paths.
+  set_source_files_properties("${PROJECT_SOURCE_DIR}/third_party/minhook/hde/hde64.c"
+    PROPERTIES LANGUAGE CXX COMPILE_OPTIONS /wd4701)
+endfunction()
 set(compat_core src/core/identify.cpp src/core/process.cpp src/core/token_context.cpp src/core/object_security.cpp)
 add_library(msys-sandbox-compat-agent SHARED ${compat_core} src/agent/hooks.cpp src/agent/memory.cpp src/agent/stack_probe.asm)
+add_compat_hook_backend(msys-sandbox-compat-agent)
 target_include_directories(msys-sandbox-compat-agent PRIVATE include)
 set_target_properties(msys-sandbox-compat-agent PROPERTIES OUTPUT_NAME msys-sandbox-compat
   ARCHIVE_OUTPUT_NAME msys-sandbox-compat-agent PDB_NAME msys-sandbox-compat-agent)
@@ -26,6 +38,7 @@ target_link_options(msys-sandbox-compat-agent PRIVATE /NODEFAULTLIB /NOENTRY /IN
 # frame on MSYS-managed secondary-thread stacks.
 target_compile_options(msys-sandbox-compat-agent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Gs4096>)
 add_executable(msys-sandbox-compat ${compat_core} src/host/main.cpp src/host/platform.cpp src/host/security.cpp src/host/bootstrap.cpp)
+add_compat_hook_backend(msys-sandbox-compat)
 target_include_directories(msys-sandbox-compat PRIVATE include)
 target_compile_options(msys-sandbox-compat PRIVATE /EHsc)
 target_link_libraries(msys-sandbox-compat PRIVATE advapi32 userenv)
@@ -49,5 +62,5 @@ endif()
 install(TARGETS msys-sandbox-compat msys-sandbox-compat-agent RUNTIME DESTINATION bin)
 install(FILES README.md CHANGELOG.md DESTINATION share/msys-sandbox-compat)
 install(DIRECTORY docs/ DESTINATION share/msys-sandbox-compat/docs FILES_MATCHING PATTERN "*.md")
-install(FILES third_party/LICENSE.nlohmann third_party/LICENSE.mxc third_party/LICENSE.flatbuffers
+install(FILES third_party/LICENSE.nlohmann third_party/LICENSE.mxc third_party/LICENSE.flatbuffers third_party/LICENSE.minhook
   DESTINATION share/msys-sandbox-compat/licenses)

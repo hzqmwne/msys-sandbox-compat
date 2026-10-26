@@ -7,59 +7,144 @@
 
 namespace msys_sandbox_compat {
 
-// The only supported entry format is the AMD64 ntdll syscall prefix consisting
-// of two whole instructions: mov r10,rcx; mov eax,imm32. Refuse other builds or
-// an existing hook instead of guessing instruction lengths or overwriting it.
+namespace {
+struct PendingHook {
+    HookPlan plan;
+    BYTE source[hook_source_bytes];
+    size_t source_size;
+    ULONG protection;
+    bool selected;
+};
+
+bool same_code(const BYTE *left, const BYTE *right, size_t count) {
+    for (size_t i = 0; i < count; ++i)
+        if (left[i] != right[i])
+            return false;
+    return true;
+}
+
+NTSTATUS read_hook_source(const NativeApi &api, HANDLE process, uintptr_t address,
+                          PendingHook &pending) {
+    pending.source_size = 0;
+    if (address > UINTPTR_MAX - hook_source_bytes)
+        return status_not_supported;
+    while (pending.source_size < hook_source_bytes) {
+        const auto at = address + pending.source_size;
+        MEMORY_BASIC_INFORMATION info{};
+        auto status = api.query_memory(process, reinterpret_cast<void *>(at), 0, &info,
+                                       sizeof(info), nullptr);
+        if (status < 0 || info.State != MEM_COMMIT ||
+            (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) ||
+            !(info.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+            break;
+        const auto base = reinterpret_cast<uintptr_t>(info.BaseAddress);
+        if (base > at || info.RegionSize <= at - base)
+            break;
+        size_t available = info.RegionSize - (at - base);
+        // A five-byte patch must stay in one protection region. The read may
+        // continue across other regions to decode a complete final instruction.
+        if (!pending.source_size && available < hook_patch_bytes)
+            return status_not_supported;
+        if (available > hook_source_bytes - pending.source_size)
+            available = hook_source_bytes - pending.source_size;
+        SIZE_T transferred = 0;
+        status = api.read(process, reinterpret_cast<void *>(at),
+                          pending.source + pending.source_size, available, &transferred);
+        if (status < 0 || transferred != available)
+            break;
+        pending.source_size += available;
+    }
+    return pending.source_size >= hook_patch_bytes ? status_success : status_not_supported;
+}
+
+void rollback_hooks(const NativeApi &api, HANDLE process, const AgentState &state,
+                    PendingHook *pending, size_t attempted) {
+    while (attempted) {
+        const size_t index = --attempted;
+        if (!pending[index].selected)
+            continue;
+        PVOID region = reinterpret_cast<void *>(state.hooks[index].target);
+        SIZE_T extent = hook_patch_bytes;
+        ULONG ignored = 0;
+        if (api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &ignored) >= 0) {
+            api.write(process, reinterpret_cast<void *>(state.hooks[index].target),
+                      pending[index].plan.original, hook_patch_bytes, nullptr);
+            api.protect(process, &region, &extent, pending[index].protection, &ignored);
+        }
+    }
+    api.flush_code(process, nullptr, 0);
+}
+} // namespace
+
 NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys) {
     // The new image is still writable and its initial thread is suspended.
-    // Build the contiguous thunk table once, before final section protection.
-    BYTE trampolines[hook_count][32]{};
+    // Keep batch storage off MSYS secondary-thread stacks. Each child's own
+    // entry bytes are read again; no predecessor addresses are cloned blindly.
+    NativeBuffer storage(api, sizeof(PendingHook) * hook_count);
+    auto pending = storage.as<PendingHook>();
+    if (!pending)
+        return status_unsuccessful;
     for (size_t index = 0; index < hook_count; ++index) {
         const auto &hook = state.hooks[index];
-        BYTE original[8];
-        auto status = api.read(process, reinterpret_cast<void *>(hook.target), original,
-                               sizeof(original), nullptr);
+        auto &item = pending[index];
+        item = {};
+        item.selected = msys || index == static_cast<size_t>(HookId::create_process);
+        auto status = read_hook_source(api, process, hook.target, item);
         if (status < 0)
             return status;
-        if (original[0] != 0x4c || original[1] != 0x8b || original[2] != 0xd1 ||
-            original[3] != 0xb8)
+        const HookRequest request{hook.target, hook.handler, hook.trampoline, item.source,
+                                  item.source_size};
+        auto error = plan_inline_hook(request, item.plan);
+        if (error != HookPlanError::none) {
+            agent_log(state, "hook plan rejected", (index << 8) | static_cast<size_t>(error));
             return status_not_supported;
-        auto delta = static_cast<int64_t>(hook.handler) - static_cast<int64_t>(hook.target + 5);
-        if (delta < INT32_MIN || delta > INT32_MAX)
-            return status_not_supported;
-
-        auto trampoline = trampolines[index];
-        memcpy(trampoline, original, 8);
-        trampoline[8] = 0xff;
-        trampoline[9] = 0x25;
-        auto tail = hook.target + 8;
-        memcpy(trampoline + 14, &tail, sizeof(tail));
+        }
     }
-    auto status = api.write(process, reinterpret_cast<void *>(state.hooks[0].trampoline),
-                            trampolines, sizeof(trampolines), nullptr);
-    if (status < 0)
-        return status;
-    for (const auto &hook : state.hooks) {
-        // Relays need original trampolines for classification/preparation,
-        // but only process creation is intercepted in a native image.
-        if (!msys && &hook != &state.hooks[static_cast<size_t>(HookId::create_process)])
+    // Relays also need unpatched original entries for classification/preparation.
+    // Write all trampolines before exposing any handler to the target process.
+    for (size_t index = 0; index < hook_count; ++index) {
+        auto status = api.write(process, reinterpret_cast<void *>(state.hooks[index].trampoline),
+                                pending[index].plan.trampoline, hook_trampoline_bytes, nullptr);
+        if (status < 0)
+            return status;
+    }
+    for (size_t index = 0; index < hook_count; ++index) {
+        auto &item = pending[index];
+        if (!item.selected)
             continue;
-        BYTE patch[8] = {0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90};
-        auto relative = static_cast<int32_t>(hook.handler - (hook.target + 5));
-        memcpy(patch + 1, &relative, sizeof(relative));
+        const auto &hook = state.hooks[index];
+        BYTE current[hook_source_bytes]{};
+        size_t verify = item.plan.consumed;
+        if (verify < hook_patch_bytes)
+            verify = hook_patch_bytes;
+        SIZE_T transferred = 0;
+        auto status =
+            api.read(process, reinterpret_cast<void *>(hook.target), current, verify, &transferred);
+        if (status < 0 || transferred != verify || !same_code(current, item.source, verify)) {
+            rollback_hooks(api, process, state, pending, index);
+            return status < 0 ? status : status_not_supported;
+        }
         PVOID region = reinterpret_cast<void *>(hook.target);
-        SIZE_T extent = sizeof(patch);
-        ULONG previous = 0, ignored = 0;
-        status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &previous);
-        if (status < 0)
+        SIZE_T extent = hook_patch_bytes;
+        ULONG ignored = 0;
+        status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &item.protection);
+        if (status < 0) {
+            rollback_hooks(api, process, state, pending, index);
             return status;
-        status = api.write(process, reinterpret_cast<void *>(hook.target), patch, sizeof(patch),
-                           nullptr);
-        api.protect(process, &region, &extent, previous, &ignored);
-        if (status < 0)
-            return status;
+        }
+        transferred = 0;
+        status = api.write(process, reinterpret_cast<void *>(hook.target), item.plan.patch,
+                           hook_patch_bytes, &transferred);
+        const auto restored = api.protect(process, &region, &extent, item.protection, &ignored);
+        if (status < 0 || transferred != hook_patch_bytes || restored < 0) {
+            rollback_hooks(api, process, state, pending, index + 1);
+            return status < 0 ? status : restored < 0 ? restored : status_unsuccessful;
+        }
     }
-    return api.flush_code(process, nullptr, 0);
+    const auto status = api.flush_code(process, nullptr, 0);
+    if (status < 0)
+        rollback_hooks(api, process, state, pending, hook_count);
+    return status;
 }
 
 NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
@@ -184,7 +269,7 @@ NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, A
     if (status < 0 || reinterpret_cast<uintptr_t>(remote) != source.self_base)
         return status < 0 ? status : status_unsuccessful;
     // All agent internal addresses and trampoline addresses are identical in
-    // descendants. ntdll's address is separately verified by install_hooks.
+    // descendants. Each child's entry bytes are rebuilt by install_hooks.
     status = api.write(process, remote, reinterpret_cast<void *>(source.self_base),
                        source.self_size, nullptr);
     if (status < 0)
