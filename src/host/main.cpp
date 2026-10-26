@@ -53,6 +53,7 @@ int wmain(int argc, wchar_t **argv) try {
     auto executable = fs::absolute(argv[first]);
     std::unique_ptr<AgentState> state;
     auto inherited = inherited_agent();
+    std::wstring session_tag;
     std::unique_ptr<void, decltype(&CloseHandle)> object_directory(nullptr, CloseHandle);
     if (inherited) {
         if (trace)
@@ -65,7 +66,7 @@ int wmain(int argc, wchar_t **argv) try {
         state->native_relay = native_relay;
         state->api = resolve_api();
         configure_runtime_paths(runtime, *state);
-        object_directory.reset(configure_security(*state));
+        session_tag = require_restricted_context();
     }
     Pseudoconsole pty;
     std::vector<BYTE> attribute_buffer;
@@ -150,6 +151,7 @@ int wmain(int argc, wchar_t **argv) try {
                 CloseHandle(root_token);
             }
             if (image.related || native_relay) {
+                object_directory.reset(configure_security(*state, session_tag));
                 auto directory = std::wstring(image.path);
                 directory.resize(directory.rfind(L'\\') + 1);
                 memcpy(state->application_directory, directory.c_str(), (directory.size() + 1) * 2);

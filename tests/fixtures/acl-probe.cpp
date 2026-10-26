@@ -212,14 +212,10 @@ extern "C" __declspec(dllexport) void dacl_probe(void *, void *) {
                 CloseHandle(child.hThread);
                 CloseHandle(child.hProcess);
             }
-            // A rejection after NtCreateUserProcess has already succeeded is
-            // reported as ERROR_INVALID_PARAMETER by the tested Win32 wrapper.
-            // Verify denial/no execution, then prove the same command succeeds
-            // when the original policy is restored. Do not assume Win32 maps
-            // every later preparation failure to ERROR_ACCESS_DENIED.
-            pass = pass && !created &&
-                   (error == ERROR_ACCESS_DENIED || error == ERROR_INVALID_PARAMETER) &&
-                   GetFileAttributesW(marker.c_str()) == INVALID_FILE_ATTRIBUTES;
+            // Verify denial/no execution, with the same command as a positive
+            // control after restoring the policy. Win32 error mapping is diagnostic.
+            pass =
+                pass && !created && GetFileAttributesW(marker.c_str()) == INVALID_FILE_ATTRIBUTES;
             pass = SetTokenInformation(primary, TokenDefaultDacl, snapshot.data(),
                                        sizeof(TOKEN_DEFAULT_DACL)) &&
                    pass;

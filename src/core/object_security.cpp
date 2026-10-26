@@ -119,12 +119,7 @@ NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
             agent_log(state, "object ACL has no user or enabled-group grant");
         return status_success;
     }
-    SIZE_T bytes = used + extra;
-    auto status = api_.allocate(current_process(), &memory_, 0, &bytes, MEM_COMMIT | MEM_RESERVE,
-                                PAGE_READWRITE);
-    if (status < 0)
-        return status;
-    memcpy(memory_, data, used);
+    memory_ = copy.release();
     auto result = static_cast<ACL *>(memory_);
     auto added = reinterpret_cast<ACCESS_ALLOWED_ACE *>(static_cast<BYTE *>(memory_) + used);
     added->Header = {ACCESS_ALLOWED_ACE_TYPE, 0, static_cast<WORD>(extra)};

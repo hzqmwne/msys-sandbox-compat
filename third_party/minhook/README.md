@@ -20,3 +20,9 @@ no allocator, thread management, relay allocation or patch-above path; caller
 owns output storage; explicit errors; reject internal branches over expansions
 and into non-instruction boundaries. The patch writes five bytes at the public
 entry, and the nearby agent provides the handler and 64-byte trampoline slots.
+
+Unknown/truncated instructions, out-of-range relative addresses and unsupported
+internal branches fail planning. Address-size overrides on RIP operands,
+operand-size overrides on branches, XBEGIN and relocated INT3 are rejected.
+The installer supports suspended new processes only: its caller terminates the
+target on failure; there is no cross-entry rollback or online unhook manager.

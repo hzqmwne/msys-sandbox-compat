@@ -75,7 +75,6 @@ HookPlanError plan_inline_hook(const HookRequest &request, HookPlan &plan) {
     int32_t entry_offset = 0;
     if (!relative32(request.target + hook_patch_bytes, request.handler, entry_offset))
         return HookPlanError::range;
-    memcpy(plan.original, request.source, hook_patch_bytes);
     plan.patch[0] = 0xe9;
     memcpy(plan.patch + 1, &entry_offset, sizeof(entry_offset));
 
@@ -210,7 +209,6 @@ HookPlanError plan_inline_hook(const HookRequest &request, HookPlan &plan) {
             return HookPlanError::branch;
     }
     plan.consumed = static_cast<uint8_t>(old_pos);
-    plan.emitted = static_cast<uint8_t>(new_pos);
     return HookPlanError::none;
 }
 

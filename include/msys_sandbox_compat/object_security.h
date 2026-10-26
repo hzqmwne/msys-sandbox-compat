@@ -3,20 +3,25 @@
 #include <intrin.h>
 
 namespace msys_sandbox_compat {
-// Serialize intercepted default-policy updates with creation and agent cloning.
+// Only relay needs a consistent default-policy snapshot during creation/cloning.
 // The child's process-local lock is reset before its initial thread resumes.
 class PolicyGuard {
   public:
-    explicit PolicyGuard(AgentState &state) : lock_(state.local.policy_lock) {
-        while (_InterlockedCompareExchange(&lock_, 1, 0))
-            _mm_pause();
+    explicit PolicyGuard(AgentState &state)
+        : lock_(state.native_relay ? &state.local.policy_lock : nullptr) {
+        if (lock_)
+            while (_InterlockedCompareExchange(lock_, 1, 0))
+                _mm_pause();
     }
-    ~PolicyGuard() { _InterlockedExchange(&lock_, 0); }
+    ~PolicyGuard() {
+        if (lock_)
+            _InterlockedExchange(lock_, 0);
+    }
     PolicyGuard(const PolicyGuard &) = delete;
     PolicyGuard &operator=(const PolicyGuard &) = delete;
 
   private:
-    volatile LONG &lock_;
+    volatile LONG *lock_;
 };
 
 // Owns only an adapted DACL. Other SD fields still refer to this synchronous

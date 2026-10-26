@@ -12,7 +12,8 @@ void check_nt(NTSTATUS status, const char *operation);
 std::wstring file_path(HANDLE file);
 NativeApi resolve_api();
 AgentState *inherited_agent();
-HANDLE configure_security(AgentState &state);
+std::wstring require_restricted_context();
+HANDLE configure_security(AgentState &state, const std::wstring &session_tag);
 void configure_runtime_paths(const std::filesystem::path &runtime, AgentState &state);
 void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &state,
                  const std::filesystem::path &agent);

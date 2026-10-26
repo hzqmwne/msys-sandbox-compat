@@ -20,17 +20,16 @@ struct HookRequest {
 };
 
 struct HookPlan {
-    unsigned char original[hook_patch_bytes];
     unsigned char patch[hook_patch_bytes];
     unsigned char trampoline[hook_trampoline_bytes];
     uint8_t consumed;
-    uint8_t emitted;
 };
 
 enum class HookPlanError { none, input, instruction, branch, range, capacity };
 
 // Pure planning boundary. The installer owns remote reads, verification,
-// protection, writes, rollback and instruction-cache flush. The entry patch is
+// protection, writes and instruction-cache flush. The caller terminates the
+// suspended new process on failure. The entry patch is
 // always E9 rel32 to handler; a future Detours backend can replace this
 // implementation without changing callers or state.
 HookPlanError plan_inline_hook(const HookRequest &request, HookPlan &plan);

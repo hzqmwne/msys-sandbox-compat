@@ -19,6 +19,11 @@ class NativeBuffer {
     }
     explicit operator bool() const { return data_ != nullptr; }
     template <class T> T *as() const { return static_cast<T *>(data_); }
+    PVOID release() {
+        auto data = data_;
+        data_ = nullptr;
+        return data;
+    }
     NativeBuffer(const NativeBuffer &) = delete;
     NativeBuffer &operator=(const NativeBuffer &) = delete;
 

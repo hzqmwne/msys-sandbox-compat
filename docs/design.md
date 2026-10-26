@@ -24,7 +24,9 @@
 
 ## 初始准备
 
-命中后，宿主手工映射没有 CRT、普通导入、TLS 或 DllMain 初始化依赖的 agent，完成重定位和状态复制。agent 在 ntdll 附近分配，以五字节 E9 相对跳转连接 handler。安装器读取目标自己的可读可执行入口，后端按完整指令生成 64 字节槽位内的 trampoline，修正相对位移，保留已有跳转路径；不再要求固定 syscall 前导。全部计划成功后先写 trampoline，再逐项复核源字节、修改保护并安装入口；失败时尝试回滚。安装成功后统一设置 agent 节保护，并建立异常展开状态。未知指令、位移不可达、危险内部跳转、跨保护区域的补丁和需要 patch-above 的短入口拒绝准备。
+启动时只确认受限上下文，并提前准备供原生桥接继承的会话标记。确认目标需要完整兼容或 relay 后，才选择兼容 SID、建立命名空间和准备传播策略；普通原生目标不受兼容快照容量限制。
+
+宿主手工映射无初始化依赖的 agent，完成重定位和状态复制。agent 位于 ntdll 附近；搬迁后端按目标自己的入口字节保留现有路径，安装器复核源字节、写入补丁并恢复页面保护。安装失败由调用方终止尚未恢复的新进程，不维护入口恢复事务。成功后设置 agent 节保护并建立异常展开状态。后端具体支持边界及上游差异见源码中的 `third_party/minhook/README.md`。
 
 准备工作包括 EXE/DLL 首选地址、MSYS 堆预留与地址修正、私有对象路径及安全描述符。root 和 child 使用同一套 agent 节保护规则；child 只重置进程局部状态。
 
@@ -63,7 +65,7 @@ MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标
 
 原生创建 hook 在恢复前识别并复制相应模式，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用原运行上下文；其创建调用已准备子进程，宿主不重复识别、复制完整状态或再次注入。首次映射在独立的 agent 状态副本中绑定 trampoline，不临时改写宿主 API。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代，省略嵌套启动器选项不会关闭已有 relay 或替换原上下文。
 
-传播前只读核对当前默认对象策略与最近成功设置后的观测基准；子进程创建后只读比较父子 token 的用户、组及禁用属性、restricting SID、权限、owner/primary group、完整性、package/capabilities、mandatory/UI/session/sandbox 状态、认证身份和访问 flags，并核对子进程默认 DACL。默认策略基准可容纳 8 KiB ACL；完整 agent 的设置 hook 在成功后更新它，设置与创建/克隆在进程内串行化。原生 relay 未被观察的策略改变、上下文不一致或查询失败时拒绝传播，不改 token 或补授授权。已创建的目标在恢复前回收；未被设置 hook 观察的默认对象策略变化在创建前拒绝。该模式不承诺跨凭据或其他安全上下文自动传播。决定见 [ADR-0006](decisions/0006-opt-in-native-relay.md) 及 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
+relay 创建前核对最近已观察的默认策略，创建后比较父子 token 身份与隔离上下文，并核对子进程默认 DACL。基准容纳 8 KiB ACL，仅在 relay 模式下建立和维护；完整 agent 的设置 hook 在成功后更新它，并与创建/克隆串行化。未观察的策略改变、上下文不一致或查询失败时拒绝传播，已创建目标在恢复前回收。非 relay 仅做当次 ACL 适配，不维护快照或持有策略锁。该模式不承诺跨凭据或其他安全上下文自动传播。决定见 [ADR-0006](decisions/0006-opt-in-native-relay.md) 及 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
 
 ## ConPTY
 

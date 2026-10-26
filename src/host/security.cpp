@@ -2,7 +2,29 @@
 #include <securityappcontainer.h>
 
 namespace msys_sandbox_compat {
-HANDLE configure_security(AgentState &state) {
+std::wstring require_restricted_context() {
+    auto token = GetCurrentProcessToken();
+    DWORD appcontainer = 0, bytes = 0;
+    check(GetTokenInformation(token, TokenIsAppContainer, &appcontainer, sizeof(appcontainer),
+                              &bytes),
+          "TokenIsAppContainer");
+    check(appcontainer || IsTokenRestricted(token), "restricted execution context required");
+    if (appcontainer)
+        return {};
+    // Publish only the launch tag before CreateProcess so later native bridges
+    // inherit it. SID selection and namespace creation can wait for classification.
+    wchar_t tag[32]{};
+    auto count = GetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", tag, _countof(tag));
+    check(count < _countof(tag), "inherited compatibility session");
+    for (DWORD i = 0; i < count; ++i)
+        check(tag[i] >= L'0' && tag[i] <= L'9', "compatibility session tag");
+    auto identity = count ? std::wstring(tag) : std::to_wstring(GetCurrentProcessId());
+    check(SetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", identity.c_str()),
+          "inherit compatibility session");
+    return identity;
+}
+
+HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
     // MSYS-created native descendants can deny reopening their primary token.
     // The current-token pseudo handle provides the read-only queries we need.
     HANDLE token = GetCurrentProcessToken();
@@ -18,14 +40,17 @@ HANDLE configure_security(AgentState &state) {
                                                default_bytes, &default_bytes),
           "TokenDefaultDacl");
     auto acl = reinterpret_cast<TOKEN_DEFAULT_DACL *>(default_info.data())->DefaultDacl;
-    if (acl) {
-        check(IsValidAcl(acl) && acl->AclSize <= sizeof(state.token_default_dacl),
-              "sandbox default DACL capacity");
-        memcpy(state.token_default_dacl, acl, acl->AclSize);
-        state.token_default_dacl_bytes = acl->AclSize;
+    check(!acl || IsValidAcl(acl), "sandbox default DACL");
+    if (state.native_relay) {
+        check(!acl || acl->AclSize <= sizeof(state.token_default_dacl),
+              "relay default DACL capacity");
+        if (acl) {
+            memcpy(state.token_default_dacl, acl, acl->AclSize);
+            state.token_default_dacl_bytes = acl->AclSize;
+        }
+        state.object_policy_valid = 1;
     }
     auto sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
-    check(sid != nullptr || IsTokenRestricted(token), "restricted execution context required");
     auto user_sid = reinterpret_cast<TOKEN_USER *>(user)->User.Sid;
     check(IsValidSid(user_sid) && GetLengthSid(user_sid) <= sizeof(state.user_sid),
           "user SID capacity");
@@ -83,7 +108,6 @@ HANDLE configure_security(AgentState &state) {
           "compatibility SID capacity");
     state.compat_sid_bytes = GetLengthSid(sid);
     memcpy(state.compat_sid, sid, state.compat_sid_bytes);
-    state.object_policy_valid = 1;
     SECURITY_DESCRIPTOR namespace_descriptor{};
     check(InitializeSecurityDescriptor(&namespace_descriptor, SECURITY_DESCRIPTOR_REVISION),
           "namespace descriptor");
@@ -109,15 +133,7 @@ HANDLE configure_security(AgentState &state) {
     auto root = L"\\Sessions\\" + std::to_wstring(session) + L"\\" + relative;
     HANDLE directory = nullptr;
     if (!package_sid) {
-        wchar_t tag[32]{};
-        auto count = GetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", tag, _countof(tag));
-        check(count < _countof(tag), "inherited compatibility session");
-        for (DWORD i = 0; i < count; ++i)
-            check(tag[i] >= L'0' && tag[i] <= L'9', "compatibility session tag");
-        auto identity = count ? std::wstring(tag) : std::to_wstring(GetCurrentProcessId());
-        check(SetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", identity.c_str()),
-              "inherit compatibility session");
-        root += L"\\msys-sandbox-compat-" + identity;
+        root += L"\\msys-sandbox-compat-" + session_tag;
         check(root.size() < object_root_chars, "namespace capacity");
         UNICODE_STRING name{static_cast<USHORT>(root.size() * sizeof(wchar_t)),
                             static_cast<USHORT>((root.size() + 1) * sizeof(wchar_t)), root.data()};

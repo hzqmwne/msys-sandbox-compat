@@ -12,7 +12,6 @@ struct PendingHook {
     HookPlan plan;
     BYTE source[hook_source_bytes];
     size_t source_size;
-    ULONG protection;
     bool selected;
 };
 
@@ -57,27 +56,12 @@ NTSTATUS read_hook_source(const NativeApi &api, HANDLE process, uintptr_t addres
     return pending.source_size >= hook_patch_bytes ? status_success : status_not_supported;
 }
 
-void rollback_hooks(const NativeApi &api, HANDLE process, const AgentState &state,
-                    PendingHook *pending, size_t attempted) {
-    while (attempted) {
-        const size_t index = --attempted;
-        if (!pending[index].selected)
-            continue;
-        PVOID region = reinterpret_cast<void *>(state.hooks[index].target);
-        SIZE_T extent = hook_patch_bytes;
-        ULONG ignored = 0;
-        if (api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &ignored) >= 0) {
-            api.write(process, reinterpret_cast<void *>(state.hooks[index].target),
-                      pending[index].plan.original, hook_patch_bytes, nullptr);
-            api.protect(process, &region, &extent, pending[index].protection, &ignored);
-        }
-    }
-    api.flush_code(process, nullptr, 0);
-}
 } // namespace
 
 NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys) {
     // The new image is still writable and its initial thread is suspended.
+    // On failure the caller terminates this new process; partial installation
+    // is never resumed, so there is no cross-entry rollback transaction.
     // Keep batch storage off MSYS secondary-thread stacks. Each child's own
     // entry bytes are read again; no predecessor addresses are cloned blindly.
     NativeBuffer storage(api, sizeof(PendingHook) * hook_count);
@@ -120,31 +104,22 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, 
         SIZE_T transferred = 0;
         auto status =
             api.read(process, reinterpret_cast<void *>(hook.target), current, verify, &transferred);
-        if (status < 0 || transferred != verify || !same_code(current, item.source, verify)) {
-            rollback_hooks(api, process, state, pending, index);
+        if (status < 0 || transferred != verify || !same_code(current, item.source, verify))
             return status < 0 ? status : status_not_supported;
-        }
         PVOID region = reinterpret_cast<void *>(hook.target);
         SIZE_T extent = hook_patch_bytes;
-        ULONG ignored = 0;
-        status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &item.protection);
-        if (status < 0) {
-            rollback_hooks(api, process, state, pending, index);
+        ULONG protection = 0, ignored = 0;
+        status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &protection);
+        if (status < 0)
             return status;
-        }
         transferred = 0;
         status = api.write(process, reinterpret_cast<void *>(hook.target), item.plan.patch,
                            hook_patch_bytes, &transferred);
-        const auto restored = api.protect(process, &region, &extent, item.protection, &ignored);
-        if (status < 0 || transferred != hook_patch_bytes || restored < 0) {
-            rollback_hooks(api, process, state, pending, index + 1);
+        const auto restored = api.protect(process, &region, &extent, protection, &ignored);
+        if (status < 0 || transferred != hook_patch_bytes || restored < 0)
             return status < 0 ? status : restored < 0 ? restored : status_unsuccessful;
-        }
     }
-    const auto status = api.flush_code(process, nullptr, 0);
-    if (status < 0)
-        rollback_hooks(api, process, state, pending, hook_count);
-    return status;
+    return api.flush_code(process, nullptr, 0);
 }
 
 NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,

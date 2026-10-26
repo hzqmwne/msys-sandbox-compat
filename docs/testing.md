@@ -20,7 +20,7 @@
 
 | 测试 | 检查内容 |
 |---|---|
-| `inline-hook-test` | MinHook 计划接口、逻辑 VA/RIP 位移、指令与页面边界、已有跳转串接、批量安装/relay 范围、失败回滚与保护恢复 |
+| `inline-hook-test` | MinHook 计划接口、逻辑 VA/RIP 位移、指令与页面边界、已有跳转串接、批量安装/relay 范围与保护恢复 |
 | `identify-test` | 直接导入快速路径、共享依赖去重、环、节点上限、深依赖链及识别/准备失败语义；无需创建 PSEC |
 | `object-security-test` | ACL 最小追加、enabled groups、空/NULL、输入不变、absolute/self-relative 的 owner/group/SACL/control 保留 |
 | `acl.ps1` | 真实 MSYS 内显式对象与后续默认设置；有限权限、deny、其他 token、adjust-only/query-only 句柄；-Existing 可直接使用已有受限上下文 |
@@ -43,7 +43,7 @@
 
 `scope` 的七项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
 
-CTest 包含独立识别测试；找到 pwsh 后注册原有五个 PSEC、四个受限令牌套件，以及三个环境各两项 relay 套件，共十六项，串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
+CTest 包含独立单测；找到 pwsh 后注册 PSEC、受限令牌、relay 和 ACL 集成套件，集成测试串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
 
 ```powershell
 # 在 tools/msvc-env.ps1 配置过的工具链环境中
@@ -56,7 +56,7 @@ ctest --test-dir build --output-on-failure
 
 relay 链路要求原生桥接只存在一个创建 hook，其余八个入口与 MSYS 地址区保持原样，MSYS 当次设置后的后代默认 ACL 保持一致，允许它与首次 native 入口的启动快照不同；直接回入必须完成真实 Perl/fork/管道及退出码。挂起用例要求调用者 `ResumeThread` 看到原挂起计数 1。策略负例由原生夹具临时收紧自身默认对象 DACL，要求创建返回访问拒绝、目标未运行，随后恢复夹具初始策略；生产代码只做检查，不进行此收紧/恢复操作。
 
-日常选择与改动相关的套件：进程创建/识别/注入/传播变化检查 fork、作用范围和相关进程链；控制台变化检查交互；文档变化检查文档即可。完整二十一项用于涉及多个运行机制的改动或阶段验收，已有通过结果不因无关改动反复重跑。权限拒绝与策略保留检查继续随相关工作负载执行。完整性脚本独立按需运行，不加入 CTest。
+日常选择与改动相关的套件：进程创建/识别/注入/传播变化检查 fork、作用范围和相关进程链；控制台变化检查交互；文档变化检查文档即可。完整 CTest 矩阵用于涉及多个运行机制的改动或阶段验收，已有通过结果不因无关改动反复重跑。权限拒绝与策略保留检查继续随相关工作负载执行。完整性脚本独立按需运行，不加入 CTest。
 
 常规 `verify` 默认一轮；重复 fork/shell 使用 `verify.ps1 -Repetitions 10`。进程链与 ConPTY 的线程 fork 默认一次，压力验收显式使用 `-ThreadRepetitions 10`（最多 1000）。也可通过兼容入口运行 `tests/fixtures/fork.pl 100`。各环境、权限边界、32 个并发子进程及交互语义仍保留，减少的是常规重复次数。测试以退出码、TAP 成败和真实工作负载为准，不依赖固定 TAP 序号或 agent trace 文案。
 

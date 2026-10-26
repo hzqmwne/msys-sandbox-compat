@@ -6,19 +6,9 @@
 using namespace msys_sandbox_compat;
 namespace {
 int failures = 0;
-WriteMemory real_write = nullptr;
-uintptr_t fail_address = 0;
 void check(bool pass, const char *name) {
     std::printf("%s pass=%d\n", name, pass);
     failures += !pass;
-}
-NTSTATUS NTAPI write_memory(HANDLE process, void *address, const void *bytes, SIZE_T count,
-                            PSIZE_T transferred) {
-    if (reinterpret_cast<uintptr_t>(address) == fail_address) {
-        fail_address = 0;
-        return status_access_denied;
-    }
-    return real_write(process, address, bytes, count, transferred);
 }
 NativeApi native_api() {
     NativeApi api{};
@@ -33,8 +23,6 @@ NativeApi native_api() {
     RESOLVE(query_memory, "NtQueryVirtualMemory");
     RESOLVE(flush_code, "NtFlushInstructionCache");
 #undef RESOLVE
-    real_write = api.write;
-    api.write = write_memory;
     return api;
 }
 
@@ -227,7 +215,7 @@ void relocated_operations() {
     }
 }
 
-void installer(bool relay, bool fail) {
+void installer(bool relay) {
     auto api = native_api();
     auto state = std::make_unique<AgentState>();
     auto pages =
@@ -245,24 +233,19 @@ void installer(bool relay, bool fail) {
     }
     DWORD previous = 0;
     VirtualProtect(pages, 4096, PAGE_EXECUTE_READ, &previous);
-    if (fail)
-        fail_address = state->hooks[2].target;
     auto status = install_hooks(api, current_process(), *state, !relay);
-    bool pass = fail ? status == status_access_denied : status >= 0;
+    bool pass = status >= 0;
     VirtualProtect(pages + 4096, 4096, PAGE_EXECUTE_READ, &previous);
     FlushInstructionCache(GetCurrentProcess(), pages, 8192);
     for (size_t i = 0; i < hook_count; ++i) {
-        bool patched = !fail && (!relay || i == static_cast<size_t>(HookId::create_process));
+        bool patched = !relay || i == static_cast<size_t>(HookId::create_process);
         pass = pass && reinterpret_cast<Function>(state->hooks[i].target)() == (patched ? 42 : 41);
-        if (!fail)
-            pass = pass && reinterpret_cast<Function>(state->hooks[i].trampoline)() == 41;
+        pass = pass && reinterpret_cast<Function>(state->hooks[i].trampoline)() == 41;
     }
     MEMORY_BASIC_INFORMATION info{};
     VirtualQuery(pages, &info, sizeof(info));
     pass = pass && info.Protect == PAGE_EXECUTE_READ;
-    check(pass, fail    ? "installer-rollback-and-protection"
-                : relay ? "installer-relay-scope"
-                        : "installer-all");
+    check(pass, relay ? "installer-relay-scope-and-protection" : "installer-all-and-protection");
     VirtualFree(pages, 0, MEM_RELEASE);
 }
 } // namespace
@@ -271,8 +254,7 @@ int main() {
     planner_cases();
     chained_entries();
     relocated_operations();
-    installer(false, false);
-    installer(true, false);
-    installer(false, true);
+    installer(false);
+    installer(true);
     return failures ? 1 : 0;
 }
