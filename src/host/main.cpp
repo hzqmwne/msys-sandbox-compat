@@ -1,10 +1,10 @@
 #include "host.h"
-#include "msys_compat/agent.h"
+#include "msys_sandbox_compat/agent.h"
 #include <cstdio>
 #include <stdexcept>
 #include "pseudoconsole.h"
 
-using namespace msys_compat;
+using namespace msys_sandbox_compat;
 namespace fs = std::filesystem;
 
 int wmain(int argc, wchar_t **argv) try {
@@ -45,7 +45,7 @@ int wmain(int argc, wchar_t **argv) try {
             break;
     }
     if (first == argc) {
-        fprintf(stderr, "Usage (inside a restricted context): msys-compat [--trace] "
+        fprintf(stderr, "Usage (inside a restricted context): msys-sandbox-compat [--trace] "
                         "[--native-relay] [--runtime DLL] PROGRAM "
                         "[arguments...]\n");
         return 2;
@@ -157,7 +157,7 @@ int wmain(int argc, wchar_t **argv) try {
                 check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
                       "locate agent");
                 inject_root(child.hProcess, child.hThread, image, *state,
-                            fs::path(own_path).parent_path() / L"msys-compat.dll");
+                            fs::path(own_path).parent_path() / L"msys-sandbox-compat.dll");
             }
             fprintf(
                 stderr,

@@ -1,11 +1,11 @@
 #include "host.h"
-#include "msys_compat/agent.h"
-#include "msys_compat/pe_view.h"
+#include "msys_sandbox_compat/agent.h"
+#include "msys_sandbox_compat/pe_view.h"
 #include <fstream>
 #include <iterator>
 #include <type_traits>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 AgentState *inherited_agent() {
     // An explicit launcher inside an opted-in tree already has the relay.
     // Its CreateProcess call prepares the child; do not inject it a second time.
@@ -150,4 +150,4 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
     check_nt(install_hooks(originals, process, state, image.related), "install root inline hooks");
     check_nt(protect_agent(originals, process, mapped.data(), state), "agent section protection");
 }
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

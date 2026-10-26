@@ -2,7 +2,7 @@
 
 #include "identify.h"
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
 constexpr size_t descriptor_bytes = 1024;
@@ -68,4 +68,4 @@ NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
 NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source);
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number = 0);
 
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

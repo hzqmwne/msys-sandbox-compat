@@ -38,29 +38,29 @@ endforeach()
 
 # Integration tests create PSEC instances or restricted tokens and must run in
 # a host that permits their creation. They share runtime fixtures, so serialize.
-find_program(MSYS_COMPAT_POWERSHELL NAMES pwsh)
-if(MSYS_COMPAT_POWERSHELL)
+find_program(MSYS_SANDBOX_COMPAT_POWERSHELL NAMES pwsh)
+if(MSYS_SANDBOX_COMPAT_POWERSHELL)
   foreach(suite verify scope conpty late-package process-chain)
-    add_test(NAME psec.${suite} COMMAND "${MSYS_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME psec.${suite} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
       -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1"
-      -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
+      -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(psec.${suite} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   endforeach()
   foreach(mode WriteRestricted FullRestricted)
-    add_test(NAME token.${mode} COMMAND "${MSYS_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME token.${mode} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
       -File "${CMAKE_CURRENT_SOURCE_DIR}/process-chain.ps1" -Environment "${mode}"
-      -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
+      -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(token.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
-    add_test(NAME token.conpty.${mode} COMMAND "${MSYS_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME token.conpty.${mode} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
       -File "${CMAKE_CURRENT_SOURCE_DIR}/conpty.ps1" -Environment "${mode}"
-      -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
+      -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(token.conpty.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   endforeach()
   foreach(mode Psec WriteRestricted FullRestricted)
     foreach(suite process-chain conpty)
-      add_test(NAME relay.${mode}.${suite} COMMAND "${MSYS_COMPAT_POWERSHELL}" -NoProfile
+      add_test(NAME relay.${mode}.${suite} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
         -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1" -Environment "${mode}" -NativeRelay
-        -BinaryDirectory "$<TARGET_FILE_DIR:msys-compat>")
+        -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
       set_tests_properties(relay.${mode}.${suite} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
     endforeach()
   endforeach()

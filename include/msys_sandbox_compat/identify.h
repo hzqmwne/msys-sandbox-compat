@@ -3,7 +3,7 @@
 #include "native_api.h"
 #include <stdint.h>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 
 constexpr size_t image_path_chars = 1024;
 
@@ -34,4 +34,4 @@ NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, c
                        size_t path_chars, const RuntimePaths &runtime, ImageRecord &image,
                        bool &related, const wchar_t *application_directory = nullptr);
 
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

@@ -1,8 +1,8 @@
-#include "msys_compat/agent.h"
-#include "msys_compat/native_buffer.h"
+#include "msys_sandbox_compat/agent.h"
+#include "msys_sandbox_compat/native_buffer.h"
 #include <initializer_list>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 namespace {
 bool same_bytes(const void *left, const void *right, size_t count) {
     auto a = static_cast<const BYTE *>(left);
@@ -137,4 +137,4 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
     api.close(child);
     return status;
 }
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

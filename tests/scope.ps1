@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Force $fixtures,$evidence,$state,(Join-Path $state
 $policy=Join-Path $state 'scope-policy.json'
 @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
 $launcher=Get-PsecLauncher $BinaryDirectory
-$compat=Join-Path $BinaryDirectory 'msys-compat.exe'
+$compat=Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $probe=Join-Path $fixtureBinaries 'native-probe.exe'
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 Copy-Item -LiteralPath $probe -Destination (Join-Path $fixtures 'bash.exe')

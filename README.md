@@ -1,4 +1,4 @@
-# MSYS Compat
+# MSYS Sandbox Compat
 
 让未修改的 MSYS 程序在 Windows 受限执行环境中运行。当前验证覆盖 **Windows 原生 PSEC / AMD64**，以及参照相关配置构造的 write-restricted 和完整 restricting SID 检查两种非 AppContainer 令牌。这些底层隔离模型是当前代表性验收基础，适用范围依据有效安全策略与进程创建条件判断。
 
@@ -33,8 +33,8 @@
 
 | 文件 | 职责 |
 |---|---|
-| `msys-compat.exe` | 在既有受限环境中启动目标、识别、准备和等待进程树 |
-| `msys-compat.dll` | MSYS 完整兼容模块；显式 relay 模式也映射到原生进程，只启用创建 hook |
+| `msys-sandbox-compat.exe` | 在既有受限环境中启动目标、识别、准备和等待进程树 |
+| `msys-sandbox-compat.dll` | MSYS 完整兼容模块；显式 relay 模式也映射到原生进程，只启用创建 hook |
 
 `psec-run.exe` 是按需构建的开发验证工具，输出到 `build/tools`，不随生产包安装。`run.ps1` 使用它创建演示 PSEC；外部隔离启动器直接运行兼容宿主，无需这个工具。测试夹具位于 `build/tests/bin`。
 
@@ -69,16 +69,16 @@
 ## 仓库结构
 
 ```text
-src/core/               宿主与 agent 共享的识别、进程准备和安全上下文检查
-src/agent/              hook 入口与无 CRT 支持
-src/host/               兼容宿主、首次映射与 ConPTY
-include/msys_compat/    内部 Native API、识别类型与 agent 状态
-tests/                  可提交的回归脚本与测试夹具
-third_party/            固定的第三方头文件及许可
-tools/                  构建工具链定位和可选 PSEC 开发工具
-docs/                   当前设计、使用、兼容范围、测试与架构决策
-build/                  CMake 缓存、中间文件、二进制和测试夹具，不提交
-unused/                 本地专题笔记、证据、实验与运行状态，不提交
+src/core/                      宿主与 agent 共享的识别、进程准备和安全上下文检查
+src/agent/                     hook 入口与无 CRT 支持
+src/host/                      兼容宿主、首次映射与 ConPTY
+include/msys_sandbox_compat/    内部 Native API、识别类型与 agent 状态
+tests/                         可提交的回归脚本与测试夹具
+third_party/                   固定的第三方头文件及许可
+tools/                         构建工具链定位和可选 PSEC 开发工具
+docs/                          当前设计、使用、兼容范围、测试与架构决策
+build/                         CMake 缓存、中间文件、二进制和测试夹具，不提交
+unused/                        本地专题笔记、证据、实验与运行状态，不提交
 ```
 
 [文档索引](docs/README.md) · [使用说明](docs/getting-started.md) · [当前设计](docs/design.md) · [兼容范围](docs/compatibility.md) · [测试说明](docs/testing.md) · [架构决策](docs/decisions/README.md) · [变更记录](CHANGELOG.md)

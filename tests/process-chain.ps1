@@ -26,7 +26,7 @@ if (!$restricted) {
 }
 $launcher = if ($restricted) { Join-Path $fixtureBinaries 'restricted-run.exe' }
             else { Get-PsecLauncher $BinaryDirectory }
-$compat = Join-Path $BinaryDirectory 'msys-compat.exe'
+$compat = Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $bridge = Join-Path $(if ($restricted) {$BinaryDirectory} else {$fixtureBinaries}) 'native-bridge.exe'
 $bash = Join-Path $GitRoot 'usr\bin\bash.exe'
 $runtime = Join-Path $GitRoot 'usr\bin\msys-2.0.dll'

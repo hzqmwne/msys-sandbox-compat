@@ -1,7 +1,7 @@
 #pragma once
 #include "native_api.h"
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 // Per-call storage for hooks running on MSYS's small, guarded internal stacks.
 // Uses original NT entry points, requires no CRT heap, and is never shared.
 class NativeBuffer {
@@ -26,4 +26,4 @@ class NativeBuffer {
     const NativeApi &api_;
     PVOID data_ = nullptr;
 };
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

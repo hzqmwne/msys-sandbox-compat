@@ -10,7 +10,7 @@ Related: ADR-0001、ADR-0005、ADR-0006
 
 ## Decision
 
-默认构建和安装只交付 msys-compat.exe、msys-compat.dll 及文档/许可。psec-run 位于 tools，显式开启开发工具或测试时构建，不随生产安装；测试夹具拥有独立源码与输出目录。
+默认构建和安装只交付 msys-sandbox-compat.exe、msys-sandbox-compat.dll 及文档/许可。psec-run 位于 tools，显式开启开发工具或测试时构建，不随生产安装；测试夹具拥有独立源码与输出目录。
 
 core 保存共享识别、进程准备与 token 检查，分别按宿主和无 CRT agent 的约束编译，不新增运行库或公共 SDK。生产仍在原策略允许的位置与权限内运行。
 

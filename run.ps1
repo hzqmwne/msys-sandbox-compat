@@ -29,7 +29,7 @@ try {
     $env:TEMP=Join-Path $state 'tmp'; $env:TMP=$env:TEMP; $env:HOME=Join-Path $state 'home'
     $launchArgs=@($policyPath)
     if (!$Raw) {
-        $launchArgs += (Join-Path $PSScriptRoot 'build\bin\msys-compat.exe')
+        $launchArgs += (Join-Path $PSScriptRoot 'build\bin\msys-sandbox-compat.exe')
         if ($NativeRelay) { $launchArgs += '--native-relay' }
         $launchArgs += @('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
         if ($Trace) { $launchArgs += '--trace' }

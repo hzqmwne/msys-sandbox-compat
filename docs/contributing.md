@@ -1,6 +1,6 @@
 # 贡献约定
 
-生产代码位于 `src/core`、`src/host`、`src/agent` 和内部头文件目录 `include/msys_compat`。`tools/psec-run` 是可选开发工具；`tests` 保存回归入口，夹具和负载在 `tests/fixtures`，识别单测在 `tests/unit`。
+生产代码位于 `src/core`、`src/host`、`src/agent` 和内部头文件目录 `include/msys_sandbox_compat`。`tools/psec-run` 是可选开发工具；`tests` 保存回归入口，夹具和负载在 `tests/fixtures`，识别单测在 `tests/unit`。
 
 优先直接控制流和已有类型，字段、参数与辅助函数只服务当前需求。core 源码按宿主与 agent 的不同选项分别编译；agent 无 CRT、普通导入和 DllMain，注意 MSYS 管理的二级线程栈。不要为了复用引入普通运行库、通用注入框架或缓存跨调用临时状态。
 

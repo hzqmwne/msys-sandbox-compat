@@ -6,7 +6,7 @@
 
 ### 精简与结构
 
-- 生产包收敛为 msys-compat.exe/DLL；psec-run 移为可选开发工具，不再安装。默认构建只生成生产兼容层，开发工具和回归分别通过 -Tools/-Tests 开启；安装暂存迁到 build/package。
+- 生产包收敛为 msys-sandbox-compat.exe/DLL；psec-run 移为可选开发工具，不再安装。默认构建只生成生产兼容层，开发工具和回归分别通过 -Tools/-Tests 开启；安装暂存迁到 build/package。
 - core 明确宿主/agent 共享源码，独立内部识别与 agent 头文件；测试源码、夹具和输出分开，统一 Windows 参数转义实现。
 - 依赖识别保留 128 节点预算和去重，取消额外深度限制；trampoline 批量初始化并统一保护，继承 relay 不重复识别或复制状态。
 - ConPTY 输入脚本与标准输入共用句柄循环；历史诊断退出默认回归，常规重复次数与压力参数分离，保留功能和权限边界矩阵。
@@ -38,6 +38,7 @@
 
 ### 项目组织
 
+- 项目、仓库和生产产物统一采用 MSYS Sandbox Compat / `msys-sandbox-compat`；同步 CMake 标识、内部 `msys_sandbox_compat` 命名空间与头文件目录、`MSYS_SANDBOX_COMPAT_SESSION` 会话标记、对象名前缀、脚本和文档。
 - 明确生产兼容约束：不修改任何磁盘文件/目录 ACL，不放宽原 restricted token 限制；测试夹具授权只定义测试初始条件，不能作为生产补权步骤。
-- 统一产物名为 `psec-run.exe`、`msys-compat.exe`、`msys-compat.dll`，正式构建与本地研究分开。
+- 统一产物名为 `psec-run.exe`、`msys-sandbox-compat.exe`、`msys-sandbox-compat.dll`，正式构建与本地研究分开。
 - 公开文档采用当前设计、使用/测试说明与编号 ADR；演进计划和专题研究保存在本地。

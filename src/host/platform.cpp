@@ -2,7 +2,7 @@
 #include <cstdio>
 #include <stdexcept>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 void check(bool success, const char *operation) {
     if (!success) {
         fprintf(stderr, "[error] %s: Win32 %lu\n", operation, GetLastError());
@@ -84,4 +84,4 @@ void configure_runtime_paths(const std::filesystem::path &runtime, AgentState &s
     auto system_path = native_directory(directory);
     memcpy(state.runtime.system_directory, system_path.c_str(), (system_path.size() + 1) * 2);
 }
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

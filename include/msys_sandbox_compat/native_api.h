@@ -3,7 +3,7 @@
 #include <windows.h>
 #include <winternl.h>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 
 inline HANDLE current_process() { return reinterpret_cast<HANDLE>(-1); }
 constexpr NTSTATUS status_success = 0;
@@ -90,4 +90,4 @@ struct NativeApi {
     decltype(&RtlAddFunctionTable) add_function_table;
 };
 
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

@@ -6,7 +6,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'tools\msvc-env.ps1')
-& $cmake -S $PSScriptRoot -B (Join-Path $PSScriptRoot 'build') -G 'NMake Makefiles' "-DCMAKE_BUILD_TYPE=$Configuration" "-DBUILD_TESTING=$([int]$Tests.IsPresent)" "-DMSYS_COMPAT_BUILD_TOOLS=$([int]$Tools.IsPresent)"
+& $cmake -S $PSScriptRoot -B (Join-Path $PSScriptRoot 'build') -G 'NMake Makefiles' "-DCMAKE_BUILD_TYPE=$Configuration" "-DBUILD_TESTING=$([int]$Tests.IsPresent)" "-DMSYS_SANDBOX_COMPAT_BUILD_TOOLS=$([int]$Tools.IsPresent)"
 if ($LASTEXITCODE) { throw 'CMake configure failed' }
 & $cmake --build (Join-Path $PSScriptRoot 'build')
 if ($LASTEXITCODE) { throw 'C++ build failed' }

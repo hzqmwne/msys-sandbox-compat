@@ -1,11 +1,11 @@
-#include "msys_compat/agent.h"
-#include "msys_compat/pe_view.h"
-#include "msys_compat/native_buffer.h"
+#include "msys_sandbox_compat/agent.h"
+#include "msys_sandbox_compat/pe_view.h"
+#include "msys_sandbox_compat/native_buffer.h"
 #include <intrin.h>
 #include <string.h>
 #include <stdlib.h>
 
-using namespace msys_compat;
+using namespace msys_sandbox_compat;
 
 extern "C" {
 __declspec(dllexport) AgentState g_agent_state{};

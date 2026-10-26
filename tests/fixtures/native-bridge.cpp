@@ -1,5 +1,5 @@
-#include "msys_compat/command_line.h"
-using msys_compat::quote;
+#include "msys_sandbox_compat/command_line.h"
+using msys_sandbox_compat::quote;
 #include <windows.h>
 #include <sddl.h>
 #include <cstdio>

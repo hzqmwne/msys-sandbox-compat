@@ -1,4 +1,4 @@
-#include "msys_compat/identify.h"
+#include "msys_sandbox_compat/identify.h"
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-using namespace msys_compat;
+using namespace msys_sandbox_compat;
 struct Image {
     std::vector<BYTE> bytes = std::vector<BYTE>(0x4000);
 };

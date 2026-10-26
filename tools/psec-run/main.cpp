@@ -1,5 +1,5 @@
-#include "msys_compat/command_line.h"
-using msys_compat::quote;
+#include "msys_sandbox_compat/command_line.h"
+using msys_sandbox_compat::quote;
 // Minimal native PSEC 1.0 launcher. No AppContainer/DACL fallback.
 #include "ProcessSecurityEnvironment_generated.h"
 #include <nlohmann/json.hpp>

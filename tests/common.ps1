@@ -49,7 +49,7 @@ function Initialize-RestrictedTestFiles([string]$BinaryDirectory, [string]$Worki
     $readonly = Join-Path $WorkingDirectory 'readonly'
     New-Item -ItemType Directory -Force $readonly | Out-Null
     [IO.File]::WriteAllText((Join-Path $WorkingDirectory '.restricted-fixture'),'test-only')
-    foreach ($name in @('msys-compat.exe','msys-compat.dll')) {
+    foreach ($name in @('msys-sandbox-compat.exe','msys-sandbox-compat.dll')) {
         Copy-Item -LiteralPath (Join-Path $BinaryDirectory $name) -Destination $readonly
     }
     $fixtures = Get-TestFixtureDirectory $BinaryDirectory

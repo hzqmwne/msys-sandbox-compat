@@ -3,7 +3,7 @@
 #include <windows.h>
 #include <stdint.h>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 
 inline unsigned char ascii_lower(unsigned char value) {
     return value >= 'A' && value <= 'Z' ? value + ('a' - 'A') : value;
@@ -99,4 +99,4 @@ class PeView {
     size_t extent_;
 };
 
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

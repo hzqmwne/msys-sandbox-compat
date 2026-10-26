@@ -14,7 +14,7 @@ $allowedHash=(Get-FileHash -LiteralPath $allowed).Hash
 $policy=Join-Path $state 'verify-policy.json'
 @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
 $launcher=Get-PsecLauncher $BinaryDirectory
-$supervisor=Join-Path $BinaryDirectory 'msys-compat.exe'
+$supervisor=Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $results=[System.Collections.Generic.List[object]]::new()
 function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$Expected=0,[switch]$Raw,[string]$Match='') {
     $start=New-TestProcessInfo $launcher @() $state

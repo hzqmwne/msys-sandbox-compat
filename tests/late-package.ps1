@@ -19,7 +19,7 @@ $moduleTest=(Join-Path $PSScriptRoot 'fixtures\late-module.pl').Replace('\','/')
 $command='export PATH=/usr/bin:/bin; echo WAITING-FOR-PACKAGE; read -r ready; test "$ready" = installed || exit 80; export PATH="'+$package.Replace('\','/')+':/usr/bin:/bin"; "'+$exe.Replace('\','/')+'" "LATE-EXE-PASS\n" || exit 81; /usr/bin/perl "'+$moduleTest+'" "'+$dll.Replace('\','/')+'" "'+$helper.Replace('\','/')+'" || exit $?; echo LATE-PACKAGE-PASS'
 $info=New-TestProcessInfo (Get-PsecLauncher $BinaryDirectory) @() $state
 $info.RedirectStandardInput=$true
-foreach($a in @($policy,(Join-Path $BinaryDirectory 'msys-compat.exe'),'--trace','--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$bash,'--noprofile','--norc','-c',$command)){$info.ArgumentList.Add($a)}
+foreach($a in @($policy,(Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'),'--trace','--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$bash,'--noprofile','--norc','-c',$command)){$info.ArgumentList.Add($a)}
 $p=[Diagnostics.Process]::Start($info)
 $errorText=$p.StandardError.ReadToEndAsync()
 try {

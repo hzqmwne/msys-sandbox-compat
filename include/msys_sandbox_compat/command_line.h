@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 inline std::wstring quote(const std::wstring &text) {
     std::wstring out = L"\"";
     size_t slashes = 0;
@@ -20,4 +20,4 @@ inline std::wstring quote(const std::wstring &text) {
     out.append(slashes * 2, L'\\');
     return out + L'"';
 }
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

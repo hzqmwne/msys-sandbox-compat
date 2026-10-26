@@ -2,7 +2,7 @@
 #include <sddl.h>
 #include <securityappcontainer.h>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 HANDLE configure_security(AgentState &state) {
     // MSYS-created native descendants can deny reopening their primary token.
     // The current-token pseudo handle provides the read-only queries we need.
@@ -71,14 +71,14 @@ HANDLE configure_security(AgentState &state) {
     HANDLE directory = nullptr;
     if (!sid) {
         wchar_t tag[32]{};
-        auto count = GetEnvironmentVariableW(L"MSYS_COMPAT_SESSION", tag, _countof(tag));
+        auto count = GetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", tag, _countof(tag));
         check(count < _countof(tag), "inherited compatibility session");
         for (DWORD i = 0; i < count; ++i)
             check(tag[i] >= L'0' && tag[i] <= L'9', "compatibility session tag");
         auto identity = count ? std::wstring(tag) : std::to_wstring(GetCurrentProcessId());
-        check(SetEnvironmentVariableW(L"MSYS_COMPAT_SESSION", identity.c_str()),
+        check(SetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", identity.c_str()),
               "inherit compatibility session");
-        root += L"\\msys-compat-" + identity;
+        root += L"\\msys-sandbox-compat-" + identity;
         check(root.size() < object_root_chars, "namespace capacity");
         UNICODE_STRING name{static_cast<USHORT>(root.size() * sizeof(wchar_t)),
                             static_cast<USHORT>((root.size() + 1) * sizeof(wchar_t)), root.data()};
@@ -94,4 +94,4 @@ HANDLE configure_security(AgentState &state) {
     state.root_chars = static_cast<uint32_t>(root.size());
     return directory;
 }
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

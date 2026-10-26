@@ -1,5 +1,5 @@
-#include "msys_compat/command_line.h"
-using msys_compat::quote;
+#include "msys_sandbox_compat/command_line.h"
+using msys_sandbox_compat::quote;
 // Test-only restricted-token runner. It changes ACLs only in a marked fixture directory.
 #include <windows.h>
 #include <sddl.h>

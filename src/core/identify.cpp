@@ -1,10 +1,10 @@
-#include "msys_compat/identify.h"
-#include "msys_compat/pe_view.h"
-#include "msys_compat/native_buffer.h"
+#include "msys_sandbox_compat/identify.h"
+#include "msys_sandbox_compat/pe_view.h"
+#include "msys_sandbox_compat/native_buffer.h"
 #include <string.h>
 #include <stdlib.h>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 namespace {
 
 size_t length(const wchar_t *path) {
@@ -340,4 +340,4 @@ NTSTATUS identify_process(const NativeApi &api, HANDLE process, const RuntimePat
     return related_image(api, process, base, image.path, chars, runtime, image.record,
                          image.related);
 }
-} // namespace msys_compat
+} // namespace msys_sandbox_compat

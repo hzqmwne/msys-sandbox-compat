@@ -64,15 +64,15 @@ public sealed class TerminalTest : IDisposable {
 [string[]]$prefix=if($existing){@()}elseif($restricted){@($(if($Environment -eq 'WriteRestricted'){'write'}else{'full'}),$state)}else{@($policy)}
 $targetArguments=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),'--conpty','--conpty-size','120x40',(Join-Path $GitRoot 'usr\bin\bash.exe'),'--noprofile','--norc','-i')
 if($NativeRelay){$targetArguments=@('--native-relay')+$targetArguments}
-$arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirectory 'msys-compat.exe'))+$targetArguments}
-$launcher=if($existing){Join-Path $sourceBinaries 'msys-compat.exe'}elseif($restricted){Join-Path $fixtureBinaries 'restricted-run.exe'}else{Get-PsecLauncher $sourceBinaries}
+$arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'))+$targetArguments}
+$launcher=if($existing){Join-Path $sourceBinaries 'msys-sandbox-compat.exe'}elseif($restricted){Join-Path $fixtureBinaries 'restricted-run.exe'}else{Get-PsecLauncher $sourceBinaries}
 $info=New-TestProcessInfo $launcher $arguments $state
 $info.RedirectStandardInput=$true
 $t=[TerminalTest]::new($info)
 $passed=$false
 $exitCode=$null
 try {
-    $t.Send("export PS1='MSYS-COMPAT> '; export PATH=/usr/bin:/bin; /usr/bin/stty -echo; printf '\nREADY-INPUT\n'`r")
+    $t.Send("export PS1='MSYS-SANDBOX-COMPAT> '; export PATH=/usr/bin:/bin; /usr/bin/stty -echo; printf '\nREADY-INPUT\n'`r")
     $t.Await("READY-INPUT`r`n")
     if($restricted -or $existing){
         $fork=(Join-Path $(if($restricted){$BinaryDirectory}else{(Join-Path $PSScriptRoot 'fixtures')}) 'fork.pl').Replace('\','/').Replace("'","'\''")
@@ -90,14 +90,14 @@ try {
     $t.Send('test -t 0 && test -t 1 && test -t 2 || exit 81; test "$(stty size)" = "40 120" || exit 82; test "$(printf redirected)" = redirected || exit 83; (echo CONPTY-FORK-PASS); MSYS2_ARG_CONV_EXCL="*" /c/Windows/System32/cmd.exe /d /c "echo CONPTY-NATIVE-PASS"; echo CONTROL-READY; sleep 30'+"`r")
     $t.Await("CONTROL-READY`r`n")
     [Threading.Thread]::Sleep(200); $position=$t.Text.Length; $t.Send([string][char]3)
-    $t.AwaitFrom('MSYS-COMPAT> ',$position)
+    $t.AwaitFrom('MSYS-SANDBOX-COMPAT> ',$position)
     $t.Send('s=$?; test "$s" = 130 || exit 84; echo CTRL-C-PASS; test -o monitor || exit 86; sleep 30 & p=$!; sleep 0.2; kill -STOP "$p"; sleep 0.2; jobs -s; echo STOP-READY'+"`r")
     $t.Await("STOP-READY`r`n")
     if($t.Text -notmatch 'Stopped'){throw 'Background job did not stop'}
     $t.Send('bg %1; echo BACKGROUND-READY; fg %1'+"`r")
     $t.Await("BACKGROUND-READY`r`n")
     [Threading.Thread]::Sleep(200); $position=$t.Text.Length; $t.Send([string][char]3)
-    $t.AwaitFrom('MSYS-COMPAT> ',$position)
+    $t.AwaitFrom('MSYS-SANDBOX-COMPAT> ',$position)
     $finish='s=$?; test "$s" = 130 || exit 85; echo JOB-CONTROL-PASS; '
     if($restricted){$finish+="'$probe' probe '$workspace' || exit 90; "}
     $t.Send($finish+'exit 37'+"`r")

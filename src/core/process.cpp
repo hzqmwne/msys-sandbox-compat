@@ -1,10 +1,10 @@
-#include "msys_compat/agent.h"
-#include "msys_compat/pe_view.h"
-#include "msys_compat/native_buffer.h"
+#include "msys_sandbox_compat/agent.h"
+#include "msys_sandbox_compat/pe_view.h"
+#include "msys_sandbox_compat/native_buffer.h"
 #include <string.h>
 #include <intrin.h>
 
-namespace msys_compat {
+namespace msys_sandbox_compat {
 
 // The only supported entry format is the AMD64 ntdll syscall prefix consisting
 // of two whole instructions: mov r10,rcx; mov eax,imm32. Refuse other builds or
@@ -237,4 +237,4 @@ void agent_log(const AgentState &state, const char *event, ULONG_PTR number) {
                          nullptr, nullptr);
 }
 
-} // namespace msys_compat
+} // namespace msys_sandbox_compat
