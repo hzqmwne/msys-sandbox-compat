@@ -33,13 +33,18 @@ class Pseudoconsole {
     std::thread reader, writer;
     std::atomic<bool> stopping{false};
     DWORD original_input_mode = 0;
+    DWORD original_output_mode = 0;
+    UINT original_input_cp = 0, original_output_cp = 0;
     bool restore_input_mode = false;
+    bool restore_output_mode = false;
+    HANDLE output_sink = nullptr;
     HANDLE input_source = nullptr;
     bool owns_input = false;
     void create(const std::wstring &script, COORD dimensions = {100, 30},
                 bool follow_viewport = false) {
         input_source = GetStdHandle(STD_INPUT_HANDLE);
         const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+        output_sink = output;
         COORD viewport{};
         if (!script.empty()) {
             input_source = CreateFileW(script.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
@@ -48,13 +53,27 @@ class Pseudoconsole {
                 throw std::runtime_error("open ConPTY input script");
             owns_input = true;
         } else if (GetConsoleMode(input_source, &original_input_mode)) {
-            restore_input_mode =
-                SetConsoleMode(input_source,
-                               (original_input_mode &
-                                ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT)) |
-                                   ENABLE_VIRTUAL_TERMINAL_INPUT) != FALSE;
+            restore_input_mode = true;
+            original_input_cp = GetConsoleCP();
+            if (!SetConsoleMode(input_source, (original_input_mode &
+                                               ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
+                                                 ENABLE_PROCESSED_INPUT | ENABLE_QUICK_EDIT_MODE)) |
+                                                  ENABLE_EXTENDED_FLAGS |
+                                                  ENABLE_VIRTUAL_TERMINAL_INPUT) ||
+                !original_input_cp || !SetConsoleCP(CP_UTF8))
+                throw std::runtime_error("configure ConPTY terminal input");
             if (follow_viewport)
                 viewport = viewport_size(output);
+        }
+        if (GetConsoleMode(output, &original_output_mode)) {
+            restore_output_mode = true;
+            original_output_cp = GetConsoleOutputCP();
+            const auto mode =
+                original_output_mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            if (!SetConsoleMode(output, mode) || !original_output_cp ||
+                !SetConsoleOutputCP(CP_UTF8))
+                throw std::runtime_error("configure ConPTY terminal output");
+            SetConsoleMode(output, mode | DISABLE_NEWLINE_AUTO_RETURN);
         }
         if (viewport.X)
             dimensions = viewport;
@@ -119,8 +138,6 @@ class Pseudoconsole {
             } while (WaitForSingleObject(writer.native_handle(), 20) == WAIT_TIMEOUT);
             writer.join();
         }
-        if (restore_input_mode)
-            SetConsoleMode(input_source, original_input_mode);
         if (owns_input)
             CloseHandle(input_source);
         if (input_write)
@@ -130,6 +147,14 @@ class Pseudoconsole {
         connected();
         if (reader.joinable())
             reader.join();
+        if (restore_input_mode)
+            SetConsoleMode(input_source, original_input_mode);
+        if (restore_output_mode)
+            SetConsoleMode(output_sink, original_output_mode);
+        if (original_input_cp)
+            SetConsoleCP(original_input_cp);
+        if (original_output_cp)
+            SetConsoleOutputCP(original_output_cp);
         if (output_read)
             CloseHandle(output_read);
     }

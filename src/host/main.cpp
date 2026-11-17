@@ -7,6 +7,8 @@
 using namespace msys_sandbox_compat;
 namespace fs = std::filesystem;
 
+static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
+
 int wmain(int argc, wchar_t **argv) try {
     bool trace = false;
     bool conpty = false;
@@ -52,6 +54,7 @@ int wmain(int argc, wchar_t **argv) try {
                         "[arguments...]\n");
         return 2;
     }
+    check(SetConsoleCtrlHandler(wait_control, TRUE), "register waiting-host Ctrl+C handler");
     auto executable = fs::absolute(argv[first]);
     std::unique_ptr<AgentState> state;
     auto inherited = inherited_agent();

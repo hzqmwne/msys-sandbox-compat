@@ -23,6 +23,7 @@ static void hrcheck(HRESULT hr, const char *what) {
     }
 }
 using CloseEnvironment = void(WINAPI *)(HANDLE);
+static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 struct Resources {
     HMODULE dll{};
     HANDLE environment{};
@@ -144,6 +145,7 @@ int wmain(int argc, wchar_t **argv) try {
         TerminateProcess(r.child.hProcess, 1);
         check(FALSE, "AssignProcessToJobObject");
     }
+    check(SetConsoleCtrlHandler(wait_control, TRUE), "register PSEC waiting-host Ctrl+C handler");
     check(ResumeThread(r.child.hThread) != (DWORD)-1, "ResumeThread");
     check(WaitForSingleObject(r.child.hProcess, INFINITE) == WAIT_OBJECT_0, "wait workload");
     DWORD exit = 1;

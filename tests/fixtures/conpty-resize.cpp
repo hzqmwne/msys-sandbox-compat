@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
@@ -32,6 +33,86 @@ static void report_size(const char *label, COORD size) {
 
 static bool same_size(COORD a, COORD b) { return a.X == b.X && a.Y == b.Y; }
 
+static volatile LONG interrupted = 0;
+static BOOL WINAPI probe_control(DWORD event) {
+    if (event != CTRL_C_EVENT)
+        return FALSE;
+    InterlockedExchange(&interrupted, 1);
+    return TRUE;
+}
+
+static int screen_probe() {
+    check(SetConsoleCtrlHandler(probe_control, TRUE), "target Ctrl+C handler");
+    DWORD count = 0;
+    const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
+    constexpr char ready[] = "CONTROL-READY\r\n";
+    check(WriteFile(output, ready, sizeof(ready) - 1, &count, nullptr), "report Ctrl+C readiness");
+    const auto deadline = GetTickCount64() + 5000;
+    while (!InterlockedCompareExchange(&interrupted, 0, 0) && GetTickCount64() < deadline)
+        Sleep(10);
+    check(InterlockedCompareExchange(&interrupted, 0, 0) != 0, "target received Ctrl+C");
+    constexpr wchar_t text[] = L"SCREEN-中文-é-Ａ\r\n";
+    check(WriteConsoleW(output, text, _countof(text) - 1, &count, nullptr), "write Unicode screen");
+    DWORD mode = 0;
+    check(GetConsoleMode(output, &mode) &&
+              SetConsoleMode(output, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING),
+          "enable probe VT");
+    constexpr char cursor[] = "CURSOR-NO\x1b[2DOK\r\n";
+    check(WriteFile(output, cursor, sizeof(cursor) - 1, &count, nullptr), "write cursor move");
+    return 0;
+}
+
+static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
+
+static int outer_state(int argc, wchar_t **argv, bool failure) {
+    check(argc >= 3, "outer-state target");
+    const auto input = GetStdHandle(STD_INPUT_HANDLE);
+    const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD in_mode = 0, out_mode = 0;
+    check(GetConsoleMode(input, &in_mode) && GetConsoleMode(output, &out_mode), "outer modes");
+    out_mode &= ~ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+    check(SetConsoleMode(output, out_mode) && SetConsoleCP(437) && SetConsoleOutputCP(437),
+          "set outer initial state");
+    check(SetConsoleCtrlHandler(wait_control, TRUE), "protect test owner from Ctrl+C");
+    auto command = msys_sandbox_compat::quote(argv[2]);
+    for (int i = 3; i < argc; ++i)
+        command += L" " + msys_sandbox_compat::quote(argv[i]);
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION child{};
+    check(CreateProcessW(argv[2], command.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr,
+                         &startup, &child),
+          "start terminal session");
+    CloseHandle(child.hThread);
+    const auto waited = WaitForSingleObject(child.hProcess, 25000);
+    if (waited != WAIT_OBJECT_0)
+        TerminateProcess(child.hProcess, 1);
+    DWORD code = 1;
+    GetExitCodeProcess(child.hProcess, &code);
+    CloseHandle(child.hProcess);
+    check(waited == WAIT_OBJECT_0 && code == (failure ? 1u : 0u), "terminal session exit");
+    DWORD in_after = 0, out_after = 0;
+    check(GetConsoleMode(input, &in_after) && GetConsoleMode(output, &out_after) &&
+              in_after == in_mode && out_after == out_mode && GetConsoleCP() == 437 &&
+              GetConsoleOutputCP() == 437,
+          "restore outer modes and code pages");
+    if (failure) {
+        puts("OUTER-STATE-PASS");
+        return 0;
+    }
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    check(GetConsoleScreenBufferInfo(output, &info), "query outer screen");
+    std::wstring screen(static_cast<size_t>(info.dwSize.X) * info.dwSize.Y, L'\0');
+    DWORD count = 0;
+    check(ReadConsoleOutputCharacterW(output, screen.data(), static_cast<DWORD>(screen.size()),
+                                      {0, 0}, &count),
+          "read rendered outer screen");
+    check(screen.find(L"SCREEN-中文-é-Ａ") != std::wstring::npos, "render Unicode screen");
+    check(screen.find(L"CURSOR-OK") != std::wstring::npos, "render cursor movement");
+    puts("OUTER-STATE-PASS");
+    return 0;
+}
+
 static int probe(bool fixed_size) {
     auto size = read_viewport();
     report_size("READY", size);
@@ -58,10 +139,15 @@ static int probe(bool fixed_size) {
 }
 
 static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
-    const bool resize = mode != L"--drive-stdio";
+    const bool bash = mode == L"--drive-bash";
+    const bool powershell = mode == L"--drive-powershell";
+    const bool terminal = mode == L"--drive-terminal" || bash || powershell;
+    const bool resize = mode != L"--drive-stdio" && !terminal;
     const bool fixed_size = mode == L"--drive-fixed";
-    const char *completion_marker = resize ? "VIEWPORT-FINAL=" : "STDIO-CONSOLE";
-    const DWORD expected_exit = resize ? 0 : 37;
+    const char *completion_marker = terminal ? "OUTER-STATE-PASS"
+                                    : resize ? "VIEWPORT-FINAL="
+                                             : "STDIO-CONSOLE";
+    const DWORD expected_exit = resize || terminal ? 0 : 37;
     std::unique_ptr<void, decltype(&ClosePseudoConsole)> outer(nullptr, ClosePseudoConsole);
     using Handle = std::unique_ptr<void, decltype(&CloseHandle)>;
     HANDLE input_read = nullptr, input_write = nullptr;
@@ -104,9 +190,17 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
     input.reset();
     output.reset();
 
-    const auto deadline = GetTickCount64() + 15000;
+    const auto deadline = GetTickCount64() + 25000;
     bool resize_sent = false;
+    bool control_sent = false;
+    bool initialized = false, edit_sent = false, wait_sent = false, exit_sent = false;
     std::string transcript;
+    auto send_text = [&](const char *text) {
+        const auto length = static_cast<DWORD>(strlen(text));
+        DWORD count = 0;
+        check(WriteFile(send.get(), text, length, &count, nullptr) && count == length,
+              "send terminal input");
+    };
     do {
         DWORD available = 0;
         while (PeekNamedPipe(receive.get(), nullptr, 0, nullptr, &available, nullptr) &&
@@ -128,6 +222,41 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
                       "send fixed-size checkpoint");
             }
         }
+        if (terminal && !control_sent && transcript.find("CONTROL-READY") != std::string::npos) {
+            DWORD count = 0;
+            constexpr char ctrl_c[] = "\x1b[67;46;3;1;8;1_\x1b[67;46;3;0;8;1_";
+            check(WriteFile(send.get(), ctrl_c, sizeof(ctrl_c) - 1, &count, nullptr) &&
+                      count == sizeof(ctrl_c) - 1,
+                  "send Ctrl+C to the outer terminal");
+            control_sent = true;
+        }
+        if (bash && !initialized && transcript.find("bash-") != std::string::npos) {
+            send_text("export PS1='DEMO-READY> '; stty -echo; printf '\\nDEMO-INPUT\\n'\r");
+            initialized = true;
+        }
+        if (bash && !edit_sent && transcript.find("DEMO-INPUT\r\n") != std::string::npos) {
+            // Move left inside a quoted argument, insert X, then execute the edited line.
+            send_text("printf 'EDITED=%s\\n' '中文b\x1b[DX\x1b[C'\r");
+            edit_sent = true;
+        }
+        if (bash && !wait_sent && transcript.find("EDITED=中文Xb") != std::string::npos) {
+            send_text(
+                "printf 'SCREEN-中文-é-Ａ\\n'; printf 'CURSOR-NO\\033[2DOK\\n'; "
+                "test \"$(stty size)\" = '28 96' || exit 82; "
+                "perl -e '$SIG{INT}=sub {exit 130}; $|=1; print \"CONTROL-READY\\n\"; sleep 30'\r");
+            wait_sent = true;
+        }
+        if (bash && control_sent && !exit_sent &&
+            transcript.rfind("DEMO-READY> ") > transcript.find("CONTROL-READY") &&
+            transcript.rfind("DEMO-READY> ") != std::string::npos) {
+            send_text("s=$?; test \"$s\" = 130 || exit 83; echo DEMO-CTRL-C-PASS; exit 0\r");
+            exit_sent = true;
+        }
+        if (powershell && !initialized &&
+            transcript.find("DEMO-PS-READY\r\n") != std::string::npos) {
+            send_text("中文-é-Ａ\r");
+            initialized = true;
+        }
         DWORD code = 0;
         check(GetExitCodeProcess(process.get(), &code), "get PSEC exit code");
         if (code != STILL_ACTIVE &&
@@ -142,9 +271,15 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
 int wmain(int argc, wchar_t **argv) try {
     check(argc >= 2, "select a test mode");
     const std::wstring_view mode(argv[1]);
+    if (mode == L"--screen-probe")
+        return screen_probe();
+    if (mode == L"--outer-state" || mode == L"--outer-failure")
+        return outer_state(argc, argv, mode == L"--outer-failure");
     if (mode == L"--probe" || mode == L"--probe-fixed")
         return probe(mode == L"--probe-fixed");
-    check(argc >= 3 && (mode == L"--drive" || mode == L"--drive-fixed" || mode == L"--drive-stdio"),
+    check(argc >= 3 && (mode == L"--drive" || mode == L"--drive-fixed" ||
+                        mode == L"--drive-stdio" || mode == L"--drive-terminal" ||
+                        mode == L"--drive-bash" || mode == L"--drive-powershell"),
           "select a driver mode");
     return drive(argc, argv, mode);
 } catch (const std::exception &error) {

@@ -27,6 +27,8 @@ CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构
 
 默认目标是 Git 的 `usr/bin/bash.exe`。不要将 Git 根目录或 `bin` 中的外层 Bash 壳启动器当作真实 MSYS 目标。
 
+`run.ps1 -ConPty` 的默认 Bash 入口初始化 `/usr/bin:/bin`、`TERM=xterm-256color` 和 UTF-8 locale，然后启动交互 Bash。显式传入 `-CommandArguments` 时使用调用者的参数。其他 `-Program` 使用其自身默认参数。其他构建目录可通过 `-BinaryDirectory` 指定该构建的 `bin` 目录。
+
 ## 低层入口
 
 ```text
@@ -43,6 +45,8 @@ msys-sandbox-compat.exe [--trace] [--native-relay] [--runtime msys-2.0.dll]
 在实际 harness 内可直接执行 `tests/conpty.ps1 -Environment Existing` 验证继承的上下文。它不创建新的隔离环境或配置文件 ACL；初始策略与拒绝边界的验收要求见 [测试说明](testing.md)。
 
 兼容宿主通过 job 等待进程树退出并返回根进程退出码。ConPTY 模式收发 VT 字节流。交互式 `--conpty` 在标准输入是控制台且标准输出可查询控制台窗口尺寸时，按外层窗口尺寸启动并跟随变化。`--conpty-size`（演示脚本中的 `-TerminalSize`）固定整个会话的尺寸。脚本输入和无法查询交互控制台尺寸的会话默认使用 `100x30`。
+
+连接真实控制台时，终端桥启用原始 VT 输入和 VT 输出，并为相应方向设置 UTF-8 代码页。输出排空后恢复原模式和代码页。原生等待宿主处理自身收到的 Ctrl+C 通知，前台目标继续按其控制台处理规则响应按键。
 
 `--native-relay` 是显式选择的进程树传播模式，也可由 `run.ps1 -NativeRelay` 启用，并可与 ConPTY 组合。原生进程仅保留创建 hook，直接启动后续 MSYS 时自动完成兼容准备；默认仍不注入原生进程。已处于该树中的嵌套兼容入口复用已有 relay，无需重复加选项。该模式不修改磁盘 ACL 或放宽 token，遇到安全上下文或默认对象策略变化时拒绝传播。覆盖入口和限制见 [兼容范围](compatibility.md)。`-Raw` 与 `-NativeRelay` 不能同时使用。
 
