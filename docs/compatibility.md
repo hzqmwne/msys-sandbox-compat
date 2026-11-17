@@ -14,7 +14,7 @@
 | 原生中间程序直接创建 MSYS | `--native-relay` 下，一层/三层原生桥接后直接进入 Bash/Perl 已通过；默认模式仍需显式入口 |
 | relay 的原生根、显式嵌套入口及挂起创建 | 受测 PSEC 和两种固定令牌均通过；原生八个其余入口不变、MSYS 地址区空闲、退出码与挂起状态保留 |
 | 运行中新出现的 EXE/DLL | 按首次创建或映射时的实际依赖识别 |
-| ConPTY | 公开 API 路径在 PSEC 和两种固定非 AppContainer 受限令牌中通过交互回归 |
+| ConPTY | 公开 API 路径在 PSEC 和两种固定非 AppContainer 受限令牌中通过交互回归。尺寸跟随通过 PSEC 内外两层 ConPTY 的原生探针验收 |
 | 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
 | 非 AppContainer 完整 restricting SID 检查令牌 | 同一固定夹具通过上述工作负载与边界回归 |
 | 验收依据 | 参照相关配置构造的 PSEC 与两种受限令牌模型；按有效安全策略与进程创建条件判断适用性 |

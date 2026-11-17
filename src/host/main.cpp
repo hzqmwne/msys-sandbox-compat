@@ -10,6 +10,7 @@ namespace fs = std::filesystem;
 int wmain(int argc, wchar_t **argv) try {
     bool trace = false;
     bool conpty = false;
+    bool fixed_terminal_size = false;
     bool native_relay = false;
     std::wstring input_script;
     COORD terminal_size{100, 30};
@@ -37,6 +38,7 @@ int wmain(int argc, wchar_t **argv) try {
                       width > 0 && width <= 32767 && height > 0 && height <= 32767,
                   "terminal size WIDTHxHEIGHT");
             terminal_size = {static_cast<SHORT>(width), static_cast<SHORT>(height)};
+            fixed_terminal_size = true;
             first += 2;
         } else if (option == L"--runtime" && first + 1 < argc) {
             runtime = fs::absolute(argv[first + 1]);
@@ -71,7 +73,7 @@ int wmain(int argc, wchar_t **argv) try {
     Pseudoconsole pty;
     std::vector<BYTE> attribute_buffer;
     if (conpty)
-        pty.create(input_script, terminal_size);
+        pty.create(input_script, terminal_size, !fixed_terminal_size);
     HANDLE job = CreateJobObjectW(nullptr, nullptr);
     check(job != nullptr, "create process-tree job");
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};

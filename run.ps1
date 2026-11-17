@@ -7,7 +7,7 @@ param(
     [switch]$NativeRelay,
     [switch]$ConPty,
     [string]$ConPtyScript = '',
-    [string]$TerminalSize = '100x30'
+    [string]$TerminalSize
 )
 $ErrorActionPreference = 'Stop'
 if ($Raw -and $NativeRelay) { throw '-NativeRelay requires the compatibility launcher' }
@@ -35,7 +35,9 @@ try {
         if ($Trace) { $launchArgs += '--trace' }
         if ($ConPtyScript) { $launchArgs += @('--conpty-script',[IO.Path]::GetFullPath($ConPtyScript)) }
         elseif ($ConPty) { $launchArgs += '--conpty' }
-        if ($ConPty -or $ConPtyScript) { $launchArgs += @('--conpty-size',$TerminalSize) }
+        if (($ConPty -or $ConPtyScript) -and $PSBoundParameters.ContainsKey('TerminalSize')) {
+            $launchArgs += @('--conpty-size',$TerminalSize)
+        }
     }
     $launchArgs += $Program
     $launchArgs += $CommandArguments

@@ -75,4 +75,6 @@ relay 创建前核对最近已观察的默认策略，创建后比较父子 toke
 
 这个设计复用已有 EXE，增加一个原生宿主实例。输入脚本与标准输入统一通过句柄读取，脚本只打开一次。双向转发遇到短写会继续写入剩余字节，遇到写入失败或零进展则停止该方向的转发。关闭时仍取消阻塞输入并排空输出。
 
-该路径已在 PSEC 和两种固定非 AppContainer 受限令牌中完成交互验收；未改变生产代码或测试初始权限。受限令牌回归在终端内完成 Perl/线程 fork、原生命令、Ctrl+C、作业控制和退出码，并在交互前后验证原有文件访问拒绝。实际 harness 的完整性等级、desktop 和句柄条件仍以其自身验收为准。
+交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。VT 输入仍沿原字节流转发。关闭时先结束尺寸采样，再释放 ConPTY。显式尺寸、脚本输入和重定向标准流沿用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
+
+该路径已在 PSEC 和两种固定非 AppContainer 受限令牌中完成交互验收。受限令牌回归在终端内完成 Perl/线程 fork、原生命令、Ctrl+C、作业控制和退出码，并在交互前后验证原有文件访问拒绝。实际 harness 的完整性等级、desktop 和句柄条件仍以其自身验收为准。
