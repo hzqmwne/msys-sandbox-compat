@@ -23,6 +23,17 @@ if (($ConPty -or $ConPtyScript) -and !$PSBoundParameters.ContainsKey('CommandArg
 }
 $state = Join-Path $PSScriptRoot 'unused\runtime'
 New-Item -ItemType Directory -Force $state,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
+$programName = [IO.Path]::GetFileName($Program)
+if ($ConPty -and $programName -in @('powershell.exe','pwsh.exe') -and
+    @($CommandArguments | Where-Object { $_ -notin @('-NoProfile','-NoLogo','-NoExit') }).Count -eq 0) {
+    $historyDirectory = Join-Path $state 'powershell-history'
+    New-Item -ItemType Directory -Force $historyDirectory | Out-Null
+    $historyPath = Join-Path $historyDirectory ([IO.Path]::GetFileNameWithoutExtension($Program) + '_history.txt')
+    $initialize = "Import-Module PSReadLine -ErrorAction Stop; Set-PSReadLineOption -HistorySavePath '" +
+        $historyPath.Replace("'", "''") + "'"
+    if ($CommandArguments -notcontains '-NoExit') { $CommandArguments += '-NoExit' }
+    $CommandArguments += @('-Command', $initialize)
+}
 $policy = @{ filesystem = @{
     readonlyPaths = @($env:SystemRoot, $GitRoot, $BinaryDirectory)
     readwritePaths = @($PSScriptRoot)

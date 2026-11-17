@@ -76,3 +76,21 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
     throw "PowerShell demo failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
 Write-Output 'TERMINAL-POWERSHELL-PASS: real console Unicode input/output, rendered screen and state restoration'
+
+# Run the same interactive PSReadLine entry used during manual acceptance.
+$entry = Join-Path $state 'readline-demo.ps1'
+Set-Content -LiteralPath $entry -Encoding utf8NoBOM -Value (
+    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-NoLogo')")
+$info = New-TestProcessInfo $probe @('--drive-readline',$probe,'--outer-state',$pwsh,'-NoProfile',
+    '-File',$entry) $state
+$result = Invoke-TestProcess $info 35000
+Save-TestOutput $result $report 'readline-demo'
+$history = Join-Path $root 'unused/runtime/powershell-history/powershell_history.txt'
+$marker = [regex]::Match($result.Output, 'HISTORY-CHECK-\d+').Value
+if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS') -or
+    $result.Output.Contains('ConsoleHost_history.txt') -or $result.Output.Contains('ưm') -or
+    !$marker -or !(Test-Path -LiteralPath $history) -or
+    ![IO.File]::ReadAllText($history).Contains($marker)) {
+    throw "Interactive PSReadLine history failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
+}
+Write-Output 'TERMINAL-PSREADLINE-PASS: interactive command saved to the demo history, Unicode screen and restored state'

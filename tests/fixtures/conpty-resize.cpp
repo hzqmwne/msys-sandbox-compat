@@ -141,7 +141,8 @@ static int probe(bool fixed_size) {
 static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
     const bool bash = mode == L"--drive-bash";
     const bool powershell = mode == L"--drive-powershell";
-    const bool terminal = mode == L"--drive-terminal" || bash || powershell;
+    const bool readline = mode == L"--drive-readline";
+    const bool terminal = mode == L"--drive-terminal" || bash || powershell || readline;
     const bool resize = mode != L"--drive-stdio" && !terminal;
     const bool fixed_size = mode == L"--drive-fixed";
     const char *completion_marker = terminal ? "OUTER-STATE-PASS"
@@ -257,6 +258,15 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
             send_text("中文-é-Ａ\r");
             initialized = true;
         }
+        if (readline && !initialized && transcript.find("PS ") != std::string::npos &&
+            transcript.find("> ") != std::string::npos) {
+            const auto command_text =
+                "Write-Host 'HISTORY-CHECK-" + std::to_string(GetTickCount64()) +
+                "'; Write-Host 'SCREEN-中文-é-Ａ'; [Console]::Write(\"CURSOR-NO\" + "
+                "[char]27 + \"[2DOK\" + [Environment]::NewLine); exit 0\r";
+            send_text(command_text.c_str());
+            initialized = true;
+        }
         DWORD code = 0;
         check(GetExitCodeProcess(process.get(), &code), "get PSEC exit code");
         if (code != STILL_ACTIVE &&
@@ -277,9 +287,10 @@ int wmain(int argc, wchar_t **argv) try {
         return outer_state(argc, argv, mode == L"--outer-failure");
     if (mode == L"--probe" || mode == L"--probe-fixed")
         return probe(mode == L"--probe-fixed");
-    check(argc >= 3 && (mode == L"--drive" || mode == L"--drive-fixed" ||
-                        mode == L"--drive-stdio" || mode == L"--drive-terminal" ||
-                        mode == L"--drive-bash" || mode == L"--drive-powershell"),
+    check(argc >= 3 &&
+              (mode == L"--drive" || mode == L"--drive-fixed" || mode == L"--drive-stdio" ||
+               mode == L"--drive-terminal" || mode == L"--drive-bash" ||
+               mode == L"--drive-powershell" || mode == L"--drive-readline"),
           "select a driver mode");
     return drive(argc, argv, mode);
 } catch (const std::exception &error) {
