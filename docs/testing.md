@@ -12,6 +12,7 @@
 .\tests\conpty.ps1
 .\tests\conpty.ps1 -Environment WriteRestricted
 .\tests\conpty.ps1 -Environment FullRestricted
+.\tests\stdio.ps1
 .\tests\late-package.ps1
 .\tests\acl.ps1
 .\tests\acl.ps1 -Environment WriteRestricted
@@ -31,6 +32,7 @@
 | `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
 | `process-chain.ps1 -Environment WriteRestricted/FullRestricted` | 两种非 AppContainer 令牌下复用完整链路；记录无兼容基线，保持普通 MSYS 会话并存，验证实际受限令牌及文件写入/WRITE_DAC 拒绝 |
 | `conpty.ps1` | TTY、120×40 尺寸、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
+| `stdio.ps1` | PSEC 下正式宿主的 1 MiB 二进制 stdio 往返、stderr 分离与 stdin EOF，以及 ConPTY 根进程退出后保留后代输出和根退出码 |
 | `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 Perl 断言（含线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
 | `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |
