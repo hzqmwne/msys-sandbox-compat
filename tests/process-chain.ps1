@@ -38,10 +38,13 @@ function Shell-Command([object[]]$Arguments) {
 }
 $fork = (Join-Path $(if ($restricted) {$BinaryDirectory} else {(Join-Path $PSScriptRoot 'fixtures')}) 'fork.pl').Replace('\','/')
 $deny = $canary.Replace('\','/')
+# Old output can carry a protected ACL tied to a different logon session.
+$writeName = 'chain-write-' + [Guid]::NewGuid().ToString('N') + '.txt'
+$writePath = Join-Path $state $writeName
 $payload = "set -eu; export PATH=/usr/bin:/bin; perl '$fork' $ThreadRepetitions; " +
     'test "$(printf fork-command)" = fork-command; test "$(printf ''b\na\n'' | sort | head -1)" = a; ' +
     "if cat '$deny'; then exit 81; fi; if printf forbidden > '$deny'; then exit 82; fi; " +
-    'printf permitted > chain-write.txt; test "$(cat chain-write.txt)" = permitted; echo CHAIN-WORKLOAD-PASS; exit 37'
+    ('printf permitted > {0}; test "$(cat {0})" = permitted; echo CHAIN-WORKLOAD-PASS; exit 37' -f $writeName)
 if ($restricted) {
     $check = Shell-Command @((Join-Path $BinaryDirectory 'restricted-run.exe').Replace('\','/'),
         'probe',$state.Replace('\','/'))
@@ -146,4 +149,5 @@ try {
         [IO.File]::WriteAllText((Join-Path $evidence 'ordinary.stderr.txt'),$ordinaryError.GetAwaiter().GetResult())
         $ordinary.Dispose()
     }
+    Remove-Item -LiteralPath $writePath -ErrorAction SilentlyContinue
 }
