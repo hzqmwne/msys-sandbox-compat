@@ -9,6 +9,9 @@
 .\tests\process-chain.ps1
 .\tests\process-chain.ps1 -Environment WriteRestricted
 .\tests\process-chain.ps1 -Environment FullRestricted
+.\tests\git-hook.ps1
+.\tests\git-hook.ps1 -Environment WriteRestricted
+.\tests\git-hook.ps1 -Environment FullRestricted
 .\tests\conpty.ps1
 .\tests\conpty.ps1 -Environment WriteRestricted
 .\tests\conpty.ps1 -Environment FullRestricted
@@ -32,9 +35,10 @@
 | `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、原生根显式回入、MSYS 原生后代回入及默认 Token DACL 保持 |
 | `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
 | `process-chain.ps1 -Environment WriteRestricted/FullRestricted` | 两种非 AppContainer 令牌下复用完整链路；记录无兼容基线，保持普通 MSYS 会话并存，验证实际受限令牌及文件写入/WRITE_DAC 拒绝 |
-| `conpty.ps1` | TTY、120×40 尺寸、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
+| `git-hook.ps1` | 三种隔离模式下真实 Git 经 `--native-relay` 触发 MSYS `pre-commit`，覆盖 GNU 管道、Perl、成功提交、拒绝提交、暂存内容和文件权限 |
+| `conpty.ps1` | TTY、120×40 尺寸、UTF-8 往返、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
 | `conpty-resize.ps1` | 外层 ConPTY 调整窗口后，PSEC 内原生探针在没有键盘输入的情况下观察到内层尺寸变化，显式 80×24 会话保持固定 |
-| `stdio.ps1` | PSEC 下正式宿主的 1 MiB 二进制 stdio 往返、stderr 分离与 stdin EOF，以及 ConPTY 根进程退出后保留后代输出和根退出码 |
+| `stdio.ps1` | PSEC 下 1 MiB 二进制 stdio 往返、stdin EOF 与管道读端提前关闭。在控制台中分别重定向 stdout、stderr 到文件，并检验原始字节和未重定向流。检查 ConPTY 根进程退出后的后代输出和根退出码 |
 | `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 Perl 断言（含线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
 | `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |
@@ -45,6 +49,8 @@
 完整性检查仅在安装/部署写入逻辑变化、怀疑分发文件被修改或发布验收确有需要时执行，不在每轮兼容测试或每次提交后重复运行。若需要首次建立比较基线，使用 `tests/integrity.ps1 -CaptureBaseline`；已有基线时不要先覆盖，应直接比较。基线默认位于 `unused/evidence/git-before.json`，可通过 `-Baseline` 指定单独快照。
 
 各脚本默认输出到 `unused/evidence/current/<suite>`，也可使用 `-EvidenceDirectory` 保留不同轮次。状态和 HOME 位于 `unused/runtime`。这些文件不进入 Git 或发布包。
+
+`git-hook.ps1` 在受测上下文内创建独立工作目录，由宿主 Git 初始化测试仓库；`git add`、`git commit` 和 Git 自动拉起的 hook 在受测上下文运行。配置仅用于该夹具。验证同时检查 hook 的计算结果、隔离文件访问和真实仓库状态。
 
 `scope` 的七项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
 

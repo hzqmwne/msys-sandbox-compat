@@ -68,6 +68,8 @@ $arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirec
 $launcher=if($existing){Join-Path $sourceBinaries 'msys-sandbox-compat.exe'}elseif($restricted){Join-Path $fixtureBinaries 'restricted-run.exe'}else{Get-PsecLauncher $sourceBinaries}
 $info=New-TestProcessInfo $launcher $arguments $state
 $info.RedirectStandardInput=$true
+$info.StandardInputEncoding=[Text.UTF8Encoding]::new($false)
+$info.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
 $t=[TerminalTest]::new($info)
 $passed=$false
 $exitCode=$null
@@ -75,6 +77,8 @@ $terminalWritePath=$null
 try {
     $t.Send("export PS1='MSYS-SANDBOX-COMPAT> '; export PATH=/usr/bin:/bin; /usr/bin/stty -echo; printf '\nREADY-INPUT\n'`r")
     $t.Await("READY-INPUT`r`n")
+    $t.Send('export LC_ALL=C.UTF-8; printf "CONPTY-UNICODE-%s\n" "中文-é-Ａ"'+"`r")
+    $t.Await("CONPTY-UNICODE-中文-é-Ａ`r`n")
     if($restricted -or $existing){
         $fork=(Join-Path $(if($restricted){$BinaryDirectory}else{(Join-Path $PSScriptRoot 'fixtures')}) 'fork.pl').Replace('\','/').Replace("'","'\''")
         $workload=''
@@ -122,7 +126,7 @@ try {
         throw 'Terminal Perl workload failed'
     }
     $passed=$true
-    Write-Output 'CONPTY-ALL-PASS: tty, size, redirection, fork, native child, Ctrl+C, stop/bg/fg, exit=37'
+    Write-Output 'CONPTY-ALL-PASS: tty, size, UTF-8, redirection, fork, native child, Ctrl+C, stop/bg/fg, exit=37'
 } finally {
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stdout.txt'),$t.Text)
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stderr.txt'),$t.Error.ToString())

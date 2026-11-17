@@ -47,6 +47,44 @@ static int start_descendant() {
     return 37;
 }
 
+static int write_until_pipe_closes() {
+    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+    constexpr char ready[] = "PIPE-READY\n";
+    DWORD written = 0;
+    if (!WriteFile(output, ready, sizeof(ready) - 1, &written, nullptr) ||
+        written != sizeof(ready) - 1)
+        return 9;
+    char buffer[8192]{};
+    for (int i = 0; i < 1024; ++i) {
+        if (!WriteFile(output, buffer, sizeof(buffer), &written, nullptr)) {
+            if (GetLastError() != ERROR_BROKEN_PIPE)
+                return 10;
+            fputs("PIPE-CLOSED\n", stderr);
+            return 37;
+        }
+    }
+    return 11;
+}
+
+static int mixed_stdio(bool redirect_stdout) {
+    HANDLE redirected = GetStdHandle(redirect_stdout ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
+    HANDLE console = GetStdHandle(redirect_stdout ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (!GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) || !GetConsoleMode(console, &mode) ||
+        GetFileType(redirected) != FILE_TYPE_DISK)
+        return 12;
+
+    const unsigned char data[] = {'S', 'T', 'D', 'I', 'O', 0, 0xff, '\r', '\n'};
+    DWORD written = 0;
+    if (!WriteFile(redirected, data, sizeof(data), &written, nullptr) || written != sizeof(data))
+        return 13;
+    constexpr char marker[] = "STDIO-CONSOLE\r\n";
+    if (!WriteFile(console, marker, sizeof(marker) - 1, &written, nullptr) ||
+        written != sizeof(marker) - 1)
+        return 14;
+    return 37;
+}
+
 int wmain(int argc, wchar_t **argv) {
     if (argc < 2)
         return 7;
@@ -55,6 +93,10 @@ int wmain(int argc, wchar_t **argv) {
         return echo_until_eof();
     if (mode == L"--descendant")
         return start_descendant();
+    if (mode == L"--pipe-close")
+        return write_until_pipe_closes();
+    if (mode == L"--mixed-stdout" || mode == L"--mixed-stderr")
+        return mixed_stdio(mode == L"--mixed-stdout");
     if (mode == L"--after-parent" && argc == 3) {
         const auto parent = reinterpret_cast<HANDLE>(std::wcstoull(argv[2], nullptr, 10));
         const auto waited = WaitForSingleObject(parent, 10000);

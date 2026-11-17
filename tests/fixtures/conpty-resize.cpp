@@ -57,7 +57,11 @@ static int probe(bool fixed_size) {
     return 0;
 }
 
-static int drive(int argc, wchar_t **argv, bool fixed_size) {
+static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
+    const bool resize = mode != L"--drive-stdio";
+    const bool fixed_size = mode == L"--drive-fixed";
+    const char *completion_marker = resize ? "VIEWPORT-FINAL=" : "STDIO-CONSOLE";
+    const DWORD expected_exit = resize ? 0 : 37;
     std::unique_ptr<void, decltype(&ClosePseudoConsole)> outer(nullptr, ClosePseudoConsole);
     using Handle = std::unique_ptr<void, decltype(&CloseHandle)>;
     HANDLE input_read = nullptr, input_write = nullptr;
@@ -115,7 +119,7 @@ static int drive(int argc, wchar_t **argv, bool fixed_size) {
             transcript.append(buffer, count);
             fwrite(buffer, 1, count, stdout);
         }
-        if (!resize_sent && transcript.find("VIEWPORT-READY=") != std::string::npos) {
+        if (resize && !resize_sent && transcript.find("VIEWPORT-READY=") != std::string::npos) {
             check(SUCCEEDED(ResizePseudoConsole(console, resized)), "resize outer pseudo console");
             resize_sent = true;
             if (fixed_size) {
@@ -127,7 +131,7 @@ static int drive(int argc, wchar_t **argv, bool fixed_size) {
         DWORD code = 0;
         check(GetExitCodeProcess(process.get(), &code), "get PSEC exit code");
         if (code != STILL_ACTIVE &&
-            (code != 0 || transcript.find("VIEWPORT-FINAL=") != std::string::npos))
+            (code != expected_exit || transcript.find(completion_marker) != std::string::npos))
             return static_cast<int>(code);
         Sleep(10);
     } while (GetTickCount64() < deadline);
@@ -140,8 +144,9 @@ int wmain(int argc, wchar_t **argv) try {
     const std::wstring_view mode(argv[1]);
     if (mode == L"--probe" || mode == L"--probe-fixed")
         return probe(mode == L"--probe-fixed");
-    check(argc >= 3 && (mode == L"--drive" || mode == L"--drive-fixed"), "select a driver mode");
-    return drive(argc, argv, mode == L"--drive-fixed");
+    check(argc >= 3 && (mode == L"--drive" || mode == L"--drive-fixed" || mode == L"--drive-stdio"),
+          "select a driver mode");
+    return drive(argc, argv, mode);
 } catch (const std::exception &error) {
     fprintf(stderr, "conpty-resize: %s (Win32 %lu)\n", error.what(), GetLastError());
     return 1;
