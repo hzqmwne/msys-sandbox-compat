@@ -71,6 +71,7 @@ $info.RedirectStandardInput=$true
 $t=[TerminalTest]::new($info)
 $passed=$false
 $exitCode=$null
+$terminalWritePath=$null
 try {
     $t.Send("export PS1='MSYS-SANDBOX-COMPAT> '; export PATH=/usr/bin:/bin; /usr/bin/stty -echo; printf '\nREADY-INPUT\n'`r")
     $t.Await("READY-INPUT`r`n")
@@ -82,8 +83,11 @@ try {
             $workspace=$state.Replace('\','/').Replace("'","'\''")
             $workload="'$probe' probe '$workspace' || exit 87; "
         }
+        # A previous login's restricted token may have created a protected DACL.
+        $terminalWriteName='terminal-write-'+[Guid]::NewGuid().ToString('N')+'.txt'
+        $terminalWritePath=Join-Path $state $terminalWriteName
         $workload+="perl '$fork' $ThreadRepetitions || exit 88; " +
-            'printf permitted > terminal-write.txt; test "$(cat terminal-write.txt)" = permitted || exit 89; echo TERMINAL-POLICY-PASS'
+            ('printf permitted > {0} && test "$(cat {0})" = permitted || exit 89; echo TERMINAL-POLICY-PASS' -f $terminalWriteName)
         $t.Send($workload+"`r")
         $t.Await("TERMINAL-POLICY-PASS`r`n")
     }
@@ -125,4 +129,5 @@ try {
     @{Environment=$Environment;NativeRelay=[bool]$NativeRelay;ThreadRepetitions=$ThreadRepetitions;Passed=$passed;ExitCode=$exitCode} | ConvertTo-Json |
         Set-Content -LiteralPath (Join-Path $report 'results.json') -Encoding utf8NoBOM
     $t.Dispose()
+    if($terminalWritePath){Remove-Item -LiteralPath $terminalWritePath -ErrorAction SilentlyContinue}
 }
