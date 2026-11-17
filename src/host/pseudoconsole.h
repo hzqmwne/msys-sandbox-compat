@@ -1,4 +1,5 @@
 #pragma once
+#include "stream_write.h"
 #include <windows.h>
 #include <winternl.h>
 #include <string>
@@ -46,9 +47,9 @@ class Pseudoconsole {
         }
         reader = std::thread([this] {
             char buffer[8192];
-            DWORD count = 0, written = 0;
+            DWORD count = 0;
             while (ReadFile(output_read, buffer, sizeof(buffer), &count, nullptr) && count) {
-                if (!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buffer, count, &written, nullptr))
+                if (!msys_sandbox_compat::write_all(GetStdHandle(STD_OUTPUT_HANDLE), buffer, count))
                     break;
             }
         });
@@ -57,8 +58,7 @@ class Pseudoconsole {
             DWORD count = 0;
             while (!stopping && ReadFile(input_source, buffer, sizeof(buffer), &count, nullptr) &&
                    count) {
-                DWORD written = 0;
-                if (!WriteFile(input_write, buffer, count, &written, nullptr))
+                if (!msys_sandbox_compat::write_all(input_write, buffer, count))
                     break;
             }
         });

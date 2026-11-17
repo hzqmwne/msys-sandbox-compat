@@ -23,6 +23,7 @@
 | `inline-hook-test` | MinHook 计划接口、逻辑 VA/RIP 位移、指令与页面边界、已有跳转串接、批量安装/relay 范围与保护恢复 |
 | `identify-test` | 直接导入快速路径、共享依赖去重、环、节点上限、深依赖链及识别/准备失败语义；无需创建 PSEC |
 | `object-security-test` | ACL 最小追加、enabled groups、空/NULL、输入不变、absolute/self-relative 的 owner/group/SACL/control 保留 |
+| `stream-write-test` | ConPTY 双向转发共用的写入循环，覆盖连续短写、零进展和写入失败 |
 | `acl.ps1` | 真实 MSYS 内显式对象与后续默认设置；有限权限、deny、其他 token、adjust-only/query-only 句柄；-Existing 可直接使用已有受限上下文 |
 | `verify.ps1` | 原版失败基线、重复 fork/shell、读写边界、退出码和原生子进程；10 轮共 25 项 |
 | `fork.pl` | PID、堆、COW、共享文件偏移、管道、EOF、信号、exec、WNOHANG、嵌套及并发 fork、线程中 fork |
