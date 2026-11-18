@@ -30,6 +30,8 @@ struct ProcessImage {
 
 NTSTATUS identify_process(const NativeApi &api, HANDLE process, const RuntimePaths &runtime,
                           ProcessImage &image);
+bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars,
+                  const RuntimePaths &runtime);
 NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
                        size_t path_chars, const RuntimePaths &runtime, ImageRecord &image,
                        bool &related, const wchar_t *application_directory = nullptr);

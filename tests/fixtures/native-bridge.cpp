@@ -38,10 +38,12 @@ int wmain(int argc, wchar_t **argv) {
     using Query = LONG(NTAPI *)(HANDLE, ULONG, void *, ULONG, ULONG *);
     auto query = reinterpret_cast<Query>(GetProcAddress(ntdll, "NtQueryInformationProcess"));
     ULONG_PTR debug_port = 1;
+    const auto cygheap = reinterpret_cast<void *>(0x800000000ULL);
     MEMORY_BASIC_INFORMATION region{};
     if (query(GetCurrentProcess(), 7, &debug_port, sizeof(debug_port), nullptr) < 0 || debug_port ||
-        !VirtualQuery(reinterpret_cast<void *>(0x80000000000ULL), &region, sizeof(region)) ||
-        region.State != MEM_FREE)
+        !VirtualQuery(cygheap, &region, sizeof(region)) ||
+        (region.State == MEM_RESERVE && region.AllocationBase == cygheap &&
+         region.RegionSize >= 0x200000000ULL))
         return 3;
     BYTE info[4096]{};
     DWORD bytes = 0;

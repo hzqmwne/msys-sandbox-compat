@@ -56,10 +56,12 @@ int wmain(int argc, wchar_t **argv) {
         query(GetCurrentProcess(), static_cast<PROCESSINFOCLASS>(7), &port, sizeof(port), nullptr);
     fprintf(report, "debug-port-status=%08lx port=%llu\n", static_cast<ULONG>(status), port);
     clean = clean && status >= 0 && port == 0;
+    const auto cygheap = reinterpret_cast<void *>(0x800000000ULL);
     MEMORY_BASIC_INFORMATION arena{};
-    VirtualQuery(reinterpret_cast<void *>(0x80000000000ULL), &arena, sizeof(arena));
+    const auto queried = VirtualQuery(cygheap, &arena, sizeof(arena));
     fprintf(report, "msys-arena-state=%lx\n", arena.State);
-    clean = clean && arena.State == MEM_FREE;
+    clean = clean && queried && !(arena.State == MEM_RESERVE && arena.AllocationBase == cygheap &&
+                                  arena.RegionSize >= 0x200000000ULL);
     if (inspect_parent) {
         PROCESS_BASIC_INFORMATION basic{};
         query(GetCurrentProcess(), ProcessBasicInformation, &basic, sizeof(basic), nullptr);

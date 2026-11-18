@@ -1,6 +1,6 @@
 # 兼容范围
 
-当前项目为 0.1 开发版本。生产部署仅需兼容 EXE/DLL，运行于启动器已经提供的受限上下文；psec-run 仅为可选开发验证工具。已验证组合为 Windows 26300.9711 x64、原生 PSEC 1.0、MSYS 3.6.10，目标包含真实内部 Bash、Perl 和 GNU 工具。
+当前项目为 0.1 开发版本。生产部署仅需兼容 EXE/DLL，运行于启动器已经提供的受限上下文；psec-run 仅为可选开发验证工具。已验证组合为 Windows 26300.9974 x64、原生 PSEC 1.0、MSYS 3.6.10，目标包含真实内部 Bash、Perl 和 GNU 工具。
 
 | 能力 | 当前范围 |
 |---|---|
@@ -34,5 +34,7 @@ relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，
 `restricted-run.exe` 是测试夹具，不随产品安装，也不是通用沙箱工具。回归验证明确配置的只读文件、拒绝文件、可写目录与对象策略，没有认证任意路径、网络或外部产品的隔离策略。两种令牌的 ConPTY 均复用既有实现及初始策略，已验证终端内 Perl/线程 fork、TTY、尺寸、原生命令、Ctrl+C、作业控制和退出码；交互前后的权限 probe 均要求原有拒绝保持有效。
 
 兼容实现依赖 AMD64 ntdll 系统调用入口、Native API 和 MSYS 内部地址布局。入口或目标布局变化时需要重新验证，不承诺所有 Windows/MSYS 版本自动适用。
+
+创建时的 cygheap 原址预留已在 Windows 11 `26300.9974` x64 与 Git for Windows 的 MSYS 3.6.10 验证。`PS_ATTRIBUTE_MEMORY_RESERVE` 属于 Windows Native 进程创建接口。旧 Windows 上能否通过宿主使用的导入槽和实际运行时布局完成同一创建路径，需要独立验证。
 
 测试策略保留安装目录只读和 canary 拒绝边界。项目不创建普通非隔离回退路径，也不通过改写安装目录 ACL 来解决 IPC 授权问题。识别范围与沙箱策略是不同职责；命中 MSYS 不会自动取得额外文件写权限。

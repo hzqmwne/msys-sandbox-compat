@@ -274,19 +274,9 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_allocate(HANDLE process, PV
                                                               ULONG_PTR zero, PSIZE_T size,
                                                               ULONG allocation, ULONG protection) {
     auto &state = g_agent_state;
-    // MSYS uses the current-process pseudo handle for these private arenas.
-    if (process == current_process() && state.local.runtime_loaded) {
-        if (reinterpret_cast<uintptr_t>(*base) == original_cygheap) {
-            const auto delta = relocated_cygheap - original_cygheap;
-            if (*size >= delta)
-                *size -= delta;
-            if (*size > cygheap_extent)
-                return status_not_supported;
-            *base = reinterpret_cast<void *>(relocated_cygheap);
-        } else if (reinterpret_cast<uintptr_t>(*base) == original_userheap) {
-            *base = reinterpret_cast<void *>(relocated_userheap);
-        }
-    }
+    if (process == current_process() && state.local.runtime_loaded &&
+        reinterpret_cast<uintptr_t>(*base) == original_userheap)
+        *base = reinterpret_cast<void *>(relocated_userheap);
     return state.api.allocate(process, base, zero, size, allocation, protection);
 }
 
@@ -336,17 +326,26 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
             return permitted;
         }
     }
-    auto status = state.api.create_process(
-        process, thread, process_access, thread_access, process_attributes, thread_attributes,
-        process_flags, thread_flags | thread_create_suspended, parameters, create_info, attributes);
+    bool reserved_at_creation = false;
+    NTSTATUS status = status_success;
+    {
+        CygheapReservation reserve(state.api, state.runtime, attributes);
+        status = state.api.create_process(
+            process, thread, process_access, thread_access, process_attributes, thread_attributes,
+            process_flags, thread_flags | thread_create_suspended, parameters, create_info,
+            reserve.attributes());
+        reserved_at_creation = reserve.attributes() != attributes;
+    }
     if (status < 0)
         return status;
     NativeBuffer storage(state.api, sizeof(ProcessImage));
     auto image = storage.as<ProcessImage>();
     auto prepared =
         image ? identify_process(state.api, *process, state.runtime, *image) : status_unsuccessful;
+    if (reserved_at_creation && prepared >= 0 && !image->related)
+        prepared = status_invalid_image;
     if (prepared < 0) {
-        if (state.native_relay || (image && image->related))
+        if (reserved_at_creation || state.native_relay || (image && image->related))
             goto failed;
         agent_log(state, "child classification unavailable; left uninstrumented",
                   static_cast<ULONG>(prepared));

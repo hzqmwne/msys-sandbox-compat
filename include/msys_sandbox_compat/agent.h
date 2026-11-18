@@ -2,16 +2,26 @@
 
 #include "identify.h"
 #include "inline_hook.h"
+#include "native_buffer.h"
 
 namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
 
 constexpr uintptr_t original_cygheap = 0x800000000ULL;
-constexpr uintptr_t relocated_cygheap = 0x80000000000ULL;
 constexpr size_t cygheap_extent = 0x200000000ULL;
 constexpr uintptr_t original_userheap = 0xa00000000ULL;
-constexpr uintptr_t relocated_userheap = relocated_cygheap + 0x400000000ULL;
+constexpr uintptr_t relocated_userheap = 0x80400000000ULL;
+
+class CygheapReservation {
+  public:
+    CygheapReservation(const NativeApi &api, const RuntimePaths &runtime, void *attributes);
+    void *attributes() const { return attributes_; }
+
+  private:
+    NativeBuffer storage_;
+    void *attributes_;
+};
 
 enum class HookId : size_t {
     directory,

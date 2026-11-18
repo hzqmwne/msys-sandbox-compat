@@ -129,10 +129,10 @@ struct Dependency {
                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                              FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
     }
-    NTSTATUS map() {
+    NTSTATUS map(ULONG attributes = SEC_IMAGE) {
         HANDLE section = nullptr;
         auto status = api.create_section(&section, SECTION_MAP_READ | SECTION_QUERY, nullptr,
-                                         nullptr, PAGE_READONLY, SEC_IMAGE, file);
+                                         nullptr, PAGE_READONLY, attributes, file);
         if (status < 0)
             return status;
         SIZE_T extent = 0;
@@ -292,17 +292,36 @@ NTSTATUS indirect_imports(const NativeApi &api, const RuntimePaths &runtime, Ima
     return status;
 }
 
-} // namespace
-
-NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
-                       size_t chars, const RuntimePaths &runtime, ImageRecord &image, bool &related,
-                       const wchar_t *application) {
+NTSTATUS classify_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
+                        size_t chars, const RuntimePaths &runtime, ImageRecord &image, bool &related,
+                        const wchar_t *application) {
     related = false;
     bool indirect = false;
     ImageReader reader{api, process, reinterpret_cast<uintptr_t>(base)};
     auto status = reader.inspect(path, chars, image, related, indirect);
-    if (status >= 0 && !related && indirect)
-        status = indirect_imports(api, runtime, reader, path, chars, application, related);
+    return status >= 0 && !related && indirect
+               ? indirect_imports(api, runtime, reader, path, chars, application, related)
+               : status;
+}
+} // namespace
+
+bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars,
+                  const RuntimePaths &runtime) {
+    Dependency file{api};
+    if (file.open(path, chars) < 0 || file.map(SEC_IMAGE_NO_EXECUTE) < 0)
+        return false;
+    ImageRecord image{};
+    bool related = false;
+    return classify_image(api, current_process(), file.view, path, chars, runtime, image, related,
+                          nullptr) >= 0 &&
+           related && image.kind == ImageKind::executable;
+}
+
+NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
+                       size_t chars, const RuntimePaths &runtime, ImageRecord &image, bool &related,
+                       const wchar_t *application) {
+    auto status = classify_image(api, process, base, path, chars, runtime, image, related,
+                                 application);
     if (status < 0 || !related)
         return status;
     // SEC_IMAGE may rewrite ImageBase. Recover the preferred address only

@@ -7,8 +7,8 @@ namespace msys_sandbox_compat {
 class NativeBuffer {
   public:
     NativeBuffer(const NativeApi &api, SIZE_T bytes) : api_(api) {
-        if (api_.allocate(current_process(), &data_, 0, &bytes, MEM_COMMIT | MEM_RESERVE,
-                          PAGE_READWRITE) < 0)
+        if (bytes && api_.allocate(current_process(), &data_, 0, &bytes, MEM_COMMIT | MEM_RESERVE,
+                                   PAGE_READWRITE) < 0)
             data_ = nullptr;
     }
     ~NativeBuffer() {

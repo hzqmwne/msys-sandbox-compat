@@ -20,7 +20,11 @@
 
 声明此导入名就是选择该 ABI 的兼容处理，不另加文件 ID 或导出指纹认证。先检查当前映像的直接导入，再用有界队列遍历间接依赖。同一次识别按路径去重，每次只映射一个依赖；最多 128 个映像，不另设依赖深度限制；去重和固定队列同时约束循环、存储与处理数量。原生 EXE 改名为 Bash 不会命中；目标运行后才安装的包可以在首次创建、映射时识别。
 
+为在内核分配 PEB 和初始线程栈前取得 cygheap 原址，创建时先按 Native 参数中的映像路径做一次导入预检。命中后追加 `PS_ATTRIBUTE_MEMORY_RESERVE`，保留调用者的其他属性和已有的预留属性。agent 使用已有的创建 hook。独立宿主仅在本次直接启动期间替换自身 KernelBase 的一个导入槽，仍由 `CreateProcessW` 处理标准句柄、环境与控制台。已继承 relay 的宿主调用由 relay 处理。
+
 识别返回状态码与命中结果。遍历越界、读取或分配失败会返回错误；已经命中 MSYS 后获取首选地址失败，保留命中结果并停止准备。默认模式中无法确认的子进程保持原样，trace 标明识别不可用；根进程识别失败则直接报错。显式 relay 模式遇到无法分类或传播的子进程时终止本次挂起创建并返回失败，不静默留下传播缺口。
+
+实际挂起映像仍决定是否注入。创建前追加过预留的进程必须再次确认为 MSYS 才能恢复。如果仅在创建后识别到 MSYS，就在尚未恢复的进程中尝试预留同一原址。决定见 [ADR-0010](decisions/0010-reserve-cygheap-at-creation.md)。
 
 ## 初始准备
 
@@ -28,7 +32,7 @@
 
 宿主手工映射无初始化依赖的 agent，完成重定位和状态复制。agent 位于 ntdll 附近；搬迁后端按目标自己的入口字节保留现有路径，安装器复核源字节、写入补丁并恢复页面保护。安装失败由调用方终止尚未恢复的新进程，不维护入口恢复事务。成功后设置 agent 节保护并建立异常展开状态。后端具体支持边界及上游差异见源码中的 `third_party/minhook/README.md`。
 
-准备工作包括 EXE/DLL 首选地址、MSYS 堆预留与地址修正、私有对象路径及安全描述符。root 和 child 使用同一套 agent 节保护规则；child 只重置进程局部状态。
+准备工作包括 EXE/DLL 首选地址、核对 cygheap 的原址预留、私有对象路径及安全描述符。MSYS 自己在 `[0x800000000, 0xA00000000)` 中提交所需页。root 和 child 使用同一套 agent 节保护规则；child 只重置进程局部状态。
 
 ## 九个 hook 的职责
 
@@ -40,8 +44,8 @@
 | `NtCreateSymbolicLinkObject` | MSYS 目录链接与授权 |
 | `NtCreateNamedPipeFile` | MSYS 管道授权 |
 | `NtMapViewOfSection` | 按需识别并固定相关映像地址 |
-| `NtAllocateVirtualMemory` | 修正 MSYS 私有堆地址及 fork 提交范围 |
-| `NtCreateUserProcess` | 子进程初始挂起、识别、准备和传播 |
+| `NtAllocateVirtualMemory` | 调整 MSYS 的 userheap 起点 |
+| `NtCreateUserProcess` | 创建前识别和预留 cygheap，挂起创建后准备并传播 |
 | `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体并更新传播基准 |
 
 对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。已识别进程/线程查询实际 DACL 后使用同一转换器。

@@ -15,6 +15,8 @@ AgentState *inherited_agent();
 std::wstring require_restricted_context();
 HANDLE configure_security(AgentState &state, const std::wstring &session_tag);
 void configure_runtime_paths(const std::filesystem::path &runtime, AgentState &state);
+BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool conpty,
+                 const AgentState *state, PROCESS_INFORMATION &child, bool &reserved);
 void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &state,
                  const std::filesystem::path &agent);
 } // namespace msys_sandbox_compat

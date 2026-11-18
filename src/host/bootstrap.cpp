@@ -3,9 +3,109 @@
 #include "msys_sandbox_compat/pe_view.h"
 #include <fstream>
 #include <iterator>
+#include <psapi.h>
 #include <type_traits>
 
 namespace msys_sandbox_compat {
+namespace {
+struct RootCreation {
+    const AgentState &state;
+    bool &reserved;
+};
+
+thread_local RootCreation *root_creation;
+CreateUserProcess original_root_create;
+
+NTSTATUS NTAPI reserve_root_cygheap(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access,
+                                    ACCESS_MASK thread_access, POBJECT_ATTRIBUTES process_attrs,
+                                    POBJECT_ATTRIBUTES thread_attrs, ULONG process_flags,
+                                    ULONG thread_flags, PRTL_USER_PROCESS_PARAMETERS parameters,
+                                    void *create_info, void *attributes) {
+    const auto root = root_creation;
+    if (!root)
+        return original_root_create(process, thread, process_access, thread_access, process_attrs,
+                                    thread_attrs, process_flags, thread_flags, parameters,
+                                    create_info, attributes);
+    CygheapReservation reserve(root->state.api, root->state.runtime, attributes);
+    auto status = original_root_create(process, thread, process_access, thread_access, process_attrs,
+                                       thread_attrs, process_flags, thread_flags, parameters,
+                                       create_info, reserve.attributes());
+    root->reserved = status >= 0 && reserve.attributes() != attributes;
+    return status;
+}
+
+CreateUserProcess *root_create_slot() {
+    const auto module = GetModuleHandleW(L"kernelbase.dll");
+    MODULEINFO info{};
+    if (!module || !K32GetModuleInformation(GetCurrentProcess(), module, &info, sizeof(info)))
+        return nullptr;
+    PeView view(module, info.SizeOfImage);
+    const auto pe = view.headers();
+    if (!pe)
+        return nullptr;
+    const auto &directory = pe->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    const auto count = directory.Size / sizeof(IMAGE_IMPORT_DESCRIPTOR);
+    const auto imports = view.at<IMAGE_IMPORT_DESCRIPTOR>(directory.VirtualAddress, count);
+    for (size_t index = 0; imports && index < count && imports[index].Name; ++index) {
+        const auto &entry = imports[index];
+        const auto module_name = view.string_at(entry.Name);
+        if (!module_name || !ascii_equal(module_name, "ntdll.dll") || !entry.OriginalFirstThunk)
+            continue;
+        for (size_t offset = 0;; offset += sizeof(IMAGE_THUNK_DATA64)) {
+            const auto name = view.at<IMAGE_THUNK_DATA64>(entry.OriginalFirstThunk + offset);
+            const auto slot = view.at<CreateUserProcess>(entry.FirstThunk + offset);
+            if (!name || !slot || !name->u1.AddressOfData)
+                break;
+            if (IMAGE_SNAP_BY_ORDINAL64(name->u1.Ordinal))
+                continue;
+            const auto name_text =
+                view.string_at(name->u1.AddressOfData + offsetof(IMAGE_IMPORT_BY_NAME, Name));
+            if (name_text && ascii_equal(name_text, "NtCreateUserProcess"))
+                return const_cast<CreateUserProcess *>(slot);
+        }
+    }
+    return nullptr;
+}
+} // namespace
+
+BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool conpty,
+                 const AgentState *state, PROCESS_INFORMATION &child, bool &reserved) {
+    // Keep Win32 in charge of console attachment, handle inheritance and the
+    // other creation attributes. The inherited relay already handles this call.
+    const auto create = [&] {
+        return CreateProcessW(executable, command, nullptr, nullptr, !conpty,
+                              CREATE_SUSPENDED | (conpty ? EXTENDED_STARTUPINFO_PRESENT : 0),
+                              nullptr, nullptr, &startup.StartupInfo, &child);
+    };
+    auto slot = state && !conpty ? root_create_slot() : nullptr;
+    DWORD protection = 0;
+    if (!slot || !VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &protection))
+        return create();
+
+    original_root_create = *slot;
+    auto entry = reinterpret_cast<PVOID volatile *>(slot);
+    RootCreation root{*state, reserved};
+    root_creation = &root;
+    InterlockedExchangePointer(entry, reinterpret_cast<PVOID>(reserve_root_cygheap));
+    const auto created = create();
+    const DWORD create_error = created ? ERROR_SUCCESS : GetLastError();
+    InterlockedExchangePointer(entry, reinterpret_cast<PVOID>(original_root_create));
+    root_creation = nullptr;
+    DWORD ignored = 0;
+    if (!VirtualProtect(slot, sizeof(*slot), protection, &ignored)) {
+        const auto error = GetLastError();
+        if (created) {
+            ::TerminateProcess(child.hProcess, 1);
+            CloseHandle(child.hThread);
+            CloseHandle(child.hProcess);
+        }
+        SetLastError(error);
+        return FALSE;
+    }
+    SetLastError(create_error);
+    return created;
+}
+
 AgentState *inherited_agent() {
     // An explicit launcher inside an opted-in tree already has the relay.
     // Its CreateProcess call prepares the child; do not inject it a second time.

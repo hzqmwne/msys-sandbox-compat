@@ -130,9 +130,9 @@ int wmain(int argc, wchar_t **argv) try {
         startup.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     }
     PROCESS_INFORMATION child{};
-    check(CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, !conpty,
-                         CREATE_SUSPENDED | (conpty ? EXTENDED_STARTUPINFO_PRESENT : 0), nullptr,
-                         nullptr, &startup.StartupInfo, &child),
+    bool reserved = false;
+    check(create_root(executable.c_str(), command.data(), startup, conpty, state.get(), child,
+                      reserved),
           "create suspended root");
     if (conpty) {
         DeleteProcThreadAttributeList(startup.lpAttributeList);
@@ -146,6 +146,8 @@ int wmain(int argc, wchar_t **argv) try {
             ProcessImage image{};
             check_nt(identify_process(state->api, child.hProcess, state->runtime, image),
                      "classify actual root image");
+            if (reserved && !image.related)
+                check_nt(status_invalid_image, "verify preflight MSYS root");
             if (image.related) {
                 // A cold MSYS start needs a real primary-token handle. A token
                 // inherited through an MSYS-created native bridge may deny this,

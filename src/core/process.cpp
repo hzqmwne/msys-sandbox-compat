@@ -8,6 +8,28 @@
 namespace msys_sandbox_compat {
 
 namespace {
+constexpr ULONG_PTR process_image_name = 0x20005;
+constexpr ULONG_PTR process_memory_reserve = 0x20007;
+
+struct CreateAttribute {
+    ULONG_PTR type;
+    SIZE_T size;
+    const void *value;
+    SIZE_T *return_size;
+};
+
+struct ReserveRange {
+    void *base;
+    SIZE_T size;
+};
+
+struct CreateInput {
+    SIZE_T bytes;
+    CreateAttribute entries[65]; // Room for 64 caller attributes and the appended range.
+    wchar_t path[image_path_chars];
+    ReserveRange range;
+};
+
 struct PendingHook {
     HookPlan plan;
     BYTE source[hook_source_bytes];
@@ -57,6 +79,43 @@ NTSTATUS read_hook_source(const NativeApi &api, HANDLE process, uintptr_t addres
 }
 
 } // namespace
+
+CygheapReservation::CygheapReservation(const NativeApi &api, const RuntimePaths &runtime,
+                                       void *attributes)
+    : storage_(api, attributes ? sizeof(CreateInput) : 0), attributes_(attributes) {
+    auto input = storage_.as<CreateInput>();
+    if (!input)
+        return;
+    SIZE_T bytes = 0, read = 0;
+    if (api.read(current_process(), attributes, &bytes, sizeof(bytes), &read) < 0 ||
+        read != sizeof(bytes) || bytes < sizeof(bytes) + sizeof(CreateAttribute) ||
+        bytes > offsetof(CreateInput, path) - sizeof(CreateAttribute) ||
+        (bytes - sizeof(bytes)) % sizeof(CreateAttribute))
+        return;
+    if (api.read(current_process(), attributes, input, bytes, &read) < 0 || read != bytes ||
+        input->bytes != bytes)
+        return;
+    const auto count = (bytes - sizeof(bytes)) / sizeof(CreateAttribute);
+    const CreateAttribute *image = nullptr;
+    for (size_t index = 0; index < count; ++index) {
+        const auto &entry = input->entries[index];
+        if (entry.type == process_memory_reserve)
+            return; // Preserve a reservation already supplied by the caller.
+        if (entry.type == process_image_name)
+            image = &entry;
+    }
+    if (!image || !image->size || image->size >= sizeof(input->path) ||
+        image->size % sizeof(wchar_t) ||
+        api.read(current_process(), image->value, input->path, image->size, &read) < 0 ||
+        read != image->size ||
+        !imports_msys(api, input->path, image->size / sizeof(wchar_t), runtime))
+        return;
+
+    input->range = {reinterpret_cast<void *>(original_cygheap), cygheap_extent};
+    input->entries[count] = {process_memory_reserve, sizeof(input->range), &input->range, nullptr};
+    input->bytes += sizeof(CreateAttribute);
+    attributes_ = input;
+}
 
 NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys) {
     // The new image is still writable and its initial thread is suspended.
@@ -124,8 +183,7 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, 
 
 NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
                          const ProcessImage &image, AgentState &state) {
-    // Set only this positively identified child's object ACLs. In particular,
-    // do not replace NtCreateUserProcess's attributes for every native child.
+    // Set only this positively identified child's object ACLs.
     auto status = adapt_kernel_object(api, process, state);
     if (status < 0)
         return status;
@@ -133,11 +191,23 @@ NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
     if (status < 0)
         return status;
 
-    PVOID arena = reinterpret_cast<void *>(relocated_cygheap);
-    SIZE_T extent = cygheap_extent;
-    status = api.allocate(process, &arena, 0, &extent, MEM_RESERVE, PAGE_NOACCESS);
-    if (status < 0 || arena != reinterpret_cast<void *>(relocated_cygheap))
-        return status < 0 ? status : status_unsuccessful;
+    const auto base = reinterpret_cast<void *>(original_cygheap);
+    MEMORY_BASIC_INFORMATION reservation{};
+    status = api.query_memory(process, base, 0, &reservation, sizeof(reservation), nullptr);
+    if (status < 0)
+        return status;
+    if (reservation.AllocationBase == base && reservation.BaseAddress == base &&
+        reservation.State == MEM_RESERVE && reservation.RegionSize >= cygheap_extent) {
+        agent_log(state, "cygheap reserved at creation", original_cygheap);
+    } else {
+        // The actual import walk may identify MSYS when preflight could not.
+        PVOID arena = base;
+        SIZE_T extent = cygheap_extent;
+        status = api.allocate(process, &arena, 0, &extent, MEM_RESERVE, PAGE_NOACCESS);
+        if (status < 0 || arena != base)
+            return status < 0 ? status : status_unsuccessful;
+        agent_log(state, "cygheap reserved after creation", original_cygheap);
+    }
 
     PROCESS_BASIC_INFORMATION basic{};
     status = api.query_process(process, ProcessBasicInformation, &basic, sizeof(basic), nullptr);
@@ -171,7 +241,7 @@ NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
     if (status < 0)
         return status;
     PVOID address = reinterpret_cast<void *>(image.record.preferred_base);
-    extent = 0;
+    SIZE_T extent = 0;
     status =
         api.map_section(section, process, &address, 0, 0, nullptr, &extent, 2, 0, PAGE_READONLY);
     api.close(section);
