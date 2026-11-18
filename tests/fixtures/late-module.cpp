@@ -18,48 +18,56 @@ HANDLE open_image_section(const wchar_t *path) {
     return section;
 }
 
-bool maps_without_preferred_base(msys_sandbox_compat::MapSection map, const wchar_t *path) {
+ULONG_PTR map_image(msys_sandbox_compat::MapSection map, const wchar_t *path, ULONG_PTR zero) {
     HANDLE section = open_image_section(path);
     if (!section)
-        return false;
+        return 0;
     PVOID base = nullptr;
     SIZE_T size = 0;
-    auto status = map(section, GetCurrentProcess(), &base, 0, 0, nullptr, &size, 2, 0, PAGE_READONLY);
+    LARGE_INTEGER offset{};
+    auto status = map(section, GetCurrentProcess(), &base, zero, 0, &offset, &size, 2, 0, PAGE_READONLY);
     CloseHandle(section);
     if (status < 0 || !base)
-        return false;
+        return 0;
+    auto address = reinterpret_cast<ULONG_PTR>(base);
     UnmapViewOfFile(base);
-    return true;
+    return address;
 }
 
-bool check_unconstrained_views(msys_sandbox_compat::MapSection map, wchar_t (&path)[MAX_PATH]) {
+bool check_additional_views(msys_sandbox_compat::MapSection map, wchar_t (&path)[MAX_PATH]) {
     // The loaded wrapper occupies the preferred base of both files under test.
     if (reinterpret_cast<uintptr_t>(GetModuleHandleW(L"new-module.dll")) != 0x63000000000ULL)
         return false;
     auto name = wcsrchr(path, L'\\');
-    if (!name || wcscpy_s(name + 1, MAX_PATH - (name + 1 - path), L"late-aslr-module.dll"))
+    if (!name)
         return false;
-    bool aslr_ok = maps_without_preferred_base(map, path);
+    auto select = [&](const wchar_t *filename) {
+        return wcscpy_s(name + 1, MAX_PATH - (name + 1 - path), filename) == 0;
+    };
+    bool aslr_ok = select(L"late-aslr-module.dll") && map_image(map, path, 0);
     if (!aslr_ok) {
         constexpr char message[] = "LATE-DLL-DYNAMIC-BASE-FAIL\n";
         write(2, message, sizeof(message) - 1);
     }
 
-    // From root\usr\bin\..., locate the sibling root-other\new-module.dll.
-    for (int i = 0; i < 2; ++i) {
-        *name = 0;
-        name = wcsrchr(path, L'\\');
-        if (!name)
-            return false;
-    }
-    if (wcscpy_s(name, MAX_PATH - (name - path), L"-other\\new-module.dll"))
-        return false;
-    bool outside_ok = maps_without_preferred_base(map, path);
-    if (!outside_ok) {
-        constexpr char message[] = "LATE-DLL-OUTSIDE-ROOT-FAIL\n";
+    bool retry_ok = select(L"late-conflict-module.dll") && map_image(map, path, 0);
+    if (!retry_ok) {
+        constexpr char message[] = "LATE-DLL-CONFLICT-RETRY-FAIL\n";
         write(2, message, sizeof(message) - 1);
     }
-    return aslr_ok && outside_ok;
+    if (!select(L"late-low-module.dll"))
+        return false;
+    constexpr ULONG_PTR low_base = 0x34000000;
+    const bool count_ok = map_image(map, path, 1) == low_base;
+    // The sparse mask permits addresses through 0x3fffffff.
+    const bool bitmap_ok = map_image(map, path, 0x20000000) == low_base;
+    const auto constrained = map_image(map, path, 3);
+    const bool constraint_ok = constrained && constrained < 0x20000000;
+    if (!count_ok || !bitmap_ok || !constraint_ok) {
+        constexpr char message[] = "LATE-DLL-ZEROBITS-FIXED-FAIL\n";
+        write(2, message, sizeof(message) - 1);
+    }
+    return aslr_ok && retry_ok && count_ok && bitmap_ok && constraint_ok;
 }
 
 bool check_mapping_requests() {
@@ -105,8 +113,8 @@ bool check_mapping_requests() {
         constexpr char message[] = "LATE-DLL-ZEROBITS-FAIL\n";
         write(2, message, sizeof(message) - 1);
     }
-    const bool unconstrained_ok = check_unconstrained_views(map, path);
-    return explicit_ok && constrained_ok && unconstrained_ok;
+    const bool additional_ok = check_additional_views(map, path);
+    return explicit_ok && constrained_ok && additional_ok;
 }
 
 } // namespace

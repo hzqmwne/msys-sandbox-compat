@@ -315,17 +315,6 @@ NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, A
                        source.self_size, nullptr);
     if (status < 0)
         return status;
-    // The copied state already carries the parent's root for relocated EXEs.
-    if (image.runtime_root_chars) {
-        status = api.write(process, source.runtime_root, image.path,
-                           image.runtime_root_chars * sizeof(wchar_t), nullptr);
-        if (status < 0)
-            return status;
-        status = api.write(process, &source.runtime_root_chars, &image.runtime_root_chars,
-                           sizeof(image.runtime_root_chars), nullptr);
-        if (status < 0)
-            return status;
-    }
     ProcessState local{};
     status = api.write(process, &source.local, &local, sizeof(local), nullptr);
     if (status < 0)

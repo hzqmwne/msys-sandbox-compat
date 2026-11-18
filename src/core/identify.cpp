@@ -153,24 +153,6 @@ struct ImageFile {
 
 } // namespace
 
-size_t exe_runtime_root_length(const wchar_t *path, size_t chars) {
-    constexpr wchar_t volume[] = L"\\Device\\HarddiskVolume";
-    constexpr wchar_t usr[] = L"\\usr\\";
-    constexpr size_t volume_chars = _countof(volume) - 1;
-    constexpr size_t usr_chars = _countof(usr) - 1;
-    if (chars >= image_path_chars || chars <= volume_chars + usr_chars ||
-        !wide_equal(path, volume_chars, volume, volume_chars))
-        return 0;
-    size_t start = volume_chars;
-    while (start < chars && path[start] != L'\\')
-        ++start;
-    // Require a directory below the volume and retain the trailing separator.
-    for (size_t end = chars - usr_chars; end > start; --end)
-        if (wide_equal(path + end, usr_chars, usr, usr_chars))
-            return end + 1;
-    return 0;
-}
-
 bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars) {
     ImageFile file{api};
     if (file.open(path, chars) < 0 || file.map() < 0)
@@ -197,7 +179,6 @@ NTSTATUS identify_executable(const NativeApi &api, HANDLE process, const void *b
 
 NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &image) {
     image.related = false;
-    image.runtime_root_chars = 0;
     NativeBuffer buffer(api, 4096);
     if (!buffer)
         return status_unsuccessful;
@@ -220,9 +201,6 @@ NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &im
                       sizeof(base), nullptr);
     if (status < 0)
         return status;
-    status = identify_executable(api, process, base, image.path, chars, image.record, image.related);
-    if (status >= 0 && image.related)
-        image.runtime_root_chars = exe_runtime_root_length(image.path, chars);
-    return status;
+    return identify_executable(api, process, base, image.path, chars, image.record, image.related);
 }
 } // namespace msys_sandbox_compat

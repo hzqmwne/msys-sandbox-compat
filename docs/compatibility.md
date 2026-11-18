@@ -13,7 +13,7 @@
 | MSYS 创建原生中间程序后显式回入 MSYS | 一层/三层原生桥接后 Bash、Perl、线程中 fork、管道与退出码通过回归 |
 | 原生中间程序直接创建 MSYS | `--native-relay` 下，一层/三层原生桥接后直接进入 Bash/Perl 已通过；默认模式仍需显式入口 |
 | relay 的原生根、显式嵌套入口及挂起创建 | 受测 PSEC 和两种固定令牌均通过；仅创建入口被修改，保留退出码与挂起状态 |
-| 运行中新出现的 EXE/DLL | EXE 按直接导入识别，符合映射条件的根内 DLL 在首次映射时处理 |
+| 运行中新出现的 EXE/DLL | EXE 按直接导入识别，符合映射条件的 DLL 在首次映射时处理 |
 | ConPTY | 公开 API 路径在 PSEC 和两种固定非 AppContainer 受限令牌中通过交互回归。尺寸跟随通过 PSEC 内外两层 ConPTY 的原生探针验收 |
 | Git `pre-commit` | 在已初始化的工作区，原生 Git 通过 `--native-relay` 自动启动 MSYS hook。PSEC 和两种固定受限令牌通过提交成功、hook 拒绝提交及文件边界回归 |
 | 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
@@ -23,7 +23,7 @@
 
 验证按底层隔离机制与配置组织；在相关安全策略、进程创建与控制台条件一致时，现有模型可代表上层启动环境。当前验收不要求先接入上层 harness，也不按产品名称分别建立兼容实现。
 
-EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原生根启动后才 LoadLibrary MSYS、仅 delay import 或仅由中间 DLL 引入运行时，均在预先识别范围外。DLL 地址适配限于创建时记录的安装根。根外扩展由 Windows 选址，其 fork 同址重载可能失败。见 [DLL 映射范围](design.md#dll-映射范围)。
+EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原生根启动后才 LoadLibrary MSYS、仅 delay import 或仅由中间 DLL 引入运行时，均在预先识别范围外。完整 MSYS 兼容进程中的 DLL 映射规则适用于任意路径。首选址不可用时由 Windows 按原请求选址，fork 同址重载仍可能失败。见 [DLL 映射范围](design.md#dll-映射范围)。
 
 设置 PE `DYNAMIC_BASE` 的 DLL 由 Windows 选址。使用该标志的新版 `msys-2.0.dll` 仍需在目标环境单独验证并存、父子映像布局和 fork。
 

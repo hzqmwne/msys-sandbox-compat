@@ -30,6 +30,9 @@ target_link_options(late-msys-module PRIVATE /BASE:0x63000000000 /DYNAMICBASE:NO
 add_library(late-aslr-module SHARED fixtures/late-wrapper.cpp)
 target_link_libraries(late-aslr-module PRIVATE late-msys-helper "${msys_test_import}")
 target_link_options(late-aslr-module PRIVATE /BASE:0x63000000000 /DYNAMICBASE /INCREMENTAL:NO)
+add_library(late-low-module SHARED fixtures/late-wrapper.cpp)
+target_link_libraries(late-low-module PRIVATE late-msys-helper "${msys_test_import}")
+target_link_options(late-low-module PRIVATE /BASE:0x34000000 /DYNAMICBASE:NO /INCREMENTAL:NO)
 
 add_library(import-name-runtime SHARED fixtures/import-name-runtime.cpp)
 add_executable(import-name-client fixtures/import-name-client.cpp)

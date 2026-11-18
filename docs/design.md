@@ -36,15 +36,15 @@
 
 ## DLL 映射范围
 
-在识别挂起的 MSYS EXE 时，从实际 NT 映像路径的 `\usr\` 子树记录安装根。目录规则适用于本地卷上的标准布局，要求安装根位于卷下的独立目录。能从自身路径取得根的子进程使用自己的安装根，其余子进程可沿用已知的父进程根。旧命令里的 `--runtime DLL` 仍可解析。
+完整 MSYS 兼容进程在调用方传入 `*BaseAddress == 0` 时，为未设置 `DYNAMIC_BASE` 的 AMD64 `SEC_IMAGE` DLL 尝试首选基址。兼容层从当次 section 查询 PE 标志、映像长度和首选址。DLL 路径、文件名和导入关系均不参与判断。映射路径无需重新打开 DLL 或建立临时视图。
 
-映射时只在 `ZeroBits` 和 `*BaseAddress` 均为零、section 是未设置 `DYNAMIC_BASE` 的 AMD64 `SEC_IMAGE` DLL、实际映像路径位于已记录的安装根下时，请求该 section 的首选基址。兼容层以临时映像视图取得实际路径，标志和原始首选址均从当前 section 查询。根外 DLL、根未知或查询失败时由原映射入口处理。映射路径不重开 DLL 或解析导入表。追踪记录请求基址、映射状态和内核写回地址。
+非零 `ZeroBits` 按 AMD64 的数量或前导零位图确定地址上限，首选映像区间必须完全放得下。原始 `ZeroBits` 继续传给内核。不满足条件或查询失败时使用原请求。首选址映射失败时将 `*BaseAddress` 恢复为零，再用原请求重试一次。追踪记录首选址尝试的状态、成功时的实址及重试事件。
 
 MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启动期间调用 `dll_dllcrt0` 登记的 MSYS DLL 进入 `DLL_LINK`，包括主 EXE 的传递依赖。已登记的原生 `DLL_NATIVE` 也经过重载后的基址核对。PE 导入表用于给已登记的模块排序。
 
 动态登记的 `DLL_LOAD` 可以在父进程偏离 PE 首选地址。fork 子进程预留父进程实际使用的区间。如果父进程记录的实载地址和首选地址不同，子进程会先试映射，遇到其他落点时卸载并暂时占住该区间，再有限次重试。正式加载仍校验基址等于父进程实际地址，随后父进程复制模块的数据段。Windows 的 PE 重定位处理映像中带重定位记录的地址，fork 复制的 XS 函数指针等普通运行时引用仍保留原值。
 
-主 EXE 的传递依赖和运行时加载的扩展均按其实际映像路径应用同一规则。本机原生 PSEC 下，`perl.exe` 经 `msys-perl5_42.dll` 间接导入 `msys-crypt-2.dll`。只固定 `msys-2.0.dll` 和 `msys-perl5_42.dll` 时，两者都在父子进程中同址，三轮 fork 均因 `msys-crypt-2.dll` 的实载基址不同而失败。`DYNAMIC_BASE` 筛选只用于当前 DLL 映射请求。定向实验见 [测试说明](testing.md#映像地址对照)。
+主 EXE 的传递依赖和运行时加载的扩展均按同一映射规则处理。本机原生 PSEC 下，`perl.exe` 经 `msys-perl5_42.dll` 间接导入 `msys-crypt-2.dll`。只固定 `msys-2.0.dll` 和 `msys-perl5_42.dll` 时，两者都在父子进程中同址，三轮 fork 均因 `msys-crypt-2.dll` 的实载基址不同而失败。自动选址重试可以让 DLL 加载继续，fork 同址检查仍以父子实载地址为准。定向实验见 [测试说明](testing.md#映像地址对照)。
 
 固定 Perl 的全部传递静态 MSYS 依赖后，最小 fork 通过，动态加载 XS 模块的完整负载仍出现同址重载失败。Perl 的子程序对象保存了 XS 函数的绝对地址。成功样本中，MSYS 自行把模块重载到父进程在 PE 首选地址之外的实际基址，子进程随后调用了继承的函数引用。
 
@@ -57,7 +57,7 @@ MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启
 | `NtCreateMutant` | mutex 授权 |
 | `NtCreateSymbolicLinkObject` | MSYS 目录链接与授权 |
 | `NtCreateNamedPipeFile` | MSYS 管道授权 |
-| `NtMapViewOfSection` | 对初始基址和 `ZeroBits` 均为零、且未设置 `DYNAMIC_BASE` 的相关 `SEC_IMAGE` DLL 请求首选基址 |
+| `NtMapViewOfSection` | 对基址未指定、未设置 `DYNAMIC_BASE` 且符合 `ZeroBits` 的 `SEC_IMAGE` DLL 尝试首选基址，失败时恢复原请求 |
 | `NtCreateUserProcess` | 创建前识别并暂留堆窗口，挂起创建后准备、释放窗口及传播 |
 | `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体并更新传播基准 |
 | `NtSetSecurityObject` | 当前进程伪句柄单独设置 DACL 时，按当次输入补受限主体 |

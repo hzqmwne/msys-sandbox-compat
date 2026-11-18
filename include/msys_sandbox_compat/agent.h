@@ -65,9 +65,6 @@ struct AgentState {
     uint32_t token_default_dacl_bytes;
     uint32_t object_policy_valid;
     HookSlot hooks[hook_count];
-    // Prepared while the target is suspended.
-    wchar_t runtime_root[image_path_chars];
-    size_t runtime_root_chars;
     // Process-local fields are reset when cloning into a new suspended child.
     ProcessState local;
 };

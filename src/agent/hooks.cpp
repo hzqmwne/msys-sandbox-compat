@@ -181,10 +181,27 @@ struct SectionImageInformation {
 };
 static_assert(sizeof(SectionImageInformation) == 64);
 
-PVOID inspect_section(const AgentState &state, HANDLE section, PVOID *base) {
+bool within_zero_bits(ULONG_PTR base, SIZE_T size, ULONG_PTR zero) {
+    if (!zero)
+        return true;
+    // AMD64 counts apply to the low 32 bits; a bitmap specifies leading zeros.
+    ULONG_PTR limit;
+    if (zero <= 21) {
+        limit = (ULONG_PTR{1} << (32 - zero)) - 1;
+    } else if (zero >= 32) {
+        unsigned long top;
+        _BitScanReverse64(&top, zero);
+        limit = UINTPTR_MAX >> (63 - top);
+    } else {
+        return false;
+    }
+    return size && base <= limit && size - 1 <= limit - base;
+}
+
+PVOID preferred_view_base(const NativeApi &api, HANDLE section, PVOID *base, ULONG_PTR zero) {
     PVOID requested = nullptr;
     SIZE_T received = 0;
-    if (state.api.read(current_process(), base, &requested, sizeof(requested), &received) < 0 ||
+    if (api.read(current_process(), base, &requested, sizeof(requested), &received) < 0 ||
         received != sizeof(requested) || requested)
         return nullptr;
 
@@ -193,41 +210,23 @@ PVOID inspect_section(const AgentState &state, HANDLE section, PVOID *base) {
         ULONG attributes;
         LARGE_INTEGER size;
     } basic{};
-    if (state.api.query_section(section, 0, &basic, sizeof(basic), nullptr) < 0 ||
+    if (api.query_section(section, 0, &basic, sizeof(basic), nullptr) < 0 ||
         !(basic.attributes & SEC_IMAGE))
         return nullptr;
 
     SectionImageInformation flags{};
-    if (state.api.query_section(section, 1, &flags, sizeof(flags), nullptr) < 0 ||
+    if (api.query_section(section, 1, &flags, sizeof(flags), nullptr) < 0 ||
         flags.machine != IMAGE_FILE_MACHINE_AMD64 || !(flags.image_characteristics & IMAGE_FILE_DLL) ||
         (flags.dll_characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE))
         return nullptr;
 
     PVOID original = nullptr;
     // SectionOriginalBaseInformation identifies the preferred base of this section.
-    if (state.api.query_section(section, 3, &original, sizeof(original), nullptr) < 0 ||
-        !original || (reinterpret_cast<uintptr_t>(original) & 0xffff))
+    if (api.query_section(section, 3, &original, sizeof(original), nullptr) < 0 ||
+        !original || (reinterpret_cast<uintptr_t>(original) & 0xffff) ||
+        !within_zero_bits(reinterpret_cast<uintptr_t>(original), basic.size.QuadPart, zero))
         return nullptr;
-
-    NativeBuffer buffer(state.api, 8192);
-    if (!buffer)
-        return nullptr;
-    PVOID inspection = nullptr;
-    SIZE_T extent = 0;
-    if (state.api.map_section(section, current_process(), &inspection, 0, 0, nullptr, &extent,
-                              2, 0, PAGE_READONLY) < 0)
-        return nullptr;
-    const auto status =
-        state.api.query_memory(current_process(), inspection, 2, buffer.as<BYTE>(), 8192, nullptr);
-    state.api.unmap_section(current_process(), inspection);
-    if (status < 0)
-        return nullptr;
-    const auto name = buffer.as<UNICODE_STRING>();
-    const auto root_chars = state.runtime_root_chars;
-    return name->Length / sizeof(wchar_t) > root_chars &&
-                   wide_equal(name->Buffer, root_chars, state.runtime_root, root_chars)
-               ? original
-               : nullptr;
+    return original;
 }
 } // namespace
 
@@ -288,19 +287,33 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
                                                          ULONG protection) {
     auto &state = g_agent_state;
     register_unwind();
-    const auto preferred =
-        base && !zero && state.runtime_root_chars ? inspect_section(state, section, base) : nullptr;
-    if (preferred)
-        *base = preferred;
-    auto status = state.api.map_section(section, process, base, zero, commit, offset, size,
-                                        inherit, allocation, protection);
-    if (preferred) {
+    const auto &api = state.api;
+    const auto map = [&] {
+        return api.map_section(section, process, base, zero, commit, offset, size,
+                               inherit, allocation, protection);
+    };
+    // Leave aliased in/out arguments to the original call.
+    if (!base || (reinterpret_cast<uintptr_t>(base) % alignof(PVOID)) ||
+        base == reinterpret_cast<PVOID *>(offset) || base == reinterpret_cast<PVOID *>(size))
+        return map();
+
+    const auto preferred = preferred_view_base(api, section, base, zero);
+    if (preferred && api.write(current_process(), base, &preferred, sizeof(preferred), nullptr) >= 0) {
+        const auto status = map();
         agent_log(state, "image mapping requested base", reinterpret_cast<ULONG_PTR>(preferred));
         agent_log(state, "image mapping status", static_cast<ULONG>(status));
-        if (status >= 0)
+        if (status >= 0) {
             agent_log(state, "image mapping actual base", reinterpret_cast<ULONG_PTR>(*base));
+            return status;
+        }
+        // Failed maps leave the native in/out fields untouched. Undo our own input change.
+        const PVOID unspecified = nullptr;
+        const auto restored = api.write(current_process(), base, &unspecified, sizeof(unspecified), nullptr);
+        if (restored < 0)
+            return restored;
+        agent_log(state, "image mapping retry with original base", static_cast<ULONG>(status));
     }
-    return status;
+    return map();
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,

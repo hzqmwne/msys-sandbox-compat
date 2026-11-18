@@ -165,23 +165,6 @@ int main() {
     image(L"preflight.exe", {"msys-2.0.dll"}, false);
     expect(imports_msys(api, exe_path.c_str(), exe_path.size()),
            "EXE preflight recognizes a direct import");
-    constexpr wchar_t exe_in_bin[] =
-        L"\\Device\\HarddiskVolume7\\Git\\UsR\\BiN\\bash.exe";
-    constexpr wchar_t expected_root[] = L"\\Device\\HarddiskVolume7\\Git\\";
-    expect(exe_runtime_root_length(exe_in_bin, _countof(exe_in_bin) - 1) ==
-               _countof(expected_root) - 1,
-           "derive the installation root including its directory separator");
-    constexpr wchar_t exe_in_lib[] = L"\\Device\\HarddiskVolume7\\Git\\usr\\lib\\ssh\\sftp-server.exe";
-    expect(exe_runtime_root_length(exe_in_lib, _countof(exe_in_lib) - 1) ==
-               _countof(expected_root) - 1,
-           "recognize executables elsewhere in the usr tree");
-    constexpr wchar_t exe_at_volume_root[] = L"\\Device\\HarddiskVolume7\\usr\\bin\\bash.exe";
-    expect(!exe_runtime_root_length(exe_at_volume_root, _countof(exe_at_volume_root) - 1),
-           "never use an entire NT volume as the root");
-    constexpr wchar_t loose_exe[] = L"\\Device\\HarddiskVolume7\\portable\\bash.exe";
-    expect(!exe_runtime_root_length(loose_exe, _countof(loose_exe) - 1),
-           "nonstandard layout does not enable directory classification");
-
     printf("IDENTIFY-%s failures=%d\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }
