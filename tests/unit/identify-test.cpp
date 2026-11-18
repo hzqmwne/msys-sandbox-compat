@@ -12,7 +12,7 @@ struct Image {
     std::vector<BYTE> bytes = std::vector<BYTE>(0x4000);
 };
 static std::map<std::wstring, std::unique_ptr<Image>> files;
-static size_t maps, allocation_bytes, memory_reads;
+static size_t maps, allocation_bytes, memory_reads, file_opens;
 static int failures;
 static const wchar_t *app = L"\\Device\\Review\\app\\";
 static bool fail_allocation, reject_root_reopen;
@@ -67,6 +67,7 @@ static NTSTATUS NTAPI read_memory(HANDLE, const void *source, void *out, SIZE_T 
 }
 static NTSTATUS NTAPI open_file(PHANDLE handle, ACCESS_MASK, POBJECT_ATTRIBUTES attributes,
                                 PIO_STATUS_BLOCK, ULONG, ULONG) {
+    ++file_opens;
     auto name = attributes->ObjectName;
     auto path = std::wstring(name->Buffer, name->Length / sizeof(wchar_t));
     if (reject_root_reopen && path == std::wstring(app) + L"root.exe")
@@ -92,6 +93,12 @@ static NTSTATUS NTAPI map_section(HANDLE section, HANDLE, PVOID *base, ULONG_PTR
 }
 static NTSTATUS NTAPI unmap_section(HANDLE, PVOID) { return 0; }
 static NTSTATUS NTAPI close_handle(HANDLE) { return 0; }
+static NTSTATUS NTAPI query_section(HANDLE section, ULONG kind, void *out, SIZE_T bytes, PSIZE_T) {
+    if (kind != 3 || bytes != sizeof(PVOID))
+        return status_not_supported;
+    *static_cast<PVOID *>(out) = section;
+    return status_success;
+}
 static NTSTATUS NTAPI read_file(HANDLE file, HANDLE, void *, void *, PIO_STATUS_BLOCK io, void *out,
                                 ULONG bytes, PLARGE_INTEGER offset, PULONG) {
     auto object = reinterpret_cast<Image *>(file);
@@ -111,6 +118,7 @@ int main() {
     api.open_file = open_file;
     api.create_section = create_section;
     api.map_section = map_section;
+    api.query_section = query_section;
     api.unmap_section = unmap_section;
     api.close = close_handle;
     api.read_file = read_file;
@@ -129,7 +137,7 @@ int main() {
     }
     auto inspect = [&](const char *label, std::vector<std::string> names, LONG pe_offset = 0x100) {
         auto &root = image(L"root.exe", names, false, pe_offset);
-        maps = allocation_bytes = memory_reads = 0;
+        maps = allocation_bytes = memory_reads = file_opens = 0;
         ImageRecord record{};
         std::wstring path = std::wstring(app) + L"root.exe";
         bool related = false;
@@ -156,6 +164,7 @@ int main() {
     auto native_result = inspect("shared_graph_native", imports);
     expect(native_result.first >= 0 && !native_result.second && maps == imports.size() + 8,
            "each shared dependency is mapped once");
+    expect(file_opens == maps, "the dependency walk reuses each successful file open");
     auto direct = inspect("direct_runtime_import", {"MSYS-2.0.DLL"});
     expect(direct.first >= 0 && direct.second && allocation_bytes == 0,
            "direct imports need no work list");
@@ -204,6 +213,31 @@ int main() {
                       : std::vector<std::string>{"deep" + std::to_string(i + 1) + ".dll"});
     auto depth = inspect("deep_dependency_chain", {"deep0.dll"});
     expect(depth.first >= 0 && depth.second, "deep chains fit the node budget");
+
+    auto &candidate = image(L"candidate.dll", {"kernel32.dll", "user32.dll", "msys-2.0.dll"});
+    std::wstring candidate_path = std::wstring(app) + L"candidate.dll";
+    auto inspect_mapping = [&](MappingInspection &mapping, uint64_t expected_base) {
+        file_opens = 0;
+        ImageRecord record{};
+        bool related = false;
+        auto status = related_image(api, current_process(), candidate.bytes.data(),
+                                    candidate_path.c_str(), candidate_path.size(), runtime, record,
+                                    related, app, &mapping);
+        return status >= 0 && related == (expected_base != 0) &&
+               (!related || record.preferred_base == expected_base) && !file_opens;
+    };
+    MappingInspection first_map{reinterpret_cast<HANDLE>(0x150000000ULL), 0, false, false};
+    expect(inspect_mapping(first_map, 0x150000000ULL) && first_map.import_hint == 3 &&
+               !first_map.reused_import && first_map.section_base,
+           "cache a direct import index and read the preferred base from the section");
+    MappingInspection second_map{reinterpret_cast<HANDLE>(0x160000000ULL), first_map.import_hint,
+                                  false, false};
+    expect(inspect_mapping(second_map, 0x160000000ULL) && second_map.reused_import,
+           "a different section can reuse the import hint while supplying its own base");
+    reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR *>(candidate.bytes.data() + 0x1000)->Name = 0;
+    MappingInspection replaced{second_map.section, second_map.import_hint, false, false};
+    expect(inspect_mapping(replaced, 0) && !replaced.reused_import && !replaced.section_base,
+           "a new image at the same path can end its import table before the cached index");
     printf("IDENTIFY-%s failures=%d\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

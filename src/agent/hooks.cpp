@@ -161,6 +161,33 @@ struct ObjectCall {
     }
 };
 
+// AMD64 SectionImageInformation. The final fields are not used by the filter.
+struct SectionImageInformation {
+    PVOID entry;
+    ULONG zero_bits;
+    SIZE_T stack_reserve;
+    SIZE_T stack_commit;
+    ULONG subsystem;
+    ULONG subsystem_version;
+    ULONG operating_system_version;
+    USHORT image_characteristics;
+    USHORT dll_characteristics;
+    USHORT machine;
+    BYTE contains_code;
+    BYTE image_flags;
+    ULONG loader_flags;
+    ULONG file_size;
+    ULONG checksum;
+};
+static_assert(sizeof(SectionImageInformation) == 64);
+
+volatile LONG &import_hint_slot(ProcessState &local, const UNICODE_STRING &name) {
+    uint32_t hash = 2166136261u;
+    for (size_t i = 0; i < name.Length / sizeof(wchar_t); ++i)
+        hash = (hash ^ wide_lower(name.Buffer[i])) * 16777619u;
+    return local.image_import_hints[hash % _countof(local.image_import_hints)];
+}
+
 NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &related) {
     auto &state = g_agent_state;
     struct SectionBasic {
@@ -178,6 +205,13 @@ NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &
         received != sizeof(requested) || requested)
         return status_success;
 
+    SectionImageInformation flags{};
+    if (state.api.query_section(section, 1, &flags, sizeof(flags), nullptr) >= 0 &&
+        (flags.machine != IMAGE_FILE_MACHINE_AMD64 ||
+         !(flags.image_characteristics & IMAGE_FILE_DLL) ||
+         (flags.dll_characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)))
+        return status_success;
+
     PVOID inspection = nullptr;
     SIZE_T extent = 0;
     status = state.api.map_section(section, current_process(), &inspection, 0, 0, nullptr, &extent,
@@ -190,10 +224,21 @@ NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &
                     : status_unsuccessful;
     if (status >= 0) {
         auto name = buffer.as<UNICODE_STRING>();
+        auto &slot = import_hint_slot(state.local, *name);
+        MappingInspection mapping{section,
+                                  static_cast<uint32_t>(_InterlockedCompareExchange(&slot, 0, 0)),
+                                  false, false};
         status =
             related_image(state.api, current_process(), inspection, name->Buffer, name->Length / 2,
-                          state.runtime, image, related, state.application_directory,
-                          ImageScope::dll_without_dynamic_base);
+                          state.runtime, image, related, state.application_directory, &mapping);
+        if (status >= 0 && related) {
+            if (mapping.reused_import)
+                agent_log(state, "image direct import hint reused", image.preferred_base);
+            else if (mapping.import_hint)
+                _InterlockedExchange(&slot, static_cast<LONG>(mapping.import_hint));
+            if (!mapping.section_base)
+                agent_log(state, "image preferred base read from file", image.preferred_base);
+        }
     }
     state.api.unmap_section(current_process(), inspection);
     return status;

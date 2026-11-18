@@ -45,6 +45,7 @@ struct HookSlot {
 struct ProcessState {
     volatile LONG unwind_registered;
     volatile LONG policy_lock;
+    volatile LONG image_import_hints[64];
 };
 
 struct AgentState {

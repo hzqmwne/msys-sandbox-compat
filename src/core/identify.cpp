@@ -69,8 +69,24 @@ struct ImageReader {
         }
         return false;
     }
+
+    static constexpr uint32_t max_hint = 16;
+
+    bool verify_import_hint(uint32_t index) const {
+        IMAGE_IMPORT_DESCRIPTOR entries[max_hint];
+        const auto bytes = index * sizeof(entries[0]);
+        if (!index || index > max_hint || bytes > imports.Size ||
+            !read(imports.VirtualAddress, entries, bytes))
+            return false;
+        for (uint32_t i = 0; i < index; ++i)
+            if (!entries[i].Name || entries[i].Name >= size)
+                return false;
+        char text[256];
+        return name(entries[index - 1].Name, text) && ascii_equal(text, "msys-2.0.dll");
+    }
+
     NTSTATUS inspect(const wchar_t *path, size_t chars, ImageRecord &image, bool &related,
-                     bool &indirect, ImageScope scope = ImageScope::all) {
+                     bool &indirect, MappingInspection *mapping = nullptr) {
         // Most images have both headers in the first kilobyte.
         BYTE headers[1024];
         bool have_prefix = read(0, headers, sizeof(headers));
@@ -96,7 +112,7 @@ struct ImageReader {
         image = {pe.OptionalHeader.ImageBase, size,
                  pe.FileHeader.Characteristics & IMAGE_FILE_DLL ? ImageKind::library
                                                                 : ImageKind::executable};
-        if (scope == ImageScope::dll_without_dynamic_base &&
+        if (mapping &&
             (image.kind != ImageKind::library ||
              (pe.OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)))
             return status_success;
@@ -106,6 +122,14 @@ struct ImageReader {
         if (image.kind == ImageKind::library && runtime_name(path, chars)) {
             related = true;
             return status_success;
+        }
+        if (mapping) {
+            if (verify_import_hint(mapping->import_hint)) {
+                mapping->reused_import = true;
+                related = true;
+                return status_success;
+            }
+            mapping->import_hint = 0;
         }
         char text[256];
         for (uint32_t offset = 0; imports.Size - offset >= sizeof(IMAGE_IMPORT_DESCRIPTOR);
@@ -118,6 +142,9 @@ struct ImageReader {
             if (!name(entry.Name, text))
                 return status_invalid_image;
             if (ascii_equal(text, "msys-2.0.dll")) {
+                const auto index = offset / sizeof(entry) + 1;
+                if (mapping && index <= max_hint)
+                    mapping->import_hint = static_cast<uint32_t>(index);
                 related = true;
                 return status_success;
             }
@@ -190,6 +217,7 @@ struct Dependency {
 // One bounded work list is also the visited set. Each dependency is mapped
 // once, then released; traversal never nests mappings or C++ calls.
 struct ImportNode {
+    HANDLE file;
     wchar_t path[image_path_chars];
 };
 struct ImportWalk {
@@ -244,6 +272,8 @@ struct ImportWalk {
             if (count == _countof(nodes))
                 return status_not_supported;
             auto &node = nodes[count++];
+            node.file = file.file;
+            file.file = nullptr;
             memcpy(node.path, candidate, (used + 1) * sizeof(wchar_t));
             return status_success;
         }
@@ -288,9 +318,8 @@ NTSTATUS indirect_imports(const NativeApi &api, const RuntimePaths &runtime, Ima
     for (unsigned next = 1; status >= 0 && next < walk->count; ++next) {
         auto &node = walk->nodes[next];
         Dependency file{api};
-        status = file.open(node.path, length(node.path));
-        if (status < 0)
-            break;
+        file.file = node.file;
+        node.file = nullptr;
         status = file.map();
         if (status < 0)
             break;
@@ -303,16 +332,19 @@ NTSTATUS indirect_imports(const NativeApi &api, const RuntimePaths &runtime, Ima
         if (indirect)
             status = walk->imports(api, runtime, reader, node);
     }
+    for (unsigned next = 1; next < walk->count; ++next)
+        if (walk->nodes[next].file)
+            api.close(walk->nodes[next].file);
     return status;
 }
 
 NTSTATUS classify_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
                         size_t chars, const RuntimePaths &runtime, ImageRecord &image, bool &related,
-                        const wchar_t *application, ImageScope scope = ImageScope::all) {
+                        const wchar_t *application, MappingInspection *mapping = nullptr) {
     related = false;
     bool indirect = false;
     ImageReader reader{api, process, reinterpret_cast<uintptr_t>(base)};
-    auto status = reader.inspect(path, chars, image, related, indirect, scope);
+    auto status = reader.inspect(path, chars, image, related, indirect, mapping);
     return status >= 0 && !related && indirect
                ? indirect_imports(api, runtime, reader, path, chars, application, related)
                : status;
@@ -333,13 +365,21 @@ bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars,
 
 NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
                        size_t chars, const RuntimePaths &runtime, ImageRecord &image, bool &related,
-                       const wchar_t *application, ImageScope scope) {
+                       const wchar_t *application, MappingInspection *mapping) {
     auto status = classify_image(api, process, base, path, chars, runtime, image, related,
-                                 application, scope);
+                                 application, mapping);
     if (status < 0 || !related)
         return status;
-    // SEC_IMAGE may rewrite ImageBase. Recover the preferred address only
-    // after classification; a preparation failure must preserve that result.
+    // SectionOriginalBaseInformation returns the original base of this exact
+    // section, even when the mapped PE header reports a relocated base.
+    PVOID original = nullptr;
+    if (mapping && api.query_section(mapping->section, 3, &original, sizeof(original), nullptr) >= 0 &&
+        original && !(reinterpret_cast<uintptr_t>(original) & 0xffff)) {
+        image.preferred_base = reinterpret_cast<uintptr_t>(original);
+        mapping->section_base = true;
+        return status_success;
+    }
+    // Keep the disk header as fallback and preserve positive classification on failure.
     Dependency file{api};
     status = file.open(path, chars);
     return status < 0 ? status : file.preferred_base(image.preferred_base);
