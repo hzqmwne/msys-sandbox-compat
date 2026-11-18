@@ -11,6 +11,7 @@ New-Item -ItemType Directory -Force $package,$evidence,(Join-Path $state 'tmp'),
 $exe=Join-Path $package 'new-printf.exe'
 $dll=Join-Path $package 'new-module.dll'
 $helper=Join-Path $package 'late-msys-helper.dll'
+$aslr=Join-Path $package 'late-aslr-module.dll'
 $policy=Join-Path $state 'late-policy.json'
 @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@()}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM $policy
 $fixtureBinaries=Get-TestFixtureDirectory $BinaryDirectory
@@ -25,10 +26,13 @@ $errorText=$p.StandardError.ReadToEndAsync()
 try {
     $first=$p.StandardOutput.ReadLineAsync()
     if(!$first.Wait(30000) -or $first.Result -ne 'WAITING-FOR-PACKAGE'){throw 'Target did not reach installation barrier'}
-    if((Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $dll) -or (Test-Path -LiteralPath $helper)){throw 'Package files must not exist before target is ready'}
+    foreach($path in @($exe,$dll,$helper,$aslr)) {
+        if(Test-Path -LiteralPath $path){throw 'Package files must not exist before target is ready'}
+    }
     Copy-Item -LiteralPath (Join-Path $GitRoot 'usr\bin\printf.exe') -Destination $exe
     Copy-Item -LiteralPath (Join-Path $fixtureBinaries 'late-msys-module.dll') -Destination $dll
     Copy-Item -LiteralPath (Join-Path $fixtureBinaries 'late-msys-helper.dll') -Destination $helper
+    Copy-Item -LiteralPath (Join-Path $fixtureBinaries 'late-aslr-module.dll') -Destination $aslr
     $p.StandardInput.Write("installed`n");$p.StandardInput.Flush()
     $output=$p.StandardOutput.ReadToEndAsync()
     if(!$p.WaitForExit(60000)){throw 'Late package timeout'}

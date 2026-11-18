@@ -36,13 +36,13 @@
 
 ## DLL 映射范围
 
-完整 MSYS 兼容进程只在 `NtMapViewOfSection` 的 `ZeroBits` 和调用方指定的基址 `*BaseAddress` 均为零时调整相关 `SEC_IMAGE` DLL。兼容层通过映像节取得实际文件路径，按文件名识别 `msys-2.0.dll`，按普通导入关系识别其他 MSYS DLL。命中 DLL 后，从磁盘 PE 头读取首选 `ImageBase`，用原映像节请求该地址。显式基址、非零 `ZeroBits`、无法读取的基址入参、数据映射和 EXE 视图均由原映射入口处理。追踪记录兼容层请求的基址、映射状态和成功后内核写回的实际基址。
+完整 MSYS 兼容进程只在 `NtMapViewOfSection` 的 `ZeroBits` 和调用方指定的基址 `*BaseAddress` 均为零时，为未设置 PE `DYNAMIC_BASE` 的相关 `SEC_IMAGE` DLL 调整地址。兼容层通过映像节取得实际文件路径，按文件名识别 `msys-2.0.dll`，按普通导入关系识别其他 MSYS DLL。命中 DLL 后，从磁盘 PE 头读取首选 `ImageBase`，用原映像节请求该地址。设置 `DYNAMIC_BASE` 的 DLL 跳过导入识别和磁盘首选地址读取，由 Windows 正常选址。显式基址、非零 `ZeroBits`、无法读取的基址入参、数据映射和 EXE 视图也由原映射入口处理。追踪记录兼容层请求的基址、映射状态和成功后内核写回的实际基址。
 
 MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启动期间调用 `dll_dllcrt0` 登记的 MSYS DLL 进入 `DLL_LINK`，包括主 EXE 的传递依赖。已登记的原生 `DLL_NATIVE` 也经过重载后的基址核对。PE 导入表用于给已登记的模块排序。
 
 动态登记的 `DLL_LOAD` 可以在父进程偏离 PE 首选地址。fork 子进程预留父进程实际使用的区间。如果父进程记录的实载地址和首选地址不同，子进程会先试映射，遇到其他落点时卸载并暂时占住该区间，再有限次重试。正式加载仍校验基址等于父进程实际地址，随后父进程复制模块的数据段。Windows 的 PE 重定位处理映像中带重定位记录的地址，fork 复制的 XS 函数指针等普通运行时引用仍保留原值。
 
-映像同址关系覆盖主 EXE 的传递静态依赖。本机原生 PSEC 下，`perl.exe` 经 `msys-perl5_42.dll` 间接导入 `msys-crypt-2.dll`。只固定 `msys-2.0.dll` 和 `msys-perl5_42.dll` 时，两者都在父子进程中同址，三轮 fork 均因 `msys-crypt-2.dll` 的实载基址不同而失败。现行的零入参规则沿用这套模块识别范围。定向实验见 [测试说明](testing.md#映像地址对照)。
+映像同址关系覆盖主 EXE 的传递静态依赖。本机原生 PSEC 下，`perl.exe` 经 `msys-perl5_42.dll` 间接导入 `msys-crypt-2.dll`。只固定 `msys-2.0.dll` 和 `msys-perl5_42.dll` 时，两者都在父子进程中同址，三轮 fork 均因 `msys-crypt-2.dll` 的实载基址不同而失败。`DYNAMIC_BASE` 筛选只用于当前 DLL 映射请求，进程识别和依赖遍历仍能经过设置该位的映像。定向实验见 [测试说明](testing.md#映像地址对照)。
 
 固定 Perl 的全部传递静态 MSYS 依赖后，最小 fork 通过，动态加载 XS 模块的完整负载仍出现同址重载失败。Perl 的子程序对象保存了 XS 函数的绝对地址。成功样本中，MSYS 自行把模块重载到父进程在 PE 首选地址之外的实际基址，子进程随后调用了继承的函数引用。
 
@@ -55,7 +55,7 @@ MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启
 | `NtCreateMutant` | mutex 授权 |
 | `NtCreateSymbolicLinkObject` | MSYS 目录链接与授权 |
 | `NtCreateNamedPipeFile` | MSYS 管道授权 |
-| `NtMapViewOfSection` | 仅在初始基址和 `ZeroBits` 均为零时为相关 `SEC_IMAGE` DLL 指定首选基址 |
+| `NtMapViewOfSection` | 对初始基址和 `ZeroBits` 均为零、且未设置 `DYNAMIC_BASE` 的相关 `SEC_IMAGE` DLL 请求首选基址 |
 | `NtCreateUserProcess` | 创建前识别并暂留堆窗口，挂起创建后准备、释放窗口及传播 |
 | `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体并更新传播基准 |
 

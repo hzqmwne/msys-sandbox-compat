@@ -45,7 +45,7 @@
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
 | `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |
 | `conpty.ps1 -NativeRelay` | 在同一 relay 模式下复用完整交互验收，可与三种环境或 Existing 组合 |
-| `late-package.ps1` | 运行目标到达屏障后才放置新 EXE/DLL，验证首次识别、动态模块和 fork。父子进程都检查相关 DLL 的显式非零基址请求和非零 `ZeroBits` 请求 |
+| `late-package.ps1` | 运行目标到达屏障后才放置新 EXE/DLL，验证首次识别、动态模块和 fork。父子进程都检查显式非零基址、非零 `ZeroBits` 以及设置 `DYNAMIC_BASE` 的 DLL 映射 |
 | `integrity.ps1` | 按需比较安装目录路径、长度和 SHA-256；不属于日常回归 |
 
 完整性检查仅在安装/部署写入逻辑变化、怀疑分发文件被修改或发布验收确有需要时执行，不在每轮兼容测试或每次提交后重复运行。若需要首次建立比较基线，使用 `tests/integrity.ps1 -CaptureBaseline`；已有基线时不要先覆盖，应直接比较。基线默认位于 `unused/evidence/git-before.json`，可通过 `-Baseline` 指定单独快照。
@@ -92,4 +92,4 @@ Windows 11 `26300.9974`、Git for Windows MSYS `3.6.10` 的原生 PSEC 对照使
 
 单独加载 `Time::HiRes` 或 `List::Util` 时，传递静态依赖版各通过 1/3，同轮较宽范围的对照各通过 3/3。传递静态依赖版的成功样本中，MSYS 自行把 XS DLL 重载到了父进程的实际基址，父子都偏离 PE 首选地址。子进程使用继承的 XS 函数引用完成了调用。失败样本记录了父进程保存的函数地址和子进程多次尝试的映射位置。
 
-表中的结果来自独立实验构建。正式版采用最后一行的请求范围。`late-package` 在实际接入 hook 的 Perl 父子进程中，对已识别的辅助 DLL 再发起两次 `SEC_IMAGE` 映射，分别检查显式基址得到保留，以及非零 `ZeroBits` 时由 Windows 选择另一个可用地址。映射追踪以写回的实际基址为准。见 [当前设计](design.md#dll-映射范围)。
+表中的结果来自独立实验构建。正式版在最后一行的请求范围上再排除设置 `DYNAMIC_BASE` 的 DLL。`late-package` 在实际接入 hook 的 Perl 父子进程中，对辅助 DLL 验证显式基址得到保留，以及非零 `ZeroBits` 时仍可映射。另一个具备相同 MSYS 依赖、设置了 `DYNAMIC_BASE` 的 DLL 在其首选地址已占用时，以两个零入参请求映射成功。映射追踪以写回的实际基址为准。见 [当前设计](design.md#dll-映射范围)。

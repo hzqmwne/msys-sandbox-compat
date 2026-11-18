@@ -192,7 +192,8 @@ NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &
         auto name = buffer.as<UNICODE_STRING>();
         status =
             related_image(state.api, current_process(), inspection, name->Buffer, name->Length / 2,
-                          state.runtime, image, related, state.application_directory);
+                          state.runtime, image, related, state.application_directory,
+                          ImageScope::dll_without_dynamic_base);
     }
     state.api.unmap_section(current_process(), inspection);
     return status;
@@ -266,7 +267,7 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
             agent_log(state, "image classification or preparation failed", static_cast<ULONG>(status));
             if (related)
                 return status;
-        } else if (related && image.kind == ImageKind::library) {
+        } else if (related) {
             *base = reinterpret_cast<void *>(image.preferred_base);
             adjusted = true;
         }

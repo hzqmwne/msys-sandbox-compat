@@ -8,6 +8,7 @@ namespace msys_sandbox_compat {
 constexpr size_t image_path_chars = 1024;
 
 enum class ImageKind : uint32_t { executable = 1, library = 2 };
+enum class ImageScope { all, dll_without_dynamic_base };
 
 struct ImageRecord {
     uint64_t preferred_base;
@@ -34,6 +35,7 @@ bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars,
                   const RuntimePaths &runtime);
 NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
                        size_t path_chars, const RuntimePaths &runtime, ImageRecord &image,
-                       bool &related, const wchar_t *application_directory = nullptr);
+                       bool &related, const wchar_t *application_directory = nullptr,
+                       ImageScope scope = ImageScope::all);
 
 } // namespace msys_sandbox_compat

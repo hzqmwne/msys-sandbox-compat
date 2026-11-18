@@ -70,7 +70,7 @@ struct ImageReader {
         return false;
     }
     NTSTATUS inspect(const wchar_t *path, size_t chars, ImageRecord &image, bool &related,
-                     bool &indirect) {
+                     bool &indirect, ImageScope scope = ImageScope::all) {
         // Most images have both headers in the first kilobyte.
         BYTE headers[1024];
         bool have_prefix = read(0, headers, sizeof(headers));
@@ -91,13 +91,18 @@ struct ImageReader {
             pe.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
             return status_invalid_image;
         size = pe.OptionalHeader.SizeOfImage;
-        imports = pe.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-        if (size < sizeof(pe) || pe_offset > size - sizeof(pe) ||
-            imports.VirtualAddress > size || imports.Size > size - imports.VirtualAddress)
+        if (size < sizeof(pe) || pe_offset > size - sizeof(pe))
             return status_invalid_image;
         image = {pe.OptionalHeader.ImageBase, size,
                  pe.FileHeader.Characteristics & IMAGE_FILE_DLL ? ImageKind::library
                                                                 : ImageKind::executable};
+        if (scope == ImageScope::dll_without_dynamic_base &&
+            (image.kind != ImageKind::library ||
+             (pe.OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)))
+            return status_success;
+        imports = pe.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+        if (imports.VirtualAddress > size || imports.Size > size - imports.VirtualAddress)
+            return status_invalid_image;
         if (image.kind == ImageKind::library && runtime_name(path, chars)) {
             related = true;
             return status_success;
@@ -303,11 +308,11 @@ NTSTATUS indirect_imports(const NativeApi &api, const RuntimePaths &runtime, Ima
 
 NTSTATUS classify_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
                         size_t chars, const RuntimePaths &runtime, ImageRecord &image, bool &related,
-                        const wchar_t *application) {
+                        const wchar_t *application, ImageScope scope = ImageScope::all) {
     related = false;
     bool indirect = false;
     ImageReader reader{api, process, reinterpret_cast<uintptr_t>(base)};
-    auto status = reader.inspect(path, chars, image, related, indirect);
+    auto status = reader.inspect(path, chars, image, related, indirect, scope);
     return status >= 0 && !related && indirect
                ? indirect_imports(api, runtime, reader, path, chars, application, related)
                : status;
@@ -328,9 +333,9 @@ bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars,
 
 NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
                        size_t chars, const RuntimePaths &runtime, ImageRecord &image, bool &related,
-                       const wchar_t *application) {
+                       const wchar_t *application, ImageScope scope) {
     auto status = classify_image(api, process, base, path, chars, runtime, image, related,
-                                 application);
+                                 application, scope);
     if (status < 0 || !related)
         return status;
     // SEC_IMAGE may rewrite ImageBase. Recover the preferred address only

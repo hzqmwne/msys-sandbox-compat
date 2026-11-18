@@ -1,11 +1,42 @@
 #include "msys_sandbox_compat/native_api.h"
 #include <stddef.h>
 #include <stdint.h>
+#include <wchar.h>
 
 extern "C" __declspec(dllimport) int getpid();
 extern "C" __declspec(dllimport) intptr_t write(int, const void *, size_t);
 
 namespace {
+
+HANDLE open_image_section(const wchar_t *path) {
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+        return nullptr;
+    HANDLE section = CreateFileMappingW(file, nullptr, PAGE_READONLY | SEC_IMAGE, 0, 0, nullptr);
+    CloseHandle(file);
+    return section;
+}
+
+bool check_aslr_mapping(msys_sandbox_compat::MapSection map, wchar_t (&path)[MAX_PATH]) {
+    // The already loaded wrapper occupies the ASLR fixture's PE preferred base.
+    if (reinterpret_cast<uintptr_t>(GetModuleHandleW(L"new-module.dll")) != 0x63000000000ULL)
+        return false;
+    auto name = wcsrchr(path, L'\\');
+    if (!name || wcscpy_s(name + 1, MAX_PATH - (name + 1 - path), L"late-aslr-module.dll"))
+        return false;
+    HANDLE section = open_image_section(path);
+    if (!section)
+        return false;
+    PVOID base = nullptr;
+    SIZE_T size = 0;
+    auto status = map(section, GetCurrentProcess(), &base, 0, 0, nullptr, &size, 2, 0, PAGE_READONLY);
+    CloseHandle(section);
+    if (status < 0 || !base)
+        return false;
+    UnmapViewOfFile(base);
+    return true;
+}
 
 bool check_mapping_requests() {
     auto map = reinterpret_cast<msys_sandbox_compat::MapSection>(
@@ -17,12 +48,7 @@ bool check_mapping_requests() {
     auto chars = module ? GetModuleFileNameW(module, path, MAX_PATH) : 0;
     if (!chars || chars >= MAX_PATH)
         return false;
-    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
-                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE)
-        return false;
-    HANDLE section = CreateFileMappingW(file, nullptr, PAGE_READONLY | SEC_IMAGE, 0, 0, nullptr);
-    CloseHandle(file);
+    HANDLE section = open_image_section(path);
     if (!section)
         return false;
 
@@ -55,7 +81,12 @@ bool check_mapping_requests() {
         constexpr char message[] = "LATE-DLL-ZEROBITS-FAIL\n";
         write(2, message, sizeof(message) - 1);
     }
-    return explicit_ok && constrained_ok;
+    bool aslr_ok = check_aslr_mapping(map, path);
+    if (!aslr_ok) {
+        constexpr char message[] = "LATE-DLL-DYNAMIC-BASE-FAIL\n";
+        write(2, message, sizeof(message) - 1);
+    }
+    return explicit_ok && constrained_ok && aslr_ok;
 }
 
 } // namespace
