@@ -21,6 +21,7 @@ add_custom_command(OUTPUT "${msys_test_import}"
   COMMAND "${CMAKE_AR}" /nologo /machine:x64 "/def:${CMAKE_CURRENT_SOURCE_DIR}/fixtures/msys-test.def" "/out:${msys_test_import}"
   DEPENDS fixtures/msys-test.def VERBATIM)
 add_library(late-msys-helper SHARED fixtures/late-module.cpp "${msys_test_import}")
+target_include_directories(late-msys-helper PRIVATE ../include)
 target_link_libraries(late-msys-helper PRIVATE "${msys_test_import}")
 target_link_options(late-msys-helper PRIVATE /BASE:0x63002000000 /INCREMENTAL:NO)
 add_library(late-msys-module SHARED fixtures/late-wrapper.cpp)

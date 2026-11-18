@@ -161,7 +161,7 @@ struct ObjectCall {
     }
 };
 
-NTSTATUS inspect_section(HANDLE section, ImageRecord &image, bool &related) {
+NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &related) {
     auto &state = g_agent_state;
     struct SectionBasic {
         PVOID base;
@@ -171,6 +171,13 @@ NTSTATUS inspect_section(HANDLE section, ImageRecord &image, bool &related) {
     auto status = state.api.query_section(section, 0, &basic, sizeof(basic), nullptr);
     if (status < 0 || !(basic.attributes & SEC_IMAGE))
         return status;
+
+    PVOID requested = nullptr;
+    SIZE_T received = 0;
+    if (state.api.read(current_process(), base, &requested, sizeof(requested), &received) < 0 ||
+        received != sizeof(requested) || requested)
+        return status_success;
+
     PVOID inspection = nullptr;
     SIZE_T extent = 0;
     status = state.api.map_section(section, current_process(), &inspection, 0, 0, nullptr, &extent,
@@ -251,19 +258,27 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
     auto &state = g_agent_state;
     register_unwind();
     ImageRecord image{};
-    bool related = false;
-    auto status = inspect_section(section, image, related);
-    if (status < 0) {
-        agent_log(state, "image classification or preparation failed", static_cast<ULONG>(status));
-        if (related)
-            return status;
-    } else if (related && image.kind != ImageKind::executable) {
-        *base = reinterpret_cast<void *>(image.preferred_base);
+    bool adjusted = false;
+    if (base && !zero) {
+        bool related = false;
+        auto status = inspect_section(section, base, image, related);
+        if (status < 0) {
+            agent_log(state, "image classification or preparation failed", static_cast<ULONG>(status));
+            if (related)
+                return status;
+        } else if (related && image.kind == ImageKind::library) {
+            *base = reinterpret_cast<void *>(image.preferred_base);
+            adjusted = true;
+        }
     }
-    status = state.api.map_section(section, process, base, zero, commit, offset, size, inherit,
-                                   allocation, protection);
-    if (status >= 0 && related)
-        agent_log(state, "fixed image mapping", image.preferred_base);
+    auto status = state.api.map_section(section, process, base, zero, commit, offset, size,
+                                        inherit, allocation, protection);
+    if (adjusted) {
+        agent_log(state, "image mapping requested base", image.preferred_base);
+        agent_log(state, "image mapping status", static_cast<ULONG>(status));
+        if (status >= 0)
+            agent_log(state, "image mapping actual base", reinterpret_cast<ULONG_PTR>(*base));
+    }
     return status;
 }
 
