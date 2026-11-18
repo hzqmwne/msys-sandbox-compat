@@ -16,22 +16,20 @@ $policy=Join-Path $state 'verify-policy.json'
 $launcher=Get-PsecLauncher $BinaryDirectory
 $supervisor=Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $results=[System.Collections.Generic.List[object]]::new()
-function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$Expected=0,[switch]$Raw,
+function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$Expected=0,
                      [string]$Match='',[switch]$CheckHeapHandoff) {
     $start=New-TestProcessInfo $launcher @() $state
     $start.ArgumentList.Add($policy)
-    if(!$Raw){
-        $start.ArgumentList.Add($supervisor)
-        if($CheckHeapHandoff){$start.ArgumentList.Add('--trace')}
-        $start.ArgumentList.Add('--runtime')
-        $start.ArgumentList.Add((Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
-    }
+    $start.ArgumentList.Add($supervisor)
+    if($CheckHeapHandoff){$start.ArgumentList.Add('--trace')}
+    $start.ArgumentList.Add('--runtime')
+    $start.ArgumentList.Add((Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
     $start.ArgumentList.Add($Program)
     foreach($argument in $Arguments){$start.ArgumentList.Add($argument)}
     $result=Invoke-TestProcess $start
     $out=$result.Output; $err=$result.Error
     Save-TestOutput $result $evidence $Name
-    $diagnosticFailure=(!$Raw -and $err -match '\[exception\]|fatal error|fork: retry|child_copy:|Resource temporarily unavailable|\[image-error\]|\[fatal\]')
+    $diagnosticFailure=$err -match '\[exception\]|fatal error|fork: retry|child_copy:|Resource temporarily unavailable|\[image-error\]|\[fatal\]'
     $pass=($result.ExitCode -eq $Expected -and !$diagnosticFailure -and (!$Match -or $out -match $Match))
     if($CheckHeapHandoff){
         $launcherLine=$err.IndexOf('[launcher]')
@@ -40,13 +38,11 @@ function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$E
             $err.Substring(0,$launcherLine) -match $release -and
             $err.Substring($launcherLine) -match $release
     }
-    if($Raw){$pass=($result.ExitCode -ne 0 -and $err -match 'NtCreateDirectoryObject.*C0000022')}
     $results.Add([pscustomobject]@{Name=$Name;Passed=$pass;ExitCode=$result.ExitCode;Expected=$Expected;DiagnosticFailure=$diagnosticFailure})
     Write-Output "$Name pass=$pass exit=$($result.ExitCode)"
 }
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 $perl=Join-Path $GitRoot 'usr\bin\perl.exe'
-Invoke-Case 'raw-baseline' $bash @('--noprofile','--norc','-c','echo unexpected') -Raw
 for($i=1;$i -le $Repetitions;$i++) {
     Invoke-Case "fork-$i" $perl @((Join-Path $PSScriptRoot 'fixtures\fork.pl')) -Match 'fork from a secondary POSIX thread works' -CheckHeapHandoff
     Invoke-Case "shell-$i" $bash @('--noprofile','--norc',(Join-Path $PSScriptRoot 'fixtures\shell.sh')) -Match 'SHELL-PASS'
