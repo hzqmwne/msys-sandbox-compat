@@ -78,3 +78,15 @@ relay 链路要求原生桥接只存在一个创建 hook，其余入口与 MSYS 
 `restricted-run` 只修改带 `.restricted-fixture` 标记的测试目录及其受控文件 ACL；两种令牌的固定 SID、对象 ACL 和能力边界见 [兼容范围](compatibility.md)。暂存副本只包含兼容产物与测试夹具，MSYS 分发文件保持原位。`raw-baseline.*` 保存同令牌下原版 Bash 的结果，`native-depth-*` 必须完成真实工作负载才通过；基线失败不能代替兼容成功。
 
 测试设置的 ACL 是夹具初始条件，不能要求生产复制这些 ACL 操作。生产验收应使用原有策略已允许的部署位置，保留原 token、文件与对象访问限制；对只读写入、WRITE_DAC 和拒绝读取等行为同时检查拒绝。当前检查覆盖固定夹具，不能仅凭文件内容完整性或几个 canary 宣称任意生产环境的全部限制均已验证。
+
+## 映像地址对照
+
+Windows 11 `26300.9974`、Git for Windows MSYS `3.6.10` 的原生 PSEC 对照使用同一套原安装文件，分别验证映像匹配范围和入参条件。
+
+| 实验改写条件 | 结果 |
+|---|---|
+| `msys-2.0.dll` 且未指定基址 | Bash 常见操作及 Git init/add/status 通过。三轮 Perl 均在首次 fork 因 `msys-crypt-2.dll` 父子地址不同而失败 |
+| `perl.exe` 直接静态导入的 MSYS DLL 且未指定基址 | `msys-2.0.dll` 和 `msys-perl5_42.dll` 父子同址。三轮 Perl 在同一个传递依赖上失败 |
+| 保留当前 DLL 范围，仅在初始 `*BaseAddress` 与 `ZeroBits` 均为零时改写 | `verify` 11/11、`late-package` 及 Bash 内 Git init/add/status 通过。带追踪的回归记录 1,207 次相关 DLL 映射，两项入参均为零 |
+
+这几组结果来自独立实验构建。正式回归入口仍按 [当前设计](design.md#dll-映射范围) 判定，非零基址的映射路径需要独立样本。

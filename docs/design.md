@@ -34,6 +34,12 @@
 
 准备工作包括 EXE/DLL 首选地址、私有对象路径及安全描述符。MSYS 启动后自行在原址预留和提交 cygheap 与 userheap。root 和 child 使用同一套 agent 节保护规则；child 只重置进程局部状态。
 
+## DLL 映射范围
+
+完整 MSYS 兼容进程在 `NtMapViewOfSection` 检查 `SEC_IMAGE`。通过加载器提供的映像节取得实际文件路径，按文件名识别 `msys-2.0.dll`，按普通导入关系识别其他 MSYS DLL。命中 DLL 后，从磁盘 PE 头读取首选 `ImageBase`，将其作为基址传给原映射入口，沿用加载器选定的映像节。数据映射和 EXE 视图的映射参数原样传递。现行代码也会覆盖调用方传入的非零基址。
+
+映像同址关系覆盖主 EXE 的传递静态依赖。本机原生 PSEC 下，`perl.exe` 经 `msys-perl5_42.dll` 间接导入 `msys-crypt-2.dll`。只固定 `msys-2.0.dll` 和 `msys-perl5_42.dll` 时，两者都在父子进程中同址，三轮 fork 均因 `msys-crypt-2.dll` 的实载基址不同而失败。保留现有 DLL 范围、只处理初始 `*BaseAddress` 与 `ZeroBits` 都为零的版本通过了定向对照，非零入参尚无实测样本。定向实验与当前实现的关系见 [测试说明](testing.md#映像地址对照)。
+
 ## 八个 hook 的职责
 
 | 入口 | 兼容职责 |
