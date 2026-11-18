@@ -112,13 +112,29 @@ $repositoryPath = $repository.Replace('%','%%')
 $tracked = "$repositoryPath\payload.txt"
 Invoke-FixtureGit setup @('--version') -Isolated `
     -Setup ('mkdir "{0}" || exit /b 1' -f $repositoryPath) | Out-Null
-Invoke-FixtureGit init @('init', '--template=', '--initial-branch=main') | Out-Null
+$initArgs = @('init', '--template=', '--initial-branch=main')
+$ancestorProbe = 'dir /a "{0}" >nul 2>&1 || echo GIT-INIT-ANCESTOR-UNREADABLE' -f $root.Replace('%','%%')
+$initialized = Invoke-FixtureGit init $initArgs -Isolated -Setup $ancestorProbe -AllowFailure
+if ($initialized.ExitCode -ne 0) {
+    if ($Environment -ne 'FullRestricted' -or
+        $initialized.Output -notmatch 'GIT-INIT-ANCESTOR-UNREADABLE' -or
+        $initialized.Error -notmatch "cannot lock ref 'HEAD': unable to create directory for .+\.git/HEAD") {
+        throw "Isolated init failed ($($initialized.ExitCode))`n$($initialized.Error)"
+    }
+    Write-Output 'GIT-INIT-REJECTED: the full token cannot enumerate a repository ancestor'
+    # Prepare the fixture so add, status and commit can still be checked with the same token.
+    Invoke-FixtureGit init-fixture $initArgs | Out-Null
+}
 $commit = @('-c', 'user.name=MSYS compatibility test', '-c', 'user.email=msys-test@example.invalid',
     '-c', 'commit.gpgsign=false', '-c', 'core.autocrlf=false', '-c', ('core.hooksPath=' + $hooks.Replace('\','/')),
     'commit', '-m')
 Invoke-FixtureGit add @('-c', 'core.autocrlf=false', 'add', '--', 'payload.txt') -Isolated `
     -Setup ('>"{0}" echo accepted || exit /b 1' -f $tracked) | Out-Null
+$status = (Invoke-FixtureGit status-staged @('status', '--porcelain=v1') -Isolated).Output.TrimEnd()
+if ($status -cne 'A  payload.txt') { throw "Expected a staged file in isolated Git status: $status" }
 $accepted = Invoke-FixtureGit accepted ($commit + 'accepted') -Isolated
+$status = (Invoke-FixtureGit status-clean @('status', '--porcelain=v1') -Isolated).Output.Trim()
+if ($status) { throw "Expected a clean working tree in isolated Git status: $status" }
 $head = (Invoke-FixtureGit head @('rev-parse', 'HEAD')).Output.Trim()
 $content = (Invoke-FixtureGit committed @('show', 'HEAD:payload.txt')).Output.Trim()
 $count = (Invoke-FixtureGit count @('rev-list', '--count', 'HEAD')).Output.Trim()

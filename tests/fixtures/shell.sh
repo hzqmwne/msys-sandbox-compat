@@ -19,6 +19,10 @@ wait "$p"
 status=$?
 set -e
 test "$status" = 37
+case "$(uname -s)" in
+    MSYS_NT-*|MINGW*_NT-*) ;;
+    *) exit 38 ;;
+esac
 awk 'BEGIN { print "awk-ok" }' | grep '^awk-ok$'
 find . -maxdepth 0 -type d | grep '^\.$'
 printf 'SHELL-PASS\n'

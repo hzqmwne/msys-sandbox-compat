@@ -31,12 +31,12 @@
 | `object-security-test` | ACL 最小追加、enabled groups、空/NULL、输入不变、absolute/self-relative 的 owner/group/SACL/control 保留 |
 | `stream-write-test` | ConPTY 双向转发共用的写入循环，覆盖连续短写、零进展和写入失败 |
 | `acl.ps1` | 真实 MSYS 内显式对象与后续默认设置；有限权限、deny、其他 token、adjust-only/query-only 句柄；-Existing 可直接使用已有受限上下文 |
-| `verify.ps1` | 原版失败基线、重复 fork/shell、读写边界、退出码、原生子进程，以及 Perl 根和后代在创建时预留 cygheap |
+| `verify.ps1` | 原版失败基线、重复 fork 和 Bash 管道、子 shell、命令替换、后台任务与 `uname`，以及读写边界、退出码、原生子进程和 Perl 根与后代的 cygheap 预留 |
 | `fork.pl` | PID、堆、COW、共享文件偏移、管道、EOF、信号、exec、WNOHANG、嵌套及并发 fork、线程中 fork |
 | `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、原生根显式回入、MSYS 原生后代回入及默认 Token DACL 保持 |
 | `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
 | `process-chain.ps1 -Environment WriteRestricted/FullRestricted` | 两种非 AppContainer 令牌下复用完整链路；记录无兼容基线，保持普通 MSYS 会话并存，验证实际受限令牌及文件写入/WRITE_DAC 拒绝 |
-| `git-hook.ps1` | 三种隔离模式下真实 Git 经 `--native-relay` 触发 MSYS `pre-commit`，覆盖 GNU 管道、Perl、成功提交、拒绝提交、暂存内容和文件权限 |
+| `git-hook.ps1` | 三种隔离模式中运行真实 `git init`、`git add`、`git status`，经 `--native-relay` 触发 MSYS `pre-commit`，并检查成功与拒绝提交、暂存内容和文件权限 |
 | `conpty.ps1` | TTY、120×40 尺寸、UTF-8 往返、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
 | `conpty-resize.ps1` | 外层 ConPTY 调整窗口后，PSEC 内原生探针在没有键盘输入的情况下观察到内层尺寸变化，显式 80×24 会话保持固定 |
 | `terminal-session.ps1` | 非 UTF-8 初始控制台中的嵌套会话，读回实际 Unicode 屏幕和光标移动，验证正常/启动失败后的状态恢复。通过 `run.ps1` 验证 Bash 中文方向键编辑、PATH、尺寸与 Ctrl+C，以及 Windows PowerShell 5.1 中文输入输出和真实 PSReadLine 交互命令的历史保存 |
@@ -52,7 +52,7 @@
 
 各脚本默认输出到 `unused/evidence/current/<suite>`，也可使用 `-EvidenceDirectory` 保留不同轮次。状态和 HOME 位于 `unused/runtime`。这些文件不进入 Git 或发布包。
 
-`git-hook.ps1` 在受测上下文内创建独立工作目录，由宿主 Git 初始化测试仓库；`git add`、`git commit` 和 Git 自动拉起的 hook 在受测上下文运行。配置仅用于该夹具。验证同时检查 hook 的计算结果、隔离文件访问和真实仓库状态。
+`git-hook.ps1` 在受测上下文内创建独立工作目录，初始化仓库、暂存文件、检查暂存与干净状态并运行提交。Git 自动拉起的 hook 也在受测上下文运行。完整受限令牌如果无法列出仓库祖先目录，文件型 ref 后端可能拒绝建立 `.git/HEAD`。用例核对该目录访问失败和 Git 诊断，再用宿主初始化夹具，继续在原令牌下检查后续命令。验证同时检查 hook 的计算结果、隔离文件访问和真实仓库状态。
 
 `scope` 的七项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
 
