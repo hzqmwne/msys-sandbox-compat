@@ -32,6 +32,7 @@ enum class HookId : size_t {
     map_view,
     create_process,
     set_token,
+    set_security,
     count
 };
 constexpr size_t hook_count = static_cast<size_t>(HookId::count);

@@ -40,7 +40,8 @@ int wmain(int argc, wchar_t **argv) {
     bool clean = true;
     for (auto name : {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
                       "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile", "NtMapViewOfSection",
-                      "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
+                      "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken",
+                      "NtSetSecurityObject"}) {
         auto code =
             reinterpret_cast<const BYTE *>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name));
         bool original =
@@ -77,7 +78,8 @@ int wmain(int argc, wchar_t **argv) {
         for (auto name :
              {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
               "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile", "NtMapViewOfSection",
-              "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
+              "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken",
+              "NtSetSecurityObject"}) {
             BYTE code[8]{};
             auto address = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name);
             if (ReadProcessMemory(parent, address, code, sizeof(code), nullptr)) {
@@ -92,7 +94,7 @@ int wmain(int argc, wchar_t **argv) {
         status = query(parent, static_cast<PROCESSINFOCLASS>(7), &port, sizeof(port), nullptr);
         fprintf(report, "parent-inline-jumps=%u parent-debug-status=%08lx parent-debug-port=%llu\n",
                 jumps, static_cast<ULONG>(status), port);
-        clean = clean && jumps == 8 && allocation_original && status >= 0 && port == 0;
+        clean = clean && jumps == 9 && allocation_original && status >= 0 && port == 0;
         for (auto address : {0x800000000ULL, 0xa00000000ULL}) {
             auto base = reinterpret_cast<void *>(address);
             MEMORY_BASIC_INFORMATION heap{};

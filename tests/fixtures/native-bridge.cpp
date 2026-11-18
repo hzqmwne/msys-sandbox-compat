@@ -26,7 +26,8 @@ int wmain(int argc, wchar_t **argv) {
     for (const char *name :
          {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
           "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile", "NtMapViewOfSection",
-          "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
+          "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken",
+          "NtSetSecurityObject"}) {
         auto code = reinterpret_cast<const BYTE *>(GetProcAddress(ntdll, name));
         bool create = std::string(name) == "NtCreateUserProcess";
         bool expected = code && (relay && create ? code[0] == 0xe9

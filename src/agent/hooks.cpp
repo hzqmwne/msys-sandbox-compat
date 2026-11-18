@@ -356,6 +356,23 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
         remember_object_policy(state);
     return status;
 }
+
+extern "C" __declspec(dllexport) NTSTATUS NTAPI
+hook_set_security(HANDLE object, SECURITY_INFORMATION information, PSECURITY_DESCRIPTOR descriptor) {
+    auto &state = g_agent_state;
+    if (object != current_process() || information != DACL_SECURITY_INFORMATION)
+        return state.api.set_security(object, information, descriptor);
+
+    // Cold startup sets a process DACL separately from the token default DACL.
+    SecurityAdaptation adapted(state.api);
+    auto status = adapted.descriptor(descriptor, state);
+    if (status < 0)
+        return status;
+    if (auto replacement = adapted.adapted_descriptor())
+        descriptor = replacement;
+    return state.api.set_security(object, information, descriptor);
+}
+
 extern "C" __declspec(dllexport) NTSTATUS NTAPI
 hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS_MASK thread_access,
              POBJECT_ATTRIBUTES process_attributes, POBJECT_ATTRIBUTES thread_attributes,

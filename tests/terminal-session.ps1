@@ -44,6 +44,10 @@ $info = New-TestProcessInfo $probe @('--drive-bash',$probe,'--outer-state',$pwsh
     '-File',(Join-Path $root 'run.ps1'),'-ConPty','-BinaryDirectory',$binaries) $state
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'bash-demo'
+if ($result.Output.Contains('Cannot query console owner') -or
+    $result.Error.Contains('Cannot query console owner')) {
+    throw "Bash could not open its console owner for synchronization. See $report/bash-demo.*.txt"
+}
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('DEMO-CTRL-C-PASS') -or
     !$result.Output.Contains('OUTER-STATE-PASS') -or !$result.Output.Contains('EDITED=中文Xb')) {
     throw "Bash demo failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"

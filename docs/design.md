@@ -48,7 +48,7 @@ MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启
 
 固定 Perl 的全部传递静态 MSYS 依赖后，最小 fork 通过，动态加载 XS 模块的完整负载仍出现同址重载失败。Perl 的子程序对象保存了 XS 函数的绝对地址。成功样本中，MSYS 自行把模块重载到父进程在 PE 首选地址之外的实际基址，子进程随后调用了继承的函数引用。
 
-## 八个 hook 的职责
+## Hook 的职责
 
 | 入口 | 兼容职责 |
 |---|---|
@@ -60,10 +60,13 @@ MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启
 | `NtMapViewOfSection` | 对初始基址和 `ZeroBits` 均为零、且未设置 `DYNAMIC_BASE` 的相关 `SEC_IMAGE` DLL 请求首选基址 |
 | `NtCreateUserProcess` | 创建前识别并暂留堆窗口，挂起创建后准备、释放窗口及传播 |
 | `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体并更新传播基准 |
+| `NtSetSecurityObject` | 当前进程伪句柄单独设置 DACL 时，按当次输入补受限主体 |
 
 对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。已识别进程/线程查询实际 DACL 后使用同一转换器。
 
 默认设置同样使用当次 ACL，不恢复启动快照。仅匹配当前主 token 的 TokenDefaultDacl；NtCompareObjects 不要求输入句柄有查询权限，最终由原 NtSetInformationToken 检查设置权限。默认值对后续采用默认 SD 的对象有连带影响，作为已接受的兜底取舍；不修改已有磁盘/注册表 ACL。显式对象仍需创建路径适配。决定见 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
+
+MSYS 冷启动分别设置 token 默认 DACL 和当前进程对象的 DACL。当前进程伪句柄的独立 DACL 设置复用同一转换器，原系统调用执行授权检查。Git for Windows 的新运行时通过进程句柄检查控制台所有者是否仍存活，这条设置路径会影响该检查。
 宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄。PSEC 对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化。查询取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
 
 非 AppContainer 受限令牌没有 package 私有命名空间。宿主在当前 session 的 `BaseNamedObjects` 下创建每次启动的目录，目录初始策略沿用启动器默认 DACL，实际对象按当次输入适配，不遍历 restricting SID 并全部授权。目录句柄保持到进程树退出；内部环境变量 `MSYS_SANDBOX_COMPAT_SESSION` 携带数字启动标记，使原生中间程序后的显式兼容入口复用同一目录。普通 MSYS 和其他兼容会话的对象不会占用该目录。PSEC 路径不使用此标记。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
@@ -78,7 +81,7 @@ MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标
 
 ## 显式原生 relay
 
-`--native-relay` 将传播范围扩展到本次启动的原生根和原生后代。仍手工映射同一 agent 映像，为共享识别/准备代码初始化原入口 trampoline；原生进程仅修改 `NtCreateUserProcess` 一个入口，不修改其对象 ACL、默认 DACL 或 MSYS 地址区。确认关联 MSYS 的子进程才应用完整八个 hook 和 MSYS 准备。调用者原有的挂起状态保留。
+`--native-relay` 将传播范围扩展到本次启动的原生根和原生后代。仍手工映射同一 agent 映像，为共享识别/准备代码初始化原入口 trampoline；原生进程仅修改 `NtCreateUserProcess` 一个入口，不修改其对象 ACL、默认 DACL 或 MSYS 地址区。确认关联 MSYS 的子进程才应用完整 hook 和 MSYS 准备。调用者原有的挂起状态保留。
 
 原生创建 hook 在恢复前识别并复制相应模式，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用原运行上下文；其创建调用已准备子进程，宿主不重复识别、复制完整状态或再次注入。首次映射在独立的 agent 状态副本中绑定 trampoline，不临时改写宿主 API。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代，省略嵌套启动器选项不会关闭已有 relay 或替换原上下文。
 
