@@ -8,7 +8,7 @@
 
 - 为已识别的 MSYS 进程在创建时暂留堆窗口，并在恢复执行前释放。原版 MSYS 自行预留和提交 cygheap 与 userheap，删除 `NtAllocateVirtualMemory` hook。
 - 对设置 PE `DYNAMIC_BASE` 的 DLL 保留 Windows 的选址，首选基址调整只覆盖未设置该位的相关 DLL。
-- 优先从现有映像节读取 PE 标志和首选基址。按实际 MSYS 安装根目录识别固定基址 DLL，其他位置匹配运行时名称或直接导入。EXE 只按直接导入识别，移除传递依赖遍历。
+- EXE 只按直接导入识别。在挂起阶段记录安装根，DLL 映射只处理根内未设置 `DYNAMIC_BASE` 的映像，从现有 section 查询标志和首选基址。
 
 ### 终端转发
 

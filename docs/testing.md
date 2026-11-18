@@ -45,7 +45,7 @@
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
 | `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |
 | `conpty.ps1 -NativeRelay` | 在同一 relay 模式下复用完整交互验收，可与三种环境或 Existing 组合 |
-| `late-package.ps1` | 运行目标到达屏障后才放置新 EXE/DLL，验证首次识别、动态模块和 fork。父子进程都检查显式非零基址、非零 `ZeroBits` 以及设置 `DYNAMIC_BASE` 的 DLL 映射 |
+| `late-package.ps1` | 在独立标准布局下启动，目标到达屏障后才放置根内的 EXE/DLL，验证首次识别、动态模块和 fork。父子进程都检查显式非零基址、非零 `ZeroBits`、`DYNAMIC_BASE` DLL 和同名前缀兄弟目录中的根外映像 |
 | `integrity.ps1` | 按需比较安装目录路径、长度和 SHA-256；不属于日常回归 |
 
 完整性检查仅在安装/部署写入逻辑变化、怀疑分发文件被修改或发布验收确有需要时执行，不在每轮兼容测试或每次提交后重复运行。若需要首次建立比较基线，使用 `tests/integrity.ps1 -CaptureBaseline`；已有基线时不要先覆盖，应直接比较。基线默认位于 `unused/evidence/git-before.json`，可通过 `-Baseline` 指定单独快照。
@@ -92,6 +92,6 @@ Windows 11 `26300.9974`、Git for Windows MSYS `3.6.10` 的原生 PSEC 对照使
 
 单独加载 `Time::HiRes` 或 `List::Util` 时，传递静态依赖版各通过 1/3，同轮较宽范围的对照各通过 3/3。传递静态依赖版的成功样本中，MSYS 自行把 XS DLL 重载到了父进程的实际基址，父子都偏离 PE 首选地址。子进程使用继承的 XS 函数引用完成了调用。失败样本记录了父进程保存的函数地址和子进程多次尝试的映射位置。
 
-表中的结果来自独立实验构建。`late-package` 在实际接入 hook 的 Perl 父子进程中，验证安装根目录外且直接导入 MSYS 的新 DLL 能命中，也检查显式基址得到保留、非零 `ZeroBits` 时仍可映射，以及 `DYNAMIC_BASE` DLL 在首选址占用时仍能以两个零入参映射。`identify` 单测覆盖路径识别跳过 PE 读取，以及 EXE 和安装根外 DLL 的直接导入边界。映射追踪以写回的实际基址为准。见 [当前设计](design.md#dll-映射范围)。
+表中的结果来自独立实验构建。`late-package` 在隔离的 `usr` 布局中验证根内晚装 DLL 的首选址和 Perl fork，也检查显式非零基址与非零 `ZeroBits`。在首选址已占用时，根内的 `DYNAMIC_BASE` DLL 和根外兄弟目录中的固定基址 DLL 仍能用两个零入参映射。`identify` 覆盖 EXE 的直接导入和从 `usr` 子树确定安装根。映射追踪以写回的实际基址为准。见 [当前设计](design.md#dll-映射范围)。
 
-在本机 Git for Windows 2.56.1 安装下检查了 352 个 EXE 的普通导入。259 个直接导入 `msys-2.0.dll`，按旧识别目录规则查找未发现只有传递依赖的 EXE。PSEC 的一轮 Bash／Perl `verify` fork 跟踪中，395 次地址调整请求有 349 次通过安装路径命中，其余通过运行时名称或直接导入识别。
+在本机 Git for Windows 2.56.1 安装下检查了 352 个 EXE 的普通导入。259 个直接导入 `msys-2.0.dll`，均位于 `usr` 子树，其中 18 个位于 `usr/lib` 或 `usr/libexec`。按旧识别目录规则查找未发现只有传递依赖的 EXE。

@@ -181,90 +181,54 @@ struct SectionImageInformation {
 };
 static_assert(sizeof(SectionImageInformation) == 64);
 
-LONG known_runtime_root(AgentState &state) {
-    return _InterlockedCompareExchange(&state.local.runtime_root_chars, 0, 0);
-}
+PVOID inspect_section(const AgentState &state, HANDLE section, PVOID *base) {
+    PVOID requested = nullptr;
+    SIZE_T received = 0;
+    if (state.api.read(current_process(), base, &requested, sizeof(requested), &received) < 0 ||
+        received != sizeof(requested) || requested)
+        return nullptr;
 
-void observe_runtime_root(AgentState &state, PVOID *base) {
-    if (known_runtime_root(state) != 0)
-        return;
-    PVOID actual = nullptr;
-    if (state.api.read(current_process(), base, &actual, sizeof(actual), nullptr) < 0 || !actual)
-        return;
-    NativeBuffer buffer(state.api, 8192);
-    if (!buffer || state.api.query_memory(current_process(), actual, 2, buffer.as<BYTE>(), 8192,
-                                         nullptr) < 0)
-        return;
-    const auto name = buffer.as<UNICODE_STRING>();
-    const auto chars = runtime_root_length(name->Buffer, name->Length / sizeof(wchar_t));
-    if (!chars || _InterlockedCompareExchange(&state.local.runtime_root_chars, -1, 0) != 0)
-        return;
-    memcpy(state.runtime_root, name->Buffer, chars * sizeof(wchar_t));
-    _InterlockedExchange(&state.local.runtime_root_chars, static_cast<LONG>(chars));
-    agent_log(state, "image runtime root learned", chars);
-}
-
-NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &related,
-                         bool &observe_runtime) {
-    auto &state = g_agent_state;
     struct SectionBasic {
         PVOID base;
         ULONG attributes;
         LARGE_INTEGER size;
     } basic{};
-    auto status = state.api.query_section(section, 0, &basic, sizeof(basic), nullptr);
-    if (status < 0 || !(basic.attributes & SEC_IMAGE))
-        return status;
-
-    PVOID requested = nullptr;
-    SIZE_T received = 0;
-    if (state.api.read(current_process(), base, &requested, sizeof(requested), &received) < 0 ||
-        received != sizeof(requested) || requested)
-        return status_success;
+    if (state.api.query_section(section, 0, &basic, sizeof(basic), nullptr) < 0 ||
+        !(basic.attributes & SEC_IMAGE))
+        return nullptr;
 
     SectionImageInformation flags{};
-    const bool section_flags = state.api.query_section(section, 1, &flags, sizeof(flags), nullptr) >= 0;
-    const auto root_chars = known_runtime_root(state);
-    if (section_flags) {
-        if (flags.machine != IMAGE_FILE_MACHINE_AMD64 || !(flags.image_characteristics & IMAGE_FILE_DLL))
-            return status_success;
-        if (flags.dll_characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE) {
-            observe_runtime = root_chars == 0;
-            return status_success;
-        }
-    }
+    if (state.api.query_section(section, 1, &flags, sizeof(flags), nullptr) < 0 ||
+        flags.machine != IMAGE_FILE_MACHINE_AMD64 || !(flags.image_characteristics & IMAGE_FILE_DLL) ||
+        (flags.dll_characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE))
+        return nullptr;
 
+    PVOID original = nullptr;
+    // SectionOriginalBaseInformation identifies the preferred base of this section.
+    if (state.api.query_section(section, 3, &original, sizeof(original), nullptr) < 0 ||
+        !original || (reinterpret_cast<uintptr_t>(original) & 0xffff))
+        return nullptr;
+
+    NativeBuffer buffer(state.api, 8192);
+    if (!buffer)
+        return nullptr;
     PVOID inspection = nullptr;
     SIZE_T extent = 0;
-    status = state.api.map_section(section, current_process(), &inspection, 0, 0, nullptr, &extent,
-                                   2, 0, PAGE_READONLY);
-    if (status < 0)
-        return status;
-    NativeBuffer buffer(state.api, 8192);
-    status = buffer ? state.api.query_memory(current_process(), inspection, 2, buffer.as<BYTE>(),
-                                             8192, nullptr)
-                    : status_unsuccessful;
-    if (status >= 0) {
-        const auto name = buffer.as<UNICODE_STRING>();
-        const size_t chars = name->Length / sizeof(wchar_t);
-        observe_runtime = root_chars == 0 && runtime_root_length(name->Buffer, chars) != 0;
-        const bool inside = root_chars > 0 && chars > static_cast<size_t>(root_chars) &&
-                            wide_equal(name->Buffer, root_chars, state.runtime_root, root_chars);
-        MappingInspection mapping{section, section_flags, inside || observe_runtime, false};
-        status = related_image(state.api, current_process(), inspection, name->Buffer, chars,
-                               image, related, &mapping);
-        if (status >= 0 && related) {
-            agent_log(state, mapping.path_match ? "image runtime path match"
-                                                : "image name or direct import match",
-                      image.preferred_base);
-            if (!mapping.section_base)
-                agent_log(state, "image preferred base read from file", image.preferred_base);
-        }
-    }
+    if (state.api.map_section(section, current_process(), &inspection, 0, 0, nullptr, &extent,
+                              2, 0, PAGE_READONLY) < 0)
+        return nullptr;
+    const auto status =
+        state.api.query_memory(current_process(), inspection, 2, buffer.as<BYTE>(), 8192, nullptr);
     state.api.unmap_section(current_process(), inspection);
-    return status;
+    if (status < 0)
+        return nullptr;
+    const auto name = buffer.as<UNICODE_STRING>();
+    const auto root_chars = state.runtime_root_chars;
+    return name->Length / sizeof(wchar_t) > root_chars &&
+                   wide_equal(name->Buffer, root_chars, state.runtime_root, root_chars)
+               ? original
+               : nullptr;
 }
-
 } // namespace
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_directory(PHANDLE handle, ACCESS_MASK access,
@@ -324,27 +288,14 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
                                                          ULONG protection) {
     auto &state = g_agent_state;
     register_unwind();
-    ImageRecord image{};
-    bool adjusted = false;
-    bool observe_runtime = false;
-    if (base && !zero) {
-        bool related = false;
-        auto status = inspect_section(section, base, image, related, observe_runtime);
-        if (status < 0) {
-            agent_log(state, "image classification or preparation failed", static_cast<ULONG>(status));
-            if (related)
-                return status;
-        } else if (related) {
-            *base = reinterpret_cast<void *>(image.preferred_base);
-            adjusted = true;
-        }
-    }
+    const auto preferred =
+        base && !zero && state.runtime_root_chars ? inspect_section(state, section, base) : nullptr;
+    if (preferred)
+        *base = preferred;
     auto status = state.api.map_section(section, process, base, zero, commit, offset, size,
                                         inherit, allocation, protection);
-    if (status >= 0 && observe_runtime && process == current_process())
-        observe_runtime_root(state, base);
-    if (adjusted) {
-        agent_log(state, "image mapping requested base", image.preferred_base);
+    if (preferred) {
+        agent_log(state, "image mapping requested base", reinterpret_cast<ULONG_PTR>(preferred));
         agent_log(state, "image mapping status", static_cast<ULONG>(status));
         if (status >= 0)
             agent_log(state, "image mapping actual base", reinterpret_cast<ULONG_PTR>(*base));

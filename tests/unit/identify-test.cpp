@@ -93,12 +93,6 @@ static NTSTATUS NTAPI map_section(HANDLE section, HANDLE, PVOID *base, ULONG_PTR
 }
 static NTSTATUS NTAPI unmap_section(HANDLE, PVOID) { return 0; }
 static NTSTATUS NTAPI close_handle(HANDLE) { return 0; }
-static NTSTATUS NTAPI query_section(HANDLE section, ULONG kind, void *out, SIZE_T bytes, PSIZE_T) {
-    if (kind != 3 || bytes != sizeof(PVOID))
-        return status_not_supported;
-    *static_cast<PVOID *>(out) = section;
-    return status_success;
-}
 static NTSTATUS NTAPI read_file(HANDLE file, HANDLE, void *, void *, PIO_STATUS_BLOCK io, void *out,
                                 ULONG bytes, PLARGE_INTEGER offset, PULONG) {
     auto object = reinterpret_cast<Image *>(file);
@@ -118,7 +112,6 @@ int main() {
     api.open_file = open_file;
     api.create_section = create_section;
     api.map_section = map_section;
-    api.query_section = query_section;
     api.unmap_section = unmap_section;
     api.close = close_handle;
     api.read_file = read_file;
@@ -129,8 +122,8 @@ int main() {
         ImageRecord record{};
         std::wstring path = std::wstring(app) + L"root.exe";
         bool related = false;
-        auto status = related_image(api, current_process(), root.bytes.data(), path.c_str(),
-                                    path.size(), record, related);
+        auto status = identify_executable(api, current_process(), root.bytes.data(), path.c_str(),
+                                          path.size(), record, related);
         printf("%s status=%08lx related=%d maps=%zu temporary_bytes=%zu\n", label,
                static_cast<ULONG>(status), related, maps, allocation_bytes);
         return std::make_pair(status, related);
@@ -172,45 +165,23 @@ int main() {
     image(L"preflight.exe", {"msys-2.0.dll"}, false);
     expect(imports_msys(api, exe_path.c_str(), exe_path.size()),
            "EXE preflight recognizes a direct import");
-    constexpr wchar_t loaded_runtime[] =
-        L"\\Device\\HarddiskVolume7\\Git\\UsR\\BiN\\MSYS-2.0.DLL";
+    constexpr wchar_t exe_in_bin[] =
+        L"\\Device\\HarddiskVolume7\\Git\\UsR\\BiN\\bash.exe";
     constexpr wchar_t expected_root[] = L"\\Device\\HarddiskVolume7\\Git\\";
-    expect(runtime_root_length(loaded_runtime, _countof(loaded_runtime) - 1) ==
+    expect(exe_runtime_root_length(exe_in_bin, _countof(exe_in_bin) - 1) ==
                _countof(expected_root) - 1,
            "derive the installation root including its directory separator");
-    constexpr wchar_t volume_runtime[] = L"\\Device\\HarddiskVolume7\\usr\\bin\\msys-2.0.dll";
-    expect(!runtime_root_length(volume_runtime, _countof(volume_runtime) - 1),
+    constexpr wchar_t exe_in_lib[] = L"\\Device\\HarddiskVolume7\\Git\\usr\\lib\\ssh\\sftp-server.exe";
+    expect(exe_runtime_root_length(exe_in_lib, _countof(exe_in_lib) - 1) ==
+               _countof(expected_root) - 1,
+           "recognize executables elsewhere in the usr tree");
+    constexpr wchar_t exe_at_volume_root[] = L"\\Device\\HarddiskVolume7\\usr\\bin\\bash.exe";
+    expect(!exe_runtime_root_length(exe_at_volume_root, _countof(exe_at_volume_root) - 1),
            "never use an entire NT volume as the root");
-    constexpr wchar_t loose_runtime[] = L"\\Device\\HarddiskVolume7\\portable\\msys-2.0.dll";
-    expect(!runtime_root_length(loose_runtime, _countof(loose_runtime) - 1),
+    constexpr wchar_t loose_exe[] = L"\\Device\\HarddiskVolume7\\portable\\bash.exe";
+    expect(!exe_runtime_root_length(loose_exe, _countof(loose_exe) - 1),
            "nonstandard layout does not enable directory classification");
 
-    auto inspect_mapping = [&](Image &file, MappingInspection &mapping, uint64_t expected_base) {
-        file_opens = memory_reads = 0;
-        ImageRecord record{};
-        bool related = false;
-        std::wstring path = std::wstring(app) + L"candidate.dll";
-        auto status = related_image(api, current_process(), file.bytes.data(), path.c_str(),
-                                    path.size(), record, related, &mapping);
-        return status >= 0 && related == (expected_base != 0) &&
-               (!related || record.preferred_base == expected_base) && !file_opens;
-    };
-    auto &direct_dll = image(L"direct.dll", {"msys-2.0.dll"});
-    MappingInspection direct_map{reinterpret_cast<HANDLE>(0x150000000ULL), true, false, false};
-    expect(inspect_mapping(direct_dll, direct_map, 0x150000000ULL) && direct_map.section_base,
-           "direct import outside the root still uses the original section base");
-    auto &wrapper = image(L"wrapper.dll", {"target.dll"});
-    MappingInspection outside{reinterpret_cast<HANDLE>(0x160000000ULL), true, false, false};
-    expect(inspect_mapping(wrapper, outside, 0) && !outside.section_base,
-           "indirect import outside the root does not adjust the mapping");
-    MappingInspection inside{outside.section, true, true, false};
-    expect(inspect_mapping(wrapper, inside, 0x160000000ULL) && inside.section_base && !memory_reads,
-           "section metadata and a path match skip the import table and the file");
-    auto pe = reinterpret_cast<IMAGE_NT_HEADERS64 *>(wrapper.bytes.data() + 0x100);
-    pe->OptionalHeader.DllCharacteristics = IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
-    MappingInspection fallback{outside.section, false, true, false};
-    expect(inspect_mapping(wrapper, fallback, 0) && !fallback.section_base,
-           "when section flags are unavailable, a path hit still checks DYNAMIC_BASE");
     printf("IDENTIFY-%s failures=%d\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

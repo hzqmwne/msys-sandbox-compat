@@ -40,7 +40,7 @@ msys-sandbox-compat.exe [--trace] [--native-relay]
     program.exe [arguments...]
 ```
 
-`psec-run.exe` 是开发验证工具，由普通宿主调用以创建原生 PSEC，不属于生产兼容层必需组件。`msys-sandbox-compat.exe` 在既有 PSEC 或非 AppContainer 受限令牌上下文内调用，负责兼容准备，并从自身目录定位 `msys-sandbox-compat.dll`。EXE 的普通导入表直接声明 `msys-2.0.dll` 即按 MSYS 处理，名称忽略大小写。旧命令中的 `--runtime DLL` 仍可解析，目录识别取自 Windows 实际映射的运行时。
+`psec-run.exe` 是开发验证工具，由普通宿主调用以创建原生 PSEC，不属于生产兼容层必需组件。`msys-sandbox-compat.exe` 在既有 PSEC 或非 AppContainer 受限令牌上下文内调用，负责兼容准备，并从自身目录定位 `msys-sandbox-compat.dll`。EXE 的普通导入表直接声明 `msys-2.0.dll` 即按 MSYS 处理，名称忽略大小写。旧命令中的 `--runtime DLL` 仍可解析，安装根取自创建阶段识别的 EXE 布局。
 
 接入受限令牌启动器时，将其启动目标设为 `msys-sandbox-compat.exe PROGRAM ...`，保留启动器既有 token、对象和文件策略。兼容 EXE/DLL 应部署在原策略已允许读取/执行的位置；原版 MSYS 安装文件也必须已具备原策略允许的访问。兼容层不修改任何磁盘 ACL、不放宽 restricted token，也不借非受限进程代读被拒绝的文件。缺少访问时记录该配置下的兼容阻碍，不能通过补权把它算作成功。已验收配置见 [兼容范围](compatibility.md)，测试用 `restricted-run.exe` 不作为产品启动器分发。
 

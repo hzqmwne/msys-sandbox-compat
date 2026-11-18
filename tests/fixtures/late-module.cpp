@@ -18,13 +18,7 @@ HANDLE open_image_section(const wchar_t *path) {
     return section;
 }
 
-bool check_aslr_mapping(msys_sandbox_compat::MapSection map, wchar_t (&path)[MAX_PATH]) {
-    // The already loaded wrapper occupies the ASLR fixture's PE preferred base.
-    if (reinterpret_cast<uintptr_t>(GetModuleHandleW(L"new-module.dll")) != 0x63000000000ULL)
-        return false;
-    auto name = wcsrchr(path, L'\\');
-    if (!name || wcscpy_s(name + 1, MAX_PATH - (name + 1 - path), L"late-aslr-module.dll"))
-        return false;
+bool maps_without_preferred_base(msys_sandbox_compat::MapSection map, const wchar_t *path) {
     HANDLE section = open_image_section(path);
     if (!section)
         return false;
@@ -36,6 +30,36 @@ bool check_aslr_mapping(msys_sandbox_compat::MapSection map, wchar_t (&path)[MAX
         return false;
     UnmapViewOfFile(base);
     return true;
+}
+
+bool check_unconstrained_views(msys_sandbox_compat::MapSection map, wchar_t (&path)[MAX_PATH]) {
+    // The loaded wrapper occupies the preferred base of both files under test.
+    if (reinterpret_cast<uintptr_t>(GetModuleHandleW(L"new-module.dll")) != 0x63000000000ULL)
+        return false;
+    auto name = wcsrchr(path, L'\\');
+    if (!name || wcscpy_s(name + 1, MAX_PATH - (name + 1 - path), L"late-aslr-module.dll"))
+        return false;
+    bool aslr_ok = maps_without_preferred_base(map, path);
+    if (!aslr_ok) {
+        constexpr char message[] = "LATE-DLL-DYNAMIC-BASE-FAIL\n";
+        write(2, message, sizeof(message) - 1);
+    }
+
+    // From root\usr\bin\..., locate the sibling root-other\new-module.dll.
+    for (int i = 0; i < 2; ++i) {
+        *name = 0;
+        name = wcsrchr(path, L'\\');
+        if (!name)
+            return false;
+    }
+    if (wcscpy_s(name, MAX_PATH - (name - path), L"-other\\new-module.dll"))
+        return false;
+    bool outside_ok = maps_without_preferred_base(map, path);
+    if (!outside_ok) {
+        constexpr char message[] = "LATE-DLL-OUTSIDE-ROOT-FAIL\n";
+        write(2, message, sizeof(message) - 1);
+    }
+    return aslr_ok && outside_ok;
 }
 
 bool check_mapping_requests() {
@@ -81,12 +105,8 @@ bool check_mapping_requests() {
         constexpr char message[] = "LATE-DLL-ZEROBITS-FAIL\n";
         write(2, message, sizeof(message) - 1);
     }
-    bool aslr_ok = check_aslr_mapping(map, path);
-    if (!aslr_ok) {
-        constexpr char message[] = "LATE-DLL-DYNAMIC-BASE-FAIL\n";
-        write(2, message, sizeof(message) - 1);
-    }
-    return explicit_ok && constrained_ok && aslr_ok;
+    const bool unconstrained_ok = check_unconstrained_views(map, path);
+    return explicit_ok && constrained_ok && unconstrained_ok;
 }
 
 } // namespace

@@ -235,6 +235,8 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
         check_nt(check_child_context(originals, process, state), "root relay security context");
     if (image.related)
         check_nt(prepare_process(originals, process, thread, image, state), "prepare MSYS root");
+    state.runtime_root_chars = image.runtime_root_chars;
+    memcpy(state.runtime_root, image.path, image.runtime_root_chars * sizeof(wchar_t));
     bind(HookId::directory, "hook_directory", api.create_directory);
     bind(HookId::section, "hook_section", api.create_section);
     bind(HookId::mutant, "hook_mutant", api.create_mutant);

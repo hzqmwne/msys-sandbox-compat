@@ -7,16 +7,6 @@
 namespace msys_sandbox_compat {
 namespace {
 
-size_t directory_length(const wchar_t *path, size_t chars) {
-    while (chars && path[chars - 1] != L'\\')
-        --chars;
-    return chars;
-}
-bool runtime_name(const wchar_t *path, size_t chars) {
-    auto first = directory_length(path, chars);
-    constexpr wchar_t name[] = L"msys-2.0.dll";
-    return wide_equal(path + first, chars - first, name, _countof(name) - 1);
-}
 // Read through ntdll even for local SEC_IMAGE views: an RVA can cross an
 // inaccessible section. Keep image parsing off MSYS's guarded thread stacks.
 struct ImageReader {
@@ -53,8 +43,7 @@ struct ImageReader {
         return false;
     }
 
-    NTSTATUS inspect(const wchar_t *path, size_t chars, ImageRecord &image, bool &related,
-                     const MappingInspection *mapping = nullptr) {
+    NTSTATUS inspect(ImageRecord &image, bool &related) {
         // Most images have both headers in the first kilobyte.
         BYTE headers[1024];
         bool have_prefix = read(0, headers, sizeof(headers));
@@ -77,17 +66,9 @@ struct ImageReader {
         size = pe.OptionalHeader.SizeOfImage;
         if (size < sizeof(pe) || pe_offset > size - sizeof(pe))
             return status_invalid_image;
-        image = {pe.OptionalHeader.ImageBase, size,
-                 pe.FileHeader.Characteristics & IMAGE_FILE_DLL ? ImageKind::library
-                                                                : ImageKind::executable};
-        if ((!mapping && image.kind != ImageKind::executable) ||
-            (mapping && (image.kind != ImageKind::library ||
-                         (pe.OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE))))
+        if (pe.FileHeader.Characteristics & IMAGE_FILE_DLL)
             return status_success;
-        if (mapping && (mapping->path_match || runtime_name(path, chars))) {
-            related = true;
-            return status_success;
-        }
+        image = {pe.OptionalHeader.ImageBase, size};
         const auto &imports = pe.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
         if (imports.VirtualAddress > size || imports.Size > size - imports.VirtualAddress)
             return status_invalid_image;
@@ -172,20 +153,21 @@ struct ImageFile {
 
 } // namespace
 
-size_t runtime_root_length(const wchar_t *path, size_t chars) {
+size_t exe_runtime_root_length(const wchar_t *path, size_t chars) {
     constexpr wchar_t volume[] = L"\\Device\\HarddiskVolume";
-    constexpr wchar_t suffix[] = L"\\usr\\bin\\msys-2.0.dll";
+    constexpr wchar_t usr[] = L"\\usr\\";
     constexpr size_t volume_chars = _countof(volume) - 1;
-    constexpr size_t suffix_chars = _countof(suffix) - 1;
-    if (chars <= volume_chars + suffix_chars || !wide_equal(path, volume_chars, volume, volume_chars))
+    constexpr size_t usr_chars = _countof(usr) - 1;
+    if (chars >= image_path_chars || chars <= volume_chars + usr_chars ||
+        !wide_equal(path, volume_chars, volume, volume_chars))
         return 0;
-    const auto end = chars - suffix_chars;
-    if (end >= image_path_chars || !wide_equal(path + end, suffix_chars, suffix, suffix_chars))
-        return 0;
-    // A layout at the volume root would sweep in unrelated installations.
-    for (size_t i = volume_chars; i < end; ++i)
-        if (path[i] == L'\\')
-            return i + 1 < end ? end + 1 : 0; // Include the root's trailing separator.
+    size_t start = volume_chars;
+    while (start < chars && path[start] != L'\\')
+        ++start;
+    // Require a directory below the volume and retain the trailing separator.
+    for (size_t end = chars - usr_chars; end > start; --end)
+        if (wide_equal(path + end, usr_chars, usr, usr_chars))
+            return end + 1;
     return 0;
 }
 
@@ -196,32 +178,18 @@ bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars) {
     ImageRecord image{};
     bool related = false;
     ImageReader reader{api, current_process(), reinterpret_cast<uintptr_t>(file.view)};
-    return reader.inspect(path, chars, image, related) >= 0 && related;
+    return reader.inspect(image, related) >= 0 && related;
 }
 
-NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
-                       size_t chars, ImageRecord &image, bool &related, MappingInspection *mapping) {
+NTSTATUS identify_executable(const NativeApi &api, HANDLE process, const void *base,
+                             const wchar_t *path, size_t chars, ImageRecord &image,
+                             bool &related) {
     related = false;
-    NTSTATUS status = status_success;
-    if (mapping && mapping->section_flags && mapping->path_match) {
-        image = {0, 0, ImageKind::library};
-        related = true;
-    } else {
-        ImageReader reader{api, process, reinterpret_cast<uintptr_t>(base)};
-        status = reader.inspect(path, chars, image, related, mapping);
-    }
+    ImageReader reader{api, process, reinterpret_cast<uintptr_t>(base)};
+    auto status = reader.inspect(image, related);
     if (status < 0 || !related)
         return status;
-    // SectionOriginalBaseInformation returns the original base of this exact
-    // section, even when the mapped PE header reports a relocated base.
-    PVOID original = nullptr;
-    if (mapping && api.query_section(mapping->section, 3, &original, sizeof(original), nullptr) >= 0 &&
-        original && !(reinterpret_cast<uintptr_t>(original) & 0xffff)) {
-        image.preferred_base = reinterpret_cast<uintptr_t>(original);
-        mapping->section_base = true;
-        return status_success;
-    }
-    // Keep the disk header as fallback and preserve positive classification on failure.
+    // Read the on-disk EXE base even if the mapped header was relocated.
     ImageFile file{api};
     status = file.open(path, chars);
     return status < 0 ? status : file.preferred_base(image.preferred_base);
@@ -229,6 +197,7 @@ NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, c
 
 NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &image) {
     image.related = false;
+    image.runtime_root_chars = 0;
     NativeBuffer buffer(api, 4096);
     if (!buffer)
         return status_unsuccessful;
@@ -251,6 +220,9 @@ NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &im
                       sizeof(base), nullptr);
     if (status < 0)
         return status;
-    return related_image(api, process, base, image.path, chars, image.record, image.related);
+    status = identify_executable(api, process, base, image.path, chars, image.record, image.related);
+    if (status >= 0 && image.related)
+        image.runtime_root_chars = exe_runtime_root_length(image.path, chars);
+    return status;
 }
 } // namespace msys_sandbox_compat
