@@ -33,7 +33,7 @@
 | `acl.ps1` | 真实 MSYS 内显式对象与后续默认设置；有限权限、deny、其他 token、adjust-only/query-only 句柄；-Existing 可直接使用已有受限上下文 |
 | `verify.ps1` | 原版失败基线、重复 fork 和 Bash 管道、子 shell、命令替换、后台任务与 `uname`，以及读写边界、退出码、原生子进程和 Perl 根与后代的堆窗口释放 |
 | `fork.pl` | PID、堆、COW、共享文件偏移、管道、EOF、信号、exec、WNOHANG、嵌套及并发 fork、线程中 fork |
-| `scope.ps1` | 原生根、改名原生程序、按导入名识别、原生子进程无补丁、显式回入及默认 Token DACL 保持。查询 Bash 根和 fork 子进程的两个堆原址及分配入口 |
+| `scope.ps1` | 省略 `--runtime` 时验证原生根、改名原生程序、按导入名识别、原生子进程无补丁及显式回入。验证默认 Token DACL 保持，查询 Bash 根和 fork 子进程的两个堆原址及分配入口 |
 | `process-chain.ps1` | 原生入口 → Bash → 一层/三层原生工具 → 兼容入口 → Bash/Perl；真实 fork、二级线程 fork、管道、读写边界、默认 ACL 与退出码 |
 | `process-chain.ps1 -Environment WriteRestricted/FullRestricted` | 两种非 AppContainer 令牌下复用完整链路；记录无兼容基线，保持普通 MSYS 会话并存，验证实际受限令牌及文件写入/WRITE_DAC 拒绝 |
 | `git-hook.ps1` | 三种隔离模式中运行真实 `git init`、`git add`、`git status`，经 `--native-relay` 触发 MSYS `pre-commit`，并检查成功与拒绝提交、暂存内容和文件权限 |

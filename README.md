@@ -29,7 +29,7 @@ hook 位于 ntdll 入口，采用 MinHook 的 HDE64 与适配的指令搬迁核�
   'C:\Program Files\Git\usr\bin\bash.exe' --noprofile --norc -c '(echo fork); printf "b\na\n" | /usr/bin/sort'
 ```
 
-生产部署只需同目录的 `msys-sandbox-compat.exe` 和 `msys-sandbox-compat.dll`，放在原策略允许读取/执行的位置。在程序路径前加 `--native-relay` 启用原生中间进程传播，加 `--conpty` 启用交互终端；其他安装位置可通过 `--runtime` 指定运行时 DLL。完整参数见 [使用说明](docs/getting-started.md)。
+生产部署只需同目录的 `msys-sandbox-compat.exe` 和 `msys-sandbox-compat.dll`，放在原策略允许读取/执行的位置。在程序路径前加 `--native-relay` 启用原生中间进程传播，加 `--conpty` 启用交互终端。兼容层按导入名 `msys-2.0.dll` 识别 MSYS，`--runtime DLL` 可为间接依赖额外提供一个查找目录。完整参数见 [使用说明](docs/getting-started.md)。
 
 本地演示可从允许创建 PSEC 的普通 PowerShell 运行：
 

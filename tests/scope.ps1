@@ -19,12 +19,7 @@ Copy-Item -LiteralPath $probe -Destination (Join-Path $fixtures 'bash.exe')
 function Run([string]$Name,[string[]]$Arguments,[string]$Report='') {
     $info=New-TestProcessInfo $launcher @() $state
     $info.ArgumentList.Add($policy)
-    for($i=0;$i -lt $Arguments.Count;$i++){
-        $info.ArgumentList.Add($Arguments[$i])
-        if($i -eq 0 -and $Arguments[$i] -eq $compat){
-            $info.ArgumentList.Add('--runtime');$info.ArgumentList.Add((Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
-        }
-    }
+    foreach($argument in $Arguments){$info.ArgumentList.Add($argument)}
     $result=Invoke-TestProcess $info
     $err=$result.Error
     Save-TestOutput $result $evidence $Name

@@ -16,7 +16,7 @@ int wmain(int argc, wchar_t **argv) try {
     bool native_relay = false;
     std::wstring input_script;
     COORD terminal_size{100, 30};
-    fs::path runtime = L"C:\\Program Files\\Git\\usr\\bin\\msys-2.0.dll";
+    fs::path runtime;
     int first = 1;
     while (first < argc) {
         std::wstring option = argv[first];
@@ -101,9 +101,14 @@ int wmain(int argc, wchar_t **argv) try {
         check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
               "locate console session host");
         executable = own_path;
-        command = quote(executable.wstring()) + L" --runtime " + quote(runtime.wstring()) +
-                  (native_relay ? L" --native-relay " : L" ") + (trace ? L" --trace " : L" ") +
-                  command;
+        auto session_command = quote(executable.wstring());
+        if (!runtime.empty())
+            session_command += L" --runtime " + quote(runtime.wstring());
+        if (native_relay)
+            session_command += L" --native-relay";
+        if (trace)
+            session_command += L" --trace";
+        command = session_command + L" " + command;
     }
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = conpty ? sizeof(startup) : sizeof(STARTUPINFOW);

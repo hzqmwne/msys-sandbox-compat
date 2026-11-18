@@ -77,9 +77,10 @@ std::wstring native_directory(const std::filesystem::path &path) {
 } // namespace
 
 void configure_runtime_paths(const std::filesystem::path &runtime, AgentState &state) {
-    // --runtime supplies a dependency-search directory, not a file identity.
-    auto directory_path = native_directory(runtime.parent_path());
-    memcpy(state.runtime.directory, directory_path.c_str(), (directory_path.size() + 1) * 2);
+    if (!runtime.empty()) {
+        auto directory_path = native_directory(runtime.parent_path());
+        memcpy(state.runtime.directory, directory_path.c_str(), (directory_path.size() + 1) * 2);
+    }
     wchar_t directory[image_path_chars];
     auto chars = GetSystemDirectoryW(directory, _countof(directory));
     check(chars && chars < _countof(directory), "system directory");
