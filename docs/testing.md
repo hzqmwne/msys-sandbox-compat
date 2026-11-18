@@ -87,6 +87,9 @@ Windows 11 `26300.9974`、Git for Windows MSYS `3.6.10` 的原生 PSEC 对照使
 |---|---|
 | `msys-2.0.dll` 且未指定基址 | Bash 常见操作及 Git init/add/status 通过。三轮 Perl 均在首次 fork 因 `msys-crypt-2.dll` 父子地址不同而失败 |
 | `perl.exe` 直接静态导入的 MSYS DLL 且未指定基址 | `msys-2.0.dll` 和 `msys-perl5_42.dll` 父子同址。三轮 Perl 在同一个传递依赖上失败 |
+| `perl.exe` 的全部传递静态 MSYS 依赖且未指定基址 | 最小 fork 和独立动态夹具各通过 3/3。完整 Perl fork 负载 0/3，失败发生在重载 `Time::HiRes` 或 `List::Util` 的 XS DLL 时 |
 | 保留当前 DLL 范围，仅在初始 `*BaseAddress` 与 `ZeroBits` 均为零时改写 | `verify` 11/11、`late-package` 及 Bash 内 Git init/add/status 通过。带追踪的回归记录 1,207 次相关 DLL 映射，两项入参均为零 |
+
+单独加载 `Time::HiRes` 或 `List::Util` 时，传递静态依赖版各通过 1/3，同轮较宽范围的对照各通过 3/3。成功样本在 fork 后调用继承的 XS 函数引用，父子进程给出相同的函数地址。失败样本记录了父进程保存的函数地址和子进程多次重载的实际映射位置。
 
 这几组结果来自独立实验构建。正式回归入口仍按 [当前设计](design.md#dll-映射范围) 判定，非零基址的映射路径需要独立样本。
