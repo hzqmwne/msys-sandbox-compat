@@ -16,7 +16,10 @@ $report = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory) }
     Join-Path $root "unused/evidence/current/$suite"
 }
 New-Item -ItemType Directory -Force $report,$state | Out-Null
-$git = Join-Path $GitRoot 'mingw64/bin/git.exe'
+$git = Join-Path $GitRoot 'ucrt64/bin/git.exe'
+if (!(Test-Path -LiteralPath $git -PathType Leaf)) {
+    $git = Join-Path $GitRoot 'mingw64/bin/git.exe'
+}
 $runtime = Join-Path $GitRoot 'usr/bin/msys-2.0.dll'
 $denied = Join-Path $state 'denied.txt'
 $policyProbe = ''
