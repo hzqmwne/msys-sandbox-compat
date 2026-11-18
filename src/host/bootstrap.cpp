@@ -26,7 +26,7 @@ NTSTATUS NTAPI reserve_root_heaps(PHANDLE process, PHANDLE thread, ACCESS_MASK p
         return original_root_create(process, thread, process_access, thread_access, process_attrs,
                                     thread_attrs, process_flags, thread_flags, parameters,
                                     create_info, attributes);
-    HeapReservation reserve(root->state.api, root->state.runtime, attributes);
+    HeapReservation reserve(root->state.api, attributes);
     auto status = original_root_create(process, thread, process_access, thread_access, process_attrs,
                                        thread_attrs, process_flags, thread_flags, parameters,
                                        create_info, reserve.attributes());

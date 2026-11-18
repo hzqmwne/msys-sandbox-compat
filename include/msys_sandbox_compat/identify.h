@@ -15,13 +15,6 @@ struct ImageRecord {
     ImageKind kind;
 };
 
-// Search hints for indirect imports. Runtime membership is determined by the
-// declared msys-2.0.dll import name, without authenticating a particular file.
-struct RuntimePaths {
-    wchar_t directory[image_path_chars];
-    wchar_t system_directory[image_path_chars];
-};
-
 struct ProcessImage {
     ImageRecord record;
     wchar_t path[image_path_chars];
@@ -30,18 +23,16 @@ struct ProcessImage {
 
 struct MappingInspection {
     HANDLE section;
-    uint32_t import_hint; // One-based descriptor index, verified against this view.
-    bool reused_import;
+    bool section_flags;
+    bool path_match;
     bool section_base;
 };
 
-NTSTATUS identify_process(const NativeApi &api, HANDLE process, const RuntimePaths &runtime,
-                          ProcessImage &image);
-bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars,
-                  const RuntimePaths &runtime);
+size_t runtime_root_length(const wchar_t *path, size_t chars);
+NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &image);
+bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars);
 NTSTATUS related_image(const NativeApi &api, HANDLE process, const void *base, const wchar_t *path,
-                       size_t path_chars, const RuntimePaths &runtime, ImageRecord &image,
-                       bool &related, const wchar_t *application_directory = nullptr,
+                       size_t path_chars, ImageRecord &image, bool &related,
                        MappingInspection *mapping = nullptr);
 
 } // namespace msys_sandbox_compat

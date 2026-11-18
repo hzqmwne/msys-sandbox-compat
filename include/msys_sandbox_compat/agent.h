@@ -15,7 +15,7 @@ constexpr size_t msys_heap_extent = 0x1000000000ULL - msys_heap_base;
 
 class HeapReservation {
   public:
-    HeapReservation(const NativeApi &api, const RuntimePaths &runtime, void *attributes);
+    HeapReservation(const NativeApi &api, void *attributes);
     void *attributes() const { return attributes_; }
 
   private:
@@ -46,7 +46,7 @@ struct HookSlot {
 struct ProcessState {
     volatile LONG unwind_registered;
     volatile LONG policy_lock;
-    volatile LONG image_import_hints[64];
+    volatile LONG runtime_root_chars;
 };
 
 struct AgentState {
@@ -55,8 +55,6 @@ struct AgentState {
     uintptr_t self_base;
     uint32_t self_size;
     NativeApi api;
-    RuntimePaths runtime;
-    wchar_t application_directory[image_path_chars];
     wchar_t object_root[object_root_chars];
     uint32_t root_chars;
     unsigned char user_sid[SECURITY_MAX_SID_SIZE];
@@ -68,6 +66,8 @@ struct AgentState {
     uint32_t token_default_dacl_bytes;
     uint32_t object_policy_valid;
     HookSlot hooks[hook_count];
+    // Read only after this process publishes runtime_root_chars.
+    wchar_t runtime_root[image_path_chars];
     // Process-local fields are reset when cloning into a new suspended child.
     ProcessState local;
 };

@@ -16,7 +16,6 @@ int wmain(int argc, wchar_t **argv) try {
     bool native_relay = false;
     std::wstring input_script;
     COORD terminal_size{100, 30};
-    fs::path runtime;
     int first = 1;
     while (first < argc) {
         std::wstring option = argv[first];
@@ -43,7 +42,7 @@ int wmain(int argc, wchar_t **argv) try {
             fixed_terminal_size = true;
             first += 2;
         } else if (option == L"--runtime" && first + 1 < argc) {
-            runtime = fs::absolute(argv[first + 1]);
+            // Retain the old spelling for existing launch commands.
             first += 2;
         } else
             break;
@@ -70,7 +69,6 @@ int wmain(int argc, wchar_t **argv) try {
         state->trace = trace;
         state->native_relay = native_relay;
         state->api = resolve_api();
-        configure_runtime_paths(runtime, *state);
         session_tag = require_restricted_context();
     }
     Pseudoconsole pty;
@@ -102,8 +100,6 @@ int wmain(int argc, wchar_t **argv) try {
               "locate console session host");
         executable = own_path;
         auto session_command = quote(executable.wstring());
-        if (!runtime.empty())
-            session_command += L" --runtime " + quote(runtime.wstring());
         if (native_relay)
             session_command += L" --native-relay";
         if (trace)
@@ -149,7 +145,7 @@ int wmain(int argc, wchar_t **argv) try {
             fprintf(stderr, "[launcher] pid=%lu prepared-by=inherited-relay\n", child.dwProcessId);
         } else {
             ProcessImage image{};
-            check_nt(identify_process(state->api, child.hProcess, state->runtime, image),
+            check_nt(identify_process(state->api, child.hProcess, image),
                      "classify actual root image");
             if (reserved && !image.related)
                 check_nt(status_invalid_image, "verify preflight MSYS root");
@@ -164,9 +160,6 @@ int wmain(int argc, wchar_t **argv) try {
             }
             if (image.related || native_relay) {
                 object_directory.reset(configure_security(*state, session_tag));
-                auto directory = std::wstring(image.path);
-                directory.resize(directory.rfind(L'\\') + 1);
-                memcpy(state->application_directory, directory.c_str(), (directory.size() + 1) * 2);
                 wchar_t own_path[32768];
                 check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
                       "locate agent");

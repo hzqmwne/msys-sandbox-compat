@@ -80,7 +80,7 @@ NTSTATUS read_hook_source(const NativeApi &api, HANDLE process, uintptr_t addres
 
 } // namespace
 
-HeapReservation::HeapReservation(const NativeApi &api, const RuntimePaths &runtime, void *attributes)
+HeapReservation::HeapReservation(const NativeApi &api, void *attributes)
     : storage_(api, attributes ? sizeof(CreateInput) : 0), attributes_(attributes) {
     auto input = storage_.as<CreateInput>();
     if (!input)
@@ -107,7 +107,7 @@ HeapReservation::HeapReservation(const NativeApi &api, const RuntimePaths &runti
         image->size % sizeof(wchar_t) ||
         api.read(current_process(), image->value, input->path, image->size, &read) < 0 ||
         read != image->size ||
-        !imports_msys(api, input->path, image->size / sizeof(wchar_t), runtime))
+        !imports_msys(api, input->path, image->size / sizeof(wchar_t)))
         return;
 
     input->range = {reinterpret_cast<void *>(msys_heap_base), msys_heap_extent};
@@ -313,19 +313,6 @@ NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, A
     // descendants. Each child's entry bytes are rebuilt by install_hooks.
     status = api.write(process, remote, reinterpret_cast<void *>(source.self_base),
                        source.self_size, nullptr);
-    if (status < 0)
-        return status;
-    size_t directory_chars = 0;
-    for (size_t i = 0; image.path[i]; ++i)
-        if (image.path[i] == L'\\')
-            directory_chars = i + 1;
-    status =
-        api.write(process, source.application_directory, image.path, directory_chars * 2, nullptr);
-    if (status < 0)
-        return status;
-    const wchar_t terminator = 0;
-    status = api.write(process, source.application_directory + directory_chars, &terminator,
-                       sizeof(terminator), nullptr);
     if (status < 0)
         return status;
     ProcessState local{};

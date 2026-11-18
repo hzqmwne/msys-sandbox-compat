@@ -23,7 +23,7 @@
 
 验证按底层隔离机制与配置组织；在相关安全策略、进程创建与控制台条件一致时，现有模型可代表上层启动环境。当前验收不要求先接入上层 harness，也不按产品名称分别建立兼容实现。
 
-识别覆盖普通导入，以及应用目录、模块目录和 `--runtime` 所给目录中的传递依赖。`--runtime` 可省略。纯原生根在启动后才 LoadLibrary MSYS、仅 delay import，以及任意 SxS 或自定义 DLL 搜索规则不在当前预先识别保证内。
+EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原生根启动后才 LoadLibrary MSYS、仅 delay import 或仅由中间 DLL 引入运行时，均在预先识别范围外。完整 MSYS 进程内，DLL 映射另按实际运行时的安装根路径识别，根外 DLL 和非标准布局依据运行时文件名或直接导入。见 [DLL 映射范围](design.md#dll-映射范围)。
 
 设置 PE `DYNAMIC_BASE` 的 DLL 由 Windows 选址。使用该标志的新版 `msys-2.0.dll` 仍需在目标环境单独验证并存、父子映像布局和 fork。
 
@@ -44,6 +44,8 @@ relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，
 ## MSYS 运行时的共享映像节
 
 Git for Windows 的 MSYS 3.6.10 在 `.cygwin_` 可写共享映像节中保存 `wincap.caps`，其值是进程内的绝对指针。原生 PSEC 对照中，同一份 DLL 的两个实例在不同基址运行时，后启动的实例可能在 `DLL_PROCESS_ATTACH` 读取前一实例的地址并异常退出。保持未对齐实例存活时，共用同一文件的目标成功 0/4，使用字节相同的独立文件则成功 4/4。`BaseNamedObjects` 的隔离作用于有名称的 IPC 对象，映像节的这组共享数据随 DLL 文件映射。
+
+Windows 按文件流维护映像节的共享状态。重新打开同一个文件或通过 NTFS 硬链接加载仍使用同一个文件流。`SEC_IMAGE` 视图的页面保护由 PE 节标志决定，`ViewUnmap` 控制视图继承。可以为每个隔离域部署一份字节相同的独立运行时安装，使域内进程仍共享同一文件流，且实际 DLL 搜索选中该安装。已有独立文件对照验证了启动与部分 fork 工作负载，套接字在多个隔离域的共享语义仍需验证。[Windows 映像节与文件流](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_section_object_pointers) · [映像视图参数](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-zwmapviewofsection)
 
 运行时可将 `wincap` 保存在进程私有、fork 时由子进程自行初始化的存储中。2026 年 11 月 9 日的 Cygwin 邮件补丁曾提出这一改法。MSYS2 的另一份提案检查指针是否落在本进程的映像内，仍保留共享字段。截至 2026 年 11 月 19 日，该 PR 尚未合并。[Cygwin 邮件补丁](https://www.mail-archive.com/cygwin-patches@cygwin.com/msg13326.html) · [MSYS2 PR #403](https://github.com/msys2/msys2-runtime/pull/403)
 

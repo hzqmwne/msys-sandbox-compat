@@ -122,19 +122,7 @@ int main() {
     api.unmap_section = unmap_section;
     api.close = close_handle;
     api.read_file = read_file;
-    RuntimePaths runtime{};
-    wcscpy_s(runtime.directory, L"\\Device\\Review\\runtime\\");
-    wcscpy_s(runtime.system_directory, L"\\Device\\Review\\system\\");
     image(L"target.dll", {"msys-2.0.dll"});
-    for (int i = 0; i < 8; ++i)
-        image(L"common" + std::to_wstring(i) + L".dll",
-              i == 7 ? std::vector<std::string>{}
-                     : std::vector<std::string>{"common" + std::to_string(i + 1) + ".dll"});
-    std::vector<std::string> imports;
-    for (int i = 0; i < 16; ++i) {
-        image(L"wrapper" + std::to_wstring(i) + L".dll", {"common0.dll"});
-        imports.push_back("wrapper" + std::to_string(i) + ".dll");
-    }
     auto inspect = [&](const char *label, std::vector<std::string> names, LONG pe_offset = 0x100) {
         auto &root = image(L"root.exe", names, false, pe_offset);
         maps = allocation_bytes = memory_reads = file_opens = 0;
@@ -142,29 +130,20 @@ int main() {
         std::wstring path = std::wstring(app) + L"root.exe";
         bool related = false;
         auto status = related_image(api, current_process(), root.bytes.data(), path.c_str(),
-                                    path.size(), runtime, record, related);
+                                    path.size(), record, related);
         printf("%s status=%08lx related=%d maps=%zu temporary_bytes=%zu\n", label,
                static_cast<ULONG>(status), related, maps, allocation_bytes);
         return std::make_pair(status, related);
     };
-    auto last = imports;
-    last.push_back("target.dll");
-    auto first = imports;
-    first.insert(first.begin(), "target.dll");
     auto expect = [&](bool condition, const char *label) {
         if (!condition) {
             fprintf(stderr, "FAIL: %s\n", label);
             ++failures;
         }
     };
-    auto last_result = inspect("shared_graph_target_last", last);
-    expect(last_result.first >= 0 && last_result.second, "shared graph, target last");
-    auto first_result = inspect("shared_graph_target_first", first);
-    expect(first_result.first >= 0 && first_result.second, "shared graph, target first");
-    auto native_result = inspect("shared_graph_native", imports);
-    expect(native_result.first >= 0 && !native_result.second && maps == imports.size() + 8,
-           "each shared dependency is mapped once");
-    expect(file_opens == maps, "the dependency walk reuses each successful file open");
+    auto indirect = inspect("indirect_runtime_import", {"target.dll"});
+    expect(indirect.first >= 0 && !indirect.second && !maps && !file_opens,
+           "indirect imports do not classify an executable or open dependencies");
     auto direct = inspect("direct_runtime_import", {"MSYS-2.0.DLL"});
     expect(direct.first >= 0 && direct.second && allocation_bytes == 0,
            "direct imports need no work list");
@@ -180,64 +159,58 @@ int main() {
     fail_allocation = true;
     direct = inspect("direct_import_without_allocation", {"msys-2.0.dll"});
     expect(direct.first >= 0 && direct.second, "direct imports work without allocating");
-    auto unavailable = inspect("indirect_allocation_fails", {"target.dll"});
-    expect(unavailable.first < 0 && !unavailable.second,
-           "allocation failure is not a native result");
     fail_allocation = false;
 
-    image(L"cycle-a.dll", {"cycle-b.dll"});
-    image(L"cycle-b.dll", {"cycle-a.dll"});
-    auto cycle = inspect("dependency_cycle", {"cycle-a.dll"});
-    expect(cycle.first >= 0 && !cycle.second && maps == 2, "cycles are deduplicated");
+    auto direct_last = inspect("direct_import_after_other", {"target.dll", "msys-2.0.dll"});
+    expect(direct_last.first >= 0 && direct_last.second && !maps && file_opens == 1,
+           "direct imports never open dependencies");
+    std::wstring exe_path = std::wstring(app) + L"preflight.exe";
+    image(L"preflight.exe", {"target.dll"}, false);
+    file_opens = maps = 0;
+    expect(!imports_msys(api, exe_path.c_str(), exe_path.size()) && file_opens == 1 && maps == 1,
+           "EXE preflight inspects only the named file");
+    image(L"preflight.exe", {"msys-2.0.dll"}, false);
+    expect(imports_msys(api, exe_path.c_str(), exe_path.size()),
+           "EXE preflight recognizes a direct import");
+    constexpr wchar_t loaded_runtime[] =
+        L"\\Device\\HarddiskVolume7\\Git\\UsR\\BiN\\MSYS-2.0.DLL";
+    constexpr wchar_t expected_root[] = L"\\Device\\HarddiskVolume7\\Git\\";
+    expect(runtime_root_length(loaded_runtime, _countof(loaded_runtime) - 1) ==
+               _countof(expected_root) - 1,
+           "derive the installation root including its directory separator");
+    constexpr wchar_t volume_runtime[] = L"\\Device\\HarddiskVolume7\\usr\\bin\\msys-2.0.dll";
+    expect(!runtime_root_length(volume_runtime, _countof(volume_runtime) - 1),
+           "never use an entire NT volume as the root");
+    constexpr wchar_t loose_runtime[] = L"\\Device\\HarddiskVolume7\\portable\\msys-2.0.dll";
+    expect(!runtime_root_length(loose_runtime, _countof(loose_runtime) - 1),
+           "nonstandard layout does not enable directory classification");
 
-    auto &bad = image(L"bad.dll", {"unused.dll"});
-    reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR *>(bad.bytes.data() + 0x1000)->Name = 0xfffffff0;
-    auto malformed = inspect("malformed_dependency", {"bad.dll"});
-    expect(malformed.first < 0 && !malformed.second, "invalid RVA is reported");
-    auto direct_last = inspect("direct_import_after_bad_dependency", {"bad.dll", "msys-2.0.dll"});
-    expect(direct_last.first >= 0 && direct_last.second && maps == 0,
-           "direct imports are checked before dependencies");
-
-    std::vector<std::string> many;
-    for (int i = 0; i < 128; ++i) {
-        auto name = "node" + std::to_string(i) + ".dll";
-        image(std::wstring(name.begin(), name.end()), {});
-        many.push_back(name);
-    }
-    auto limit = inspect("node_limit", many);
-    expect(limit.first == status_not_supported && !limit.second, "node limit is observable");
-
-    for (int i = 0; i < 17; ++i)
-        image(L"deep" + std::to_wstring(i) + L".dll",
-              i == 16 ? std::vector<std::string>{"msys-2.0.dll"}
-                      : std::vector<std::string>{"deep" + std::to_string(i + 1) + ".dll"});
-    auto depth = inspect("deep_dependency_chain", {"deep0.dll"});
-    expect(depth.first >= 0 && depth.second, "deep chains fit the node budget");
-
-    auto &candidate = image(L"candidate.dll", {"kernel32.dll", "user32.dll", "msys-2.0.dll"});
-    std::wstring candidate_path = std::wstring(app) + L"candidate.dll";
-    auto inspect_mapping = [&](MappingInspection &mapping, uint64_t expected_base) {
-        file_opens = 0;
+    auto inspect_mapping = [&](Image &file, MappingInspection &mapping, uint64_t expected_base) {
+        file_opens = memory_reads = 0;
         ImageRecord record{};
         bool related = false;
-        auto status = related_image(api, current_process(), candidate.bytes.data(),
-                                    candidate_path.c_str(), candidate_path.size(), runtime, record,
-                                    related, app, &mapping);
+        std::wstring path = std::wstring(app) + L"candidate.dll";
+        auto status = related_image(api, current_process(), file.bytes.data(), path.c_str(),
+                                    path.size(), record, related, &mapping);
         return status >= 0 && related == (expected_base != 0) &&
                (!related || record.preferred_base == expected_base) && !file_opens;
     };
-    MappingInspection first_map{reinterpret_cast<HANDLE>(0x150000000ULL), 0, false, false};
-    expect(inspect_mapping(first_map, 0x150000000ULL) && first_map.import_hint == 3 &&
-               !first_map.reused_import && first_map.section_base,
-           "cache a direct import index and read the preferred base from the section");
-    MappingInspection second_map{reinterpret_cast<HANDLE>(0x160000000ULL), first_map.import_hint,
-                                  false, false};
-    expect(inspect_mapping(second_map, 0x160000000ULL) && second_map.reused_import,
-           "a different section can reuse the import hint while supplying its own base");
-    reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR *>(candidate.bytes.data() + 0x1000)->Name = 0;
-    MappingInspection replaced{second_map.section, second_map.import_hint, false, false};
-    expect(inspect_mapping(replaced, 0) && !replaced.reused_import && !replaced.section_base,
-           "a new image at the same path can end its import table before the cached index");
+    auto &direct_dll = image(L"direct.dll", {"msys-2.0.dll"});
+    MappingInspection direct_map{reinterpret_cast<HANDLE>(0x150000000ULL), true, false, false};
+    expect(inspect_mapping(direct_dll, direct_map, 0x150000000ULL) && direct_map.section_base,
+           "direct import outside the root still uses the original section base");
+    auto &wrapper = image(L"wrapper.dll", {"target.dll"});
+    MappingInspection outside{reinterpret_cast<HANDLE>(0x160000000ULL), true, false, false};
+    expect(inspect_mapping(wrapper, outside, 0) && !outside.section_base,
+           "indirect import outside the root does not adjust the mapping");
+    MappingInspection inside{outside.section, true, true, false};
+    expect(inspect_mapping(wrapper, inside, 0x160000000ULL) && inside.section_base && !memory_reads,
+           "section metadata and a path match skip the import table and the file");
+    auto pe = reinterpret_cast<IMAGE_NT_HEADERS64 *>(wrapper.bytes.data() + 0x100);
+    pe->OptionalHeader.DllCharacteristics = IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE;
+    MappingInspection fallback{outside.section, false, true, false};
+    expect(inspect_mapping(wrapper, fallback, 0) && !fallback.section_base,
+           "when section flags are unavailable, a path hit still checks DYNAMIC_BASE");
     printf("IDENTIFY-%s failures=%d\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }

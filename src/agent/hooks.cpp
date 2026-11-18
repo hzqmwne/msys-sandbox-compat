@@ -181,14 +181,31 @@ struct SectionImageInformation {
 };
 static_assert(sizeof(SectionImageInformation) == 64);
 
-volatile LONG &import_hint_slot(ProcessState &local, const UNICODE_STRING &name) {
-    uint32_t hash = 2166136261u;
-    for (size_t i = 0; i < name.Length / sizeof(wchar_t); ++i)
-        hash = (hash ^ wide_lower(name.Buffer[i])) * 16777619u;
-    return local.image_import_hints[hash % _countof(local.image_import_hints)];
+LONG known_runtime_root(AgentState &state) {
+    return _InterlockedCompareExchange(&state.local.runtime_root_chars, 0, 0);
 }
 
-NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &related) {
+void observe_runtime_root(AgentState &state, PVOID *base) {
+    if (known_runtime_root(state) != 0)
+        return;
+    PVOID actual = nullptr;
+    if (state.api.read(current_process(), base, &actual, sizeof(actual), nullptr) < 0 || !actual)
+        return;
+    NativeBuffer buffer(state.api, 8192);
+    if (!buffer || state.api.query_memory(current_process(), actual, 2, buffer.as<BYTE>(), 8192,
+                                         nullptr) < 0)
+        return;
+    const auto name = buffer.as<UNICODE_STRING>();
+    const auto chars = runtime_root_length(name->Buffer, name->Length / sizeof(wchar_t));
+    if (!chars || _InterlockedCompareExchange(&state.local.runtime_root_chars, -1, 0) != 0)
+        return;
+    memcpy(state.runtime_root, name->Buffer, chars * sizeof(wchar_t));
+    _InterlockedExchange(&state.local.runtime_root_chars, static_cast<LONG>(chars));
+    agent_log(state, "image runtime root learned", chars);
+}
+
+NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &related,
+                         bool &observe_runtime) {
     auto &state = g_agent_state;
     struct SectionBasic {
         PVOID base;
@@ -206,11 +223,16 @@ NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &
         return status_success;
 
     SectionImageInformation flags{};
-    if (state.api.query_section(section, 1, &flags, sizeof(flags), nullptr) >= 0 &&
-        (flags.machine != IMAGE_FILE_MACHINE_AMD64 ||
-         !(flags.image_characteristics & IMAGE_FILE_DLL) ||
-         (flags.dll_characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)))
-        return status_success;
+    const bool section_flags = state.api.query_section(section, 1, &flags, sizeof(flags), nullptr) >= 0;
+    const auto root_chars = known_runtime_root(state);
+    if (section_flags) {
+        if (flags.machine != IMAGE_FILE_MACHINE_AMD64 || !(flags.image_characteristics & IMAGE_FILE_DLL))
+            return status_success;
+        if (flags.dll_characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE) {
+            observe_runtime = root_chars == 0;
+            return status_success;
+        }
+    }
 
     PVOID inspection = nullptr;
     SIZE_T extent = 0;
@@ -223,19 +245,18 @@ NTSTATUS inspect_section(HANDLE section, PVOID *base, ImageRecord &image, bool &
                                              8192, nullptr)
                     : status_unsuccessful;
     if (status >= 0) {
-        auto name = buffer.as<UNICODE_STRING>();
-        auto &slot = import_hint_slot(state.local, *name);
-        MappingInspection mapping{section,
-                                  static_cast<uint32_t>(_InterlockedCompareExchange(&slot, 0, 0)),
-                                  false, false};
-        status =
-            related_image(state.api, current_process(), inspection, name->Buffer, name->Length / 2,
-                          state.runtime, image, related, state.application_directory, &mapping);
+        const auto name = buffer.as<UNICODE_STRING>();
+        const size_t chars = name->Length / sizeof(wchar_t);
+        observe_runtime = root_chars == 0 && runtime_root_length(name->Buffer, chars) != 0;
+        const bool inside = root_chars > 0 && chars > static_cast<size_t>(root_chars) &&
+                            wide_equal(name->Buffer, root_chars, state.runtime_root, root_chars);
+        MappingInspection mapping{section, section_flags, inside || observe_runtime, false};
+        status = related_image(state.api, current_process(), inspection, name->Buffer, chars,
+                               image, related, &mapping);
         if (status >= 0 && related) {
-            if (mapping.reused_import)
-                agent_log(state, "image direct import hint reused", image.preferred_base);
-            else if (mapping.import_hint)
-                _InterlockedExchange(&slot, static_cast<LONG>(mapping.import_hint));
+            agent_log(state, mapping.path_match ? "image runtime path match"
+                                                : "image name or direct import match",
+                      image.preferred_base);
             if (!mapping.section_base)
                 agent_log(state, "image preferred base read from file", image.preferred_base);
         }
@@ -305,9 +326,10 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
     register_unwind();
     ImageRecord image{};
     bool adjusted = false;
+    bool observe_runtime = false;
     if (base && !zero) {
         bool related = false;
-        auto status = inspect_section(section, base, image, related);
+        auto status = inspect_section(section, base, image, related, observe_runtime);
         if (status < 0) {
             agent_log(state, "image classification or preparation failed", static_cast<ULONG>(status));
             if (related)
@@ -319,6 +341,8 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
     }
     auto status = state.api.map_section(section, process, base, zero, commit, offset, size,
                                         inherit, allocation, protection);
+    if (status >= 0 && observe_runtime && process == current_process())
+        observe_runtime_root(state, base);
     if (adjusted) {
         agent_log(state, "image mapping requested base", image.preferred_base);
         agent_log(state, "image mapping status", static_cast<ULONG>(status));
@@ -394,7 +418,7 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
     bool owns_reservation = false;
     NTSTATUS status = status_success;
     {
-        HeapReservation reserve(state.api, state.runtime, attributes);
+        HeapReservation reserve(state.api, attributes);
         status = state.api.create_process(
             process, thread, process_access, thread_access, process_attributes, thread_attributes,
             process_flags, thread_flags | thread_create_suspended, parameters, create_info,
@@ -406,7 +430,7 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
     NativeBuffer storage(state.api, sizeof(ProcessImage));
     auto image = storage.as<ProcessImage>();
     auto prepared =
-        image ? identify_process(state.api, *process, state.runtime, *image) : status_unsuccessful;
+        image ? identify_process(state.api, *process, *image) : status_unsuccessful;
     if (owns_reservation && prepared >= 0 && !image->related)
         prepared = status_invalid_image;
     if (prepared < 0) {
