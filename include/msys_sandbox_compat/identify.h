@@ -7,7 +7,7 @@ namespace msys_sandbox_compat {
 
 constexpr size_t image_path_chars = 1024;
 
-enum class ImageKind : uint32_t { executable = 1, library = 2, runtime = 3 };
+enum class ImageKind : uint32_t { executable = 1, library = 2 };
 
 struct ImageRecord {
     uint64_t preferred_base;

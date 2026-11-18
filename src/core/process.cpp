@@ -80,8 +80,7 @@ NTSTATUS read_hook_source(const NativeApi &api, HANDLE process, uintptr_t addres
 
 } // namespace
 
-CygheapReservation::CygheapReservation(const NativeApi &api, const RuntimePaths &runtime,
-                                       void *attributes)
+HeapReservation::HeapReservation(const NativeApi &api, const RuntimePaths &runtime, void *attributes)
     : storage_(api, attributes ? sizeof(CreateInput) : 0), attributes_(attributes) {
     auto input = storage_.as<CreateInput>();
     if (!input)
@@ -111,7 +110,7 @@ CygheapReservation::CygheapReservation(const NativeApi &api, const RuntimePaths 
         !imports_msys(api, input->path, image->size / sizeof(wchar_t), runtime))
         return;
 
-    input->range = {reinterpret_cast<void *>(original_cygheap), cygheap_extent};
+    input->range = {reinterpret_cast<void *>(msys_heap_base), msys_heap_extent};
     input->entries[count] = {process_memory_reserve, sizeof(input->range), &input->range, nullptr};
     input->bytes += sizeof(CreateAttribute);
     attributes_ = input;
@@ -190,24 +189,6 @@ NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
     status = adapt_kernel_object(api, thread, state);
     if (status < 0)
         return status;
-
-    const auto base = reinterpret_cast<void *>(original_cygheap);
-    MEMORY_BASIC_INFORMATION reservation{};
-    status = api.query_memory(process, base, 0, &reservation, sizeof(reservation), nullptr);
-    if (status < 0)
-        return status;
-    if (reservation.AllocationBase == base && reservation.BaseAddress == base &&
-        reservation.State == MEM_RESERVE && reservation.RegionSize >= cygheap_extent) {
-        agent_log(state, "cygheap reserved at creation", original_cygheap);
-    } else {
-        // The actual import walk may identify MSYS when preflight could not.
-        PVOID arena = base;
-        SIZE_T extent = cygheap_extent;
-        status = api.allocate(process, &arena, 0, &extent, MEM_RESERVE, PAGE_NOACCESS);
-        if (status < 0 || arena != base)
-            return status < 0 ? status : status_unsuccessful;
-        agent_log(state, "cygheap reserved after creation", original_cygheap);
-    }
 
     PROCESS_BASIC_INFORMATION basic{};
     status = api.query_process(process, ProcessBasicInformation, &basic, sizeof(basic), nullptr);
@@ -295,7 +276,22 @@ NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, 
     return status_success;
 }
 
-NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source) {
+NTSTATUS release_heap_reservation(const NativeApi &api, HANDLE process, const AgentState &state) {
+    PVOID base = reinterpret_cast<void *>(msys_heap_base);
+    MEMORY_BASIC_INFORMATION info{};
+    auto status = api.query_memory(process, base, 0, &info, sizeof(info), nullptr);
+    if (status < 0 || info.BaseAddress != base || info.AllocationBase != base ||
+        info.State != MEM_RESERVE || info.RegionSize != msys_heap_extent)
+        return status < 0 ? status : status_unsuccessful;
+    SIZE_T size = 0;
+    status = api.free(process, &base, &size, MEM_RELEASE);
+    if (status >= 0)
+        agent_log(state, "released MSYS heap window", msys_heap_base);
+    return status;
+}
+
+NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source,
+                     bool owns_reservation) {
     auto &api = source.api;
     auto status = status_success;
     if (source.native_relay) {
@@ -339,7 +335,8 @@ NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, A
     status = install_hooks(api, process, source, image.related);
     if (status < 0)
         return status;
-    return protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);
+    status = protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);
+    return status >= 0 && owns_reservation ? release_heap_reservation(api, process, source) : status;
 }
 
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number) {

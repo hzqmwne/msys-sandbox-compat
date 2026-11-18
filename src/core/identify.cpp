@@ -89,7 +89,6 @@ struct ImageReader {
                  pe.FileHeader.Characteristics & IMAGE_FILE_DLL ? ImageKind::library
                                                                 : ImageKind::executable};
         if (image.kind == ImageKind::library && runtime_name(path, chars)) {
-            image.kind = ImageKind::runtime;
             related = true;
             return status_success;
         }

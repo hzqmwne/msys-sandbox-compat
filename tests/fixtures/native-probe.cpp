@@ -73,20 +73,34 @@ int wmain(int argc, wchar_t **argv) {
             return 3;
         }
         unsigned jumps = 0;
+        bool allocation_original = false;
         for (auto name :
              {"NtCreateDirectoryObject", "NtCreateSection", "NtCreateMutant",
               "NtCreateSymbolicLinkObject", "NtCreateNamedPipeFile", "NtMapViewOfSection",
               "NtAllocateVirtualMemory", "NtCreateUserProcess", "NtSetInformationToken"}) {
             BYTE code[8]{};
             auto address = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), name);
-            if (ReadProcessMemory(parent, address, code, sizeof(code), nullptr) && code[0] == 0xe9)
-                ++jumps;
+            if (ReadProcessMemory(parent, address, code, sizeof(code), nullptr)) {
+                if (code[0] == 0xe9)
+                    ++jumps;
+                if (std::string(name) == "NtAllocateVirtualMemory")
+                    allocation_original = code[0] == 0x4c && code[1] == 0x8b && code[2] == 0xd1 &&
+                                          code[3] == 0xb8;
+            }
         }
         port = 1;
         status = query(parent, static_cast<PROCESSINFOCLASS>(7), &port, sizeof(port), nullptr);
         fprintf(report, "parent-inline-jumps=%u parent-debug-status=%08lx parent-debug-port=%llu\n",
                 jumps, static_cast<ULONG>(status), port);
-        clean = clean && jumps == 9 && status >= 0 && port == 0;
+        clean = clean && jumps == 8 && allocation_original && status >= 0 && port == 0;
+        for (auto address : {0x800000000ULL, 0xa00000000ULL}) {
+            auto base = reinterpret_cast<void *>(address);
+            MEMORY_BASIC_INFORMATION heap{};
+            const bool original = VirtualQueryEx(parent, base, &heap, sizeof(heap)) &&
+                                  heap.AllocationBase == base && heap.State == MEM_COMMIT;
+            fprintf(report, "parent-heap=%p committed-at-original=%d\n", base, original);
+            clean = clean && original;
+        }
         CloseHandle(parent);
     }
     fprintf(report, "clean=%d\n", clean);

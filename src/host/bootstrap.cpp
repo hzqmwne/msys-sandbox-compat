@@ -16,7 +16,7 @@ struct RootCreation {
 thread_local RootCreation *root_creation;
 CreateUserProcess original_root_create;
 
-NTSTATUS NTAPI reserve_root_cygheap(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access,
+NTSTATUS NTAPI reserve_root_heaps(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access,
                                     ACCESS_MASK thread_access, POBJECT_ATTRIBUTES process_attrs,
                                     POBJECT_ATTRIBUTES thread_attrs, ULONG process_flags,
                                     ULONG thread_flags, PRTL_USER_PROCESS_PARAMETERS parameters,
@@ -26,7 +26,7 @@ NTSTATUS NTAPI reserve_root_cygheap(PHANDLE process, PHANDLE thread, ACCESS_MASK
         return original_root_create(process, thread, process_access, thread_access, process_attrs,
                                     thread_attrs, process_flags, thread_flags, parameters,
                                     create_info, attributes);
-    CygheapReservation reserve(root->state.api, root->state.runtime, attributes);
+    HeapReservation reserve(root->state.api, root->state.runtime, attributes);
     auto status = original_root_create(process, thread, process_access, thread_access, process_attrs,
                                        thread_attrs, process_flags, thread_flags, parameters,
                                        create_info, reserve.attributes());
@@ -86,7 +86,7 @@ BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool
     auto entry = reinterpret_cast<PVOID volatile *>(slot);
     RootCreation root{*state, reserved};
     root_creation = &root;
-    InterlockedExchangePointer(entry, reinterpret_cast<PVOID>(reserve_root_cygheap));
+    InterlockedExchangePointer(entry, reinterpret_cast<PVOID>(reserve_root_heaps));
     const auto created = create();
     const DWORD create_error = created ? ERROR_SUCCESS : GetLastError();
     InterlockedExchangePointer(entry, reinterpret_cast<PVOID>(original_root_create));
@@ -241,7 +241,6 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
     bind(HookId::symbolic_link, "hook_link", api.create_link);
     bind(HookId::named_pipe, "hook_pipe", api.create_pipe);
     bind(HookId::map_view, "hook_map", api.map_section);
-    bind(HookId::allocate, "hook_allocate", api.allocate);
     bind(HookId::create_process, "hook_process", api.create_process);
     bind(HookId::set_token, "hook_set_token", api.set_token);
     memcpy(mapped.data() + state_rva, &state, sizeof(state));

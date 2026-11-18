@@ -262,22 +262,9 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
     }
     status = state.api.map_section(section, process, base, zero, commit, offset, size, inherit,
                                    allocation, protection);
-    if (status >= 0 && related) {
-        if (image.kind == ImageKind::runtime)
-            state.local.runtime_loaded = 1;
+    if (status >= 0 && related)
         agent_log(state, "fixed image mapping", image.preferred_base);
-    }
     return status;
-}
-
-extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_allocate(HANDLE process, PVOID *base,
-                                                              ULONG_PTR zero, PSIZE_T size,
-                                                              ULONG allocation, ULONG protection) {
-    auto &state = g_agent_state;
-    if (process == current_process() && state.local.runtime_loaded &&
-        reinterpret_cast<uintptr_t>(*base) == original_userheap)
-        *base = reinterpret_cast<void *>(relocated_userheap);
-    return state.api.allocate(process, base, zero, size, allocation, protection);
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
@@ -326,15 +313,15 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
             return permitted;
         }
     }
-    bool reserved_at_creation = false;
+    bool owns_reservation = false;
     NTSTATUS status = status_success;
     {
-        CygheapReservation reserve(state.api, state.runtime, attributes);
+        HeapReservation reserve(state.api, state.runtime, attributes);
         status = state.api.create_process(
             process, thread, process_access, thread_access, process_attributes, thread_attributes,
             process_flags, thread_flags | thread_create_suspended, parameters, create_info,
             reserve.attributes());
-        reserved_at_creation = reserve.attributes() != attributes;
+        owns_reservation = reserve.attributes() != attributes;
     }
     if (status < 0)
         return status;
@@ -342,15 +329,15 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
     auto image = storage.as<ProcessImage>();
     auto prepared =
         image ? identify_process(state.api, *process, state.runtime, *image) : status_unsuccessful;
-    if (reserved_at_creation && prepared >= 0 && !image->related)
+    if (owns_reservation && prepared >= 0 && !image->related)
         prepared = status_invalid_image;
     if (prepared < 0) {
-        if (reserved_at_creation || state.native_relay || (image && image->related))
+        if (owns_reservation || state.native_relay || (image && image->related))
             goto failed;
         agent_log(state, "child classification unavailable; left uninstrumented",
                   static_cast<ULONG>(prepared));
     } else if (image->related || state.native_relay) {
-        prepared = clone_agent(*process, *thread, *image, state);
+        prepared = clone_agent(*process, *thread, *image, state, owns_reservation);
         if (prepared < 0)
             goto failed;
         agent_log(state, image->related ? "injected MSYS child" : "injected native relay",

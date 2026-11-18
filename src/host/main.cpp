@@ -168,6 +168,9 @@ int wmain(int argc, wchar_t **argv) try {
                 inject_root(child.hProcess, child.hThread, image, *state,
                             fs::path(own_path).parent_path() / L"msys-sandbox-compat.dll");
             }
+            if (reserved)
+                check_nt(release_heap_reservation(state->api, child.hProcess, *state),
+                         "release MSYS heap window");
             fprintf(
                 stderr,
                 "[launcher] pid=%lu classification=live-imports root=%s hooks=%zu debugger=none\n",

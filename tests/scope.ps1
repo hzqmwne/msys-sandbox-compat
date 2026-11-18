@@ -40,6 +40,9 @@ Run 'runtime-import-name' @($compat,'--trace',(Join-Path $fixtureBinaries 'impor
 $report=Join-Path $evidence 'native-child.report.txt'
 $command='"'+$probe.Replace('\','/')+'" --inspect-parent "'+$report.Replace('\','/')+'"; s=$?; echo PROBE-EXIT:$s; exit "$s"'
 Run 'native-child-parent-check' @($compat,'--trace',$bash,'--noprofile','--norc','-c',$command) $report
+$report=Join-Path $evidence 'native-child-fork-parent-check.report.txt'
+$command='("'+$probe.Replace('\','/')+'" --inspect-parent "'+$report.Replace('\','/')+'"; exit $?); exit $?'
+Run 'native-child-fork-parent-check' @($compat,'--trace',$bash,'--noprofile','--norc','-c',$command) $report
 Run 'native-root-explicit-reentry' @($compat,'--trace',$probe,'--reenter',$compat,$bash)
 $before = Join-Path $evidence 'msys-native-context-before.report.txt'
 $after = Join-Path $evidence 'msys-native-context-after.report.txt'

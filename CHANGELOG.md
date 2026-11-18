@@ -6,7 +6,7 @@
 
 ### MSYS 内存布局
 
-- 为已识别的 MSYS 进程在创建时预留原始 cygheap，保留运行时的原址和提交大小。挂起进程的真正映像继续决定兼容准备与传播。
+- 为已识别的 MSYS 进程在创建时暂留堆窗口，并在恢复执行前释放。原版 MSYS 自行预留和提交 cygheap 与 userheap，删除 `NtAllocateVirtualMemory` hook。
 
 ### 终端转发
 

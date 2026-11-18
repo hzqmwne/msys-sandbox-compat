@@ -8,14 +8,14 @@ namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
 
-constexpr uintptr_t original_cygheap = 0x800000000ULL;
-constexpr size_t cygheap_extent = 0x200000000ULL;
-constexpr uintptr_t original_userheap = 0xa00000000ULL;
-constexpr uintptr_t relocated_userheap = 0x80400000000ULL;
+// AMD64 MSYS lays out cygheap at 32 GiB, userheap from 40 GiB, and mmap from
+// 64 GiB. Keep that address window clear only through kernel process creation.
+constexpr uintptr_t msys_heap_base = 0x800000000ULL;
+constexpr size_t msys_heap_extent = 0x1000000000ULL - msys_heap_base;
 
-class CygheapReservation {
+class HeapReservation {
   public:
-    CygheapReservation(const NativeApi &api, const RuntimePaths &runtime, void *attributes);
+    HeapReservation(const NativeApi &api, const RuntimePaths &runtime, void *attributes);
     void *attributes() const { return attributes_; }
 
   private:
@@ -30,7 +30,6 @@ enum class HookId : size_t {
     symbolic_link,
     named_pipe,
     map_view,
-    allocate,
     create_process,
     set_token,
     count
@@ -44,7 +43,6 @@ struct HookSlot {
 };
 
 struct ProcessState {
-    volatile LONG runtime_loaded;
     volatile LONG unwind_registered;
     volatile LONG policy_lock;
 };
@@ -80,7 +78,9 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
 NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state);
 NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
                          const ProcessImage &image, AgentState &state);
-NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source);
+NTSTATUS release_heap_reservation(const NativeApi &api, HANDLE process, const AgentState &state);
+NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source,
+                     bool owns_reservation);
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number = 0);
 
 } // namespace msys_sandbox_compat
