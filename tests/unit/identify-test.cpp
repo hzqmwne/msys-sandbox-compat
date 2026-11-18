@@ -12,19 +12,19 @@ struct Image {
     std::vector<BYTE> bytes = std::vector<BYTE>(0x4000);
 };
 static std::map<std::wstring, std::unique_ptr<Image>> files;
-static size_t maps, allocation_bytes;
+static size_t maps, allocation_bytes, memory_reads;
 static int failures;
 static const wchar_t *app = L"\\Device\\Review\\app\\";
 static bool fail_allocation, reject_root_reopen;
 
 static Image &image(const std::wstring &name, const std::vector<std::string> &imports,
-                    bool dll = true) {
+                    bool dll = true, LONG pe_offset = 0x100) {
     auto object = std::make_unique<Image>();
     auto &bytes = object->bytes;
     auto dos = reinterpret_cast<IMAGE_DOS_HEADER *>(bytes.data());
     dos->e_magic = IMAGE_DOS_SIGNATURE;
-    dos->e_lfanew = 0x100;
-    auto pe = reinterpret_cast<IMAGE_NT_HEADERS64 *>(bytes.data() + 0x100);
+    dos->e_lfanew = pe_offset;
+    auto pe = reinterpret_cast<IMAGE_NT_HEADERS64 *>(bytes.data() + pe_offset);
     pe->Signature = IMAGE_NT_SIGNATURE;
     pe->FileHeader.Machine = IMAGE_FILE_MACHINE_AMD64;
     pe->FileHeader.Characteristics = dll ? IMAGE_FILE_DLL : 0;
@@ -59,6 +59,7 @@ static NTSTATUS NTAPI free_memory(HANDLE, PVOID *base, PSIZE_T, ULONG) {
 }
 static NTSTATUS NTAPI read_memory(HANDLE, const void *source, void *out, SIZE_T bytes,
                                   PSIZE_T received) {
+    ++memory_reads;
     memcpy(out, source, bytes);
     if (received)
         *received = bytes;
@@ -126,9 +127,9 @@ int main() {
         image(L"wrapper" + std::to_wstring(i) + L".dll", {"common0.dll"});
         imports.push_back("wrapper" + std::to_string(i) + ".dll");
     }
-    auto inspect = [&](const char *label, std::vector<std::string> names) {
-        auto &root = image(L"root.exe", names, false);
-        maps = allocation_bytes = 0;
+    auto inspect = [&](const char *label, std::vector<std::string> names, LONG pe_offset = 0x100) {
+        auto &root = image(L"root.exe", names, false, pe_offset);
+        maps = allocation_bytes = memory_reads = 0;
         ImageRecord record{};
         std::wstring path = std::wstring(app) + L"root.exe";
         bool related = false;
@@ -158,6 +159,10 @@ int main() {
     auto direct = inspect("direct_runtime_import", {"MSYS-2.0.DLL"});
     expect(direct.first >= 0 && direct.second && allocation_bytes == 0,
            "direct imports need no work list");
+    expect(memory_reads == 3, "one header read plus the import descriptor and name");
+    auto long_header = inspect("pe_header_outside_prefix", {"msys-2.0.dll"}, 0x800);
+    expect(long_header.first >= 0 && long_header.second && memory_reads == 4,
+           "a later NT header is read separately");
     reject_root_reopen = true;
     auto reopen = inspect("root_reopen_fails", {"msys-2.0.dll"});
     expect(reopen.first < 0 && reopen.second,

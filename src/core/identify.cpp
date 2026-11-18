@@ -71,18 +71,28 @@ struct ImageReader {
     }
     NTSTATUS inspect(const wchar_t *path, size_t chars, ImageRecord &image, bool &related,
                      bool &indirect) {
+        // Most images have both headers in the first kilobyte.
+        BYTE headers[1024];
+        bool have_prefix = read(0, headers, sizeof(headers));
         IMAGE_DOS_HEADER dos{};
+        if (have_prefix)
+            memcpy(&dos, headers, sizeof(dos));
+        else if (!read(0, &dos, sizeof(dos)))
+            return status_invalid_image;
+        if (dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0 || dos.e_lfanew > 0x100000)
+            return status_invalid_image;
+        auto pe_offset = static_cast<uint32_t>(dos.e_lfanew);
         IMAGE_NT_HEADERS64 pe{};
-        if (!read(0, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < 0 ||
-            dos.e_lfanew > 0x100000 ||
-            !read(static_cast<uint32_t>(dos.e_lfanew), &pe, sizeof(pe)) ||
-            pe.Signature != IMAGE_NT_SIGNATURE ||
-            pe.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+        if (have_prefix && pe_offset <= sizeof(headers) - sizeof(pe))
+            memcpy(&pe, headers + pe_offset, sizeof(pe));
+        else if (!read(pe_offset, &pe, sizeof(pe)))
+            return status_invalid_image;
+        if (pe.Signature != IMAGE_NT_SIGNATURE || pe.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
             pe.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
             return status_invalid_image;
         size = pe.OptionalHeader.SizeOfImage;
         imports = pe.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-        if (size < sizeof(pe) || static_cast<uint32_t>(dos.e_lfanew) > size - sizeof(pe) ||
+        if (size < sizeof(pe) || pe_offset > size - sizeof(pe) ||
             imports.VirtualAddress > size || imports.Size > size - imports.VirtualAddress)
             return status_invalid_image;
         image = {pe.OptionalHeader.ImageBase, size,
