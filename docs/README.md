@@ -5,7 +5,7 @@
 | 顺序 | 文档 | 内容 |
 |---|---|---|
 | 01 | [使用说明](getting-started.md) | 构建、入口和运行参数 |
-| 02 | [当前设计](design.md) | 识别、准备、进程链与 ConPTY；唯一主设计文档 |
+| 02 | [当前设计](design.md) | EXE 识别、DLL 映射、进程链与 ConPTY |
 | 03 | [兼容范围](compatibility.md) | 已验证组合、支持能力与限制 |
 | 04 | [测试说明](testing.md) | 回归、基线与产物位置 |
 | 05 | [架构决策](decisions/README.md) | 已接受的重要取舍、原因与后果 |

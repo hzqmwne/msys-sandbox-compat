@@ -27,7 +27,7 @@
 | 测试 | 检查内容 |
 |---|---|
 | `inline-hook-test` | MinHook 计划接口、逻辑 VA/RIP 位移、指令与页面边界、已有跳转串接、批量安装/relay 范围与保护恢复 |
-| `identify-test` | 直接导入快速路径、共享依赖去重、环、节点上限、深依赖链及识别/准备失败语义；无需创建 PSEC |
+| `identify-test` | EXE 直接导入、间接导入不命中、PE 头跨读取范围和准备失败保留识别结果。创建前预检只打开目标 EXE。无需创建 PSEC |
 | `object-security-test` | ACL 最小追加、enabled groups、空/NULL、输入不变、absolute/self-relative 的 owner/group/SACL/control 保留 |
 | `stream-write-test` | ConPTY 双向转发共用的写入循环，覆盖连续短写、零进展和写入失败 |
 | `acl.ps1` | 真实 MSYS 内显式对象与后续默认设置；有限权限、deny、其他 token、adjust-only/query-only 句柄；-Existing 可直接使用已有受限上下文 |
@@ -75,23 +75,23 @@ relay 链路要求原生桥接只存在一个创建 hook，其余入口与 MSYS 
 
 夹具 `import-name-runtime` 只在测试输出目录生成同名 `msys-2.0.dll`，用于验证导入名约定，不替换安装目录中的运行时。
 
-`restricted-run` 只修改带 `.restricted-fixture` 标记的测试目录及其受控文件 ACL；两种令牌的固定 SID、对象 ACL 和能力边界见 [兼容范围](compatibility.md)。暂存副本只包含兼容产物与测试夹具，MSYS 分发文件保持原位。`raw-baseline.*` 保存同令牌下原版 Bash 的结果，`native-depth-*` 必须完成真实工作负载才通过；基线失败不能代替兼容成功。
+`restricted-run` 只修改带 `.restricted-fixture` 标记的测试目录及其受控文件 ACL。暂存副本包含兼容产物与测试夹具，MSYS 分发文件保持原位。非 AppContainer 受限令牌的进程链测试将同令牌下原版 Bash 的执行结果保存为 `raw-baseline.*`，并要求 `native-depth-*` 完成真实工作负载。PSEC 的 `verify` 按兼容负载和权限边界验收。两种非 AppContainer 令牌的固定 SID、对象 ACL 和能力边界见 [兼容范围](compatibility.md)。
 
 测试设置的 ACL 是夹具初始条件，不能要求生产复制这些 ACL 操作。生产验收应使用原有策略已允许的部署位置，保留原 token、文件与对象访问限制；对只读写入、WRITE_DAC 和拒绝读取等行为同时检查拒绝。当前检查覆盖固定夹具，不能仅凭文件内容完整性或几个 canary 宣称任意生产环境的全部限制均已验证。
 
 ## 映像地址对照
 
-Windows 11 `26300.9974`、Git for Windows MSYS `3.6.10` 的原生 PSEC 对照使用同一套原安装文件，分别验证映像匹配范围和入参条件。
+早期原生 PSEC 对照使用 Windows 11 `26300.9974` 和 Git for Windows MSYS `3.6.10` 的同一套原安装文件，分别验证映像匹配范围和入参条件。
 
 | 实验改写条件 | 结果 |
 |---|---|
 | `msys-2.0.dll` 且未指定基址 | Bash 常见操作及 Git init/add/status 通过。三轮 Perl 均在首次 fork 因 `msys-crypt-2.dll` 父子地址不同而失败 |
 | `perl.exe` 直接静态导入的 MSYS DLL 且未指定基址 | `msys-2.0.dll` 和 `msys-perl5_42.dll` 父子同址。三轮 Perl 在同一个传递依赖上失败 |
 | `perl.exe` 的全部传递静态 MSYS 依赖且未指定基址 | 最小 fork 和独立动态夹具各通过 3/3。完整 Perl fork 负载 0/3，失败发生在重载 `Time::HiRes` 或 `List::Util` 的 XS DLL 时 |
-| 保留当前 DLL 范围，仅在初始 `*BaseAddress` 与 `ZeroBits` 均为零时改写 | `verify` 11/11、`late-package` 及 Bash 内 Git init/add/status 通过。带追踪的回归记录 1,207 次相关 DLL 映射，两项入参均为零 |
+| 当时按传递导入链识别 DLL，且只在初始 `*BaseAddress` 与 `ZeroBits` 均为零时改写 | `verify` 11/11、`late-package` 及 Bash 内 Git init/add/status 通过。带追踪的回归记录 1,207 次相关 DLL 映射，两项入参均为零 |
 
 单独加载 `Time::HiRes` 或 `List::Util` 时，传递静态依赖版各通过 1/3，同轮较宽范围的对照各通过 3/3。传递静态依赖版的成功样本中，MSYS 自行把 XS DLL 重载到了父进程的实际基址，父子都偏离 PE 首选地址。子进程使用继承的 XS 函数引用完成了调用。失败样本记录了父进程保存的函数地址和子进程多次尝试的映射位置。
 
-表中的结果来自独立实验构建。正式版的 `late-package` 验证安装根外的晚装 DLL 也能请求首选址。Perl 父子进程都检查显式基址得到保留、启用 `DYNAMIC_BASE` 的 DLL 交给 Windows，以及首选址已占用时按原请求换址。低基址探针覆盖数量和稀疏位图允许首选址，以及数量限制禁止首选址的情况。见 [当前设计](design.md#dll-映射范围)。
+当前 `late-package` 验证安装根外的晚装 DLL 也能请求首选址。Perl 父子进程都检查显式基址得到保留、启用 `DYNAMIC_BASE` 的 DLL 交给 Windows，以及首选址已占用时按原请求换址。低基址探针覆盖数量和稀疏位图允许首选址，以及数量限制禁止首选址的情况。独立探针另验证 `LoadLibraryW` 遇到首选映像区间内的一页占用时能换址，并正确应用重定位。引入该方案时，本机 Release 构建的完整 CTest 矩阵通过。见 [ADR-0012](decisions/0012-prefer-dll-image-base-at-map.md)。
 
 在本机 Git for Windows 2.56.1 安装下检查了 352 个 EXE 的普通导入。259 个直接导入 `msys-2.0.dll`，均位于 `usr` 子树，其中 18 个位于 `usr/lib` 或 `usr/libexec`。按旧识别目录规则查找未发现只有传递依赖的 EXE。

@@ -25,7 +25,7 @@
 
 EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原生根启动后才 LoadLibrary MSYS、仅 delay import 或仅由中间 DLL 引入运行时，均在预先识别范围外。完整 MSYS 兼容进程中的 DLL 映射规则适用于任意路径。首选址不可用时由 Windows 按原请求选址，fork 同址重载仍可能失败。见 [DLL 映射范围](design.md#dll-映射范围)。
 
-设置 PE `DYNAMIC_BASE` 的 DLL 由 Windows 选址。使用该标志的新版 `msys-2.0.dll` 仍需在目标环境单独验证并存、父子映像布局和 fork。
+设置 PE `DYNAMIC_BASE` 的 DLL 由 Windows 选址。使用该标志的 `msys-2.0.dll` 版本需在目标环境单独验证并存、父子映像布局和 fork。当前 DLL 基址调整覆盖 `NtMapViewOfSection` 入口。
 
 relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，不接管已有进程、树外进程、绕过该入口的直接系统调用或纯原生进程运行后才动态加载 MSYS 的场景。它要求父子安全上下文与最近已观察的默认对象策略一致。完整 agent 内的默认 DACL 设置成功后会更新基准；未观察的策略改变在创建前拒绝。子进程切换凭据、限制、完整性或 package，默认 DACL 与基准不符，或必要查询失败时，已创建目标在恢复前回收。原生中间进程会驻留 agent 代码，但仅一个创建入口被修改；关闭该模式的默认行为保持不变。
 
@@ -34,6 +34,8 @@ relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，
 上述文件授权是合成夹具的初始策略，不是生产兼容层执行的补权。生产不修改任何磁盘文件或目录 ACL，也不放宽既有 restricted token 的限制；只有原策略已允许的文件位置与访问才可使用。若真实 harness 原策略拒绝某个必要文件，本轮夹具结果不证明该环境已兼容，不能通过额外授权或非受限代理代读取得成功。
 
 `restricted-run.exe` 是测试夹具，不随产品安装，也不是通用沙箱工具。回归验证明确配置的只读文件、拒绝文件、可写目录与对象策略，没有认证任意路径、网络或外部产品的隔离策略。两种令牌的 ConPTY 均复用既有实现及初始策略，已验证终端内 Perl/线程 fork、TTY、尺寸、原生命令、Ctrl+C、作业控制和退出码；交互前后的权限 probe 均要求原有拒绝保持有效。
+
+在受测 Windows Terminal 的交互 Git Bash 会话中，调整窗口大小后立即输入，偶尔会丢失第一个字符。尺寸传递回归验证的是内层窗口收到尺寸变化。
 
 兼容实现依赖 AMD64 ntdll 系统调用入口、Native API 和 MSYS 内部地址布局。入口或目标布局变化时需要重新验证，不承诺所有 Windows/MSYS 版本自动适用。
 
@@ -45,8 +47,8 @@ relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，
 
 Git for Windows 的 MSYS 3.6.10 在 `.cygwin_` 可写共享映像节中保存 `wincap.caps`，其值是进程内的绝对指针。原生 PSEC 对照中，同一份 DLL 的两个实例在不同基址运行时，后启动的实例可能在 `DLL_PROCESS_ATTACH` 读取前一实例的地址并异常退出。保持未对齐实例存活时，共用同一文件的目标成功 0/4，使用字节相同的独立文件则成功 4/4。`BaseNamedObjects` 的隔离作用于有名称的 IPC 对象，映像节的这组共享数据随 DLL 文件映射。
 
-Windows 按文件流维护映像节的共享状态。重新打开同一个文件或通过 NTFS 硬链接加载仍使用同一个文件流。`SEC_IMAGE` 视图的页面保护由 PE 节标志决定，`ViewUnmap` 控制视图继承。可以为每个隔离域部署一份字节相同的独立运行时安装，使域内进程仍共享同一文件流，且实际 DLL 搜索选中该安装。已有独立文件对照验证了启动与部分 fork 工作负载，套接字在多个隔离域的共享语义仍需验证。[Windows 映像节与文件流](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_section_object_pointers) · [映像视图参数](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-zwmapviewofsection)
+Windows 按文件流维护映像节的共享状态。重新打开同一个文件或通过 NTFS 硬链接加载仍使用同一个文件流。当前兼容层使用原安装文件，`.cygwin_` 继续按文件流共享。命名 IPC 在 PSEC 下使用 Windows 提供的 AppContainer 命名空间，在非 AppContainer 受限令牌下使用本次启动的私有目录。跨进程协作数据的共享范围应与其命名对象一致。[Windows 映像节与文件流](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_section_object_pointers) · [命名空间设计](design.md#hook-的职责)
 
 运行时可将 `wincap` 保存在进程私有、fork 时由子进程自行初始化的存储中。2026 年 11 月 9 日的 Cygwin 邮件补丁曾提出这一改法。MSYS2 的另一份提案检查指针是否落在本进程的映像内，仍保留共享字段。截至 2026 年 11 月 19 日，该 PR 尚未合并。[Cygwin 邮件补丁](https://www.mail-archive.com/cygwin-patches@cygwin.com/msg13326.html) · [MSYS2 PR #403](https://github.com/msys2/msys2-runtime/pull/403)
 
-Winsock 事件表和编号分配需要跨进程共享，还需要和保护其槽位的互斥对象使用同一命名空间。Git for Windows 提议将这些数据移到相应命名空间的命名共享内存。截至同日，该 PR 尚未合并。本机关闭整个映像节共享的实验只验证了上述启动故障，套接字继承和事件通知需要各自验证。[Git for Windows PR #148](https://github.com/git-for-windows/msys2-runtime/pull/148)
+Winsock 事件表和编号分配需要在同一 AppContainer 的对应 MSYS 对象目录内共享，并和保护其槽位的互斥对象使用同一命名空间。Git for Windows 的上游提案把这些数据移到命名共享内存。独立文件和关闭整个映像节共享均只用于本机对照。套接字继承、事件通知和跨 AppContainer 隔离仍待验证。[Git for Windows PR #148](https://github.com/git-for-windows/msys2-runtime/pull/148)
