@@ -41,6 +41,52 @@ static BOOL WINAPI probe_control(DWORD event) {
     return TRUE;
 }
 
+static void screen_mouse_probe() {
+    const auto input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD original_mode = 0;
+    check(GetConsoleMode(input, &original_mode), "save native input mode");
+    check(SetConsoleMode(input, ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT), "enable native mouse");
+    puts("SCREEN-MOUSE-READY");
+    fflush(stdout);
+
+    constexpr DWORD flags[] = {0, MOUSE_MOVED, 0, MOUSE_MOVED, MOUSE_WHEELED};
+    constexpr DWORD buttons[] = {1, 1, 0, 0};
+    constexpr SHORT columns[] = {9, 10, 10, 11, 11};
+    size_t event = 0;
+    const auto deadline = GetTickCount64() + 3000;
+    while (GetTickCount64() < deadline) {
+        INPUT_RECORD record{};
+        DWORD count = 0;
+        check(PeekConsoleInputW(input, &record, 1, &count), "peek native mouse input");
+        if (!count) {
+            Sleep(10);
+            continue;
+        }
+        check(ReadConsoleInputW(input, &record, 1, &count) && count == 1, "read native mouse input");
+        if (record.EventType == KEY_EVENT) {
+            // The Ctrl+C test may have left a key-up event in the queue.
+            check(!record.Event.KeyEvent.bKeyDown, "mouse report became a character key");
+        }
+        if (record.EventType != MOUSE_EVENT)
+            continue;
+        const auto &mouse = record.Event.MouseEvent;
+        check(mouse.dwEventFlags == flags[event] && mouse.dwMousePosition.X == columns[event] &&
+                  mouse.dwMousePosition.Y == 4,
+              "native mouse coordinates and event flags");
+        if (flags[event] == MOUSE_WHEELED)
+            check(static_cast<SHORT>(HIWORD(mouse.dwButtonState)) > 0, "native wheel direction");
+        else
+            check(mouse.dwButtonState == buttons[event], "native mouse buttons");
+        if (++event == _countof(flags)) {
+            check(SetConsoleMode(input, original_mode), "restore native input mode");
+            puts("SCREEN-MOUSE-DONE");
+            fflush(stdout);
+            return;
+        }
+    }
+    throw std::runtime_error("timed out waiting for native mouse events");
+}
+
 static int screen_probe() {
     check(SetConsoleCtrlHandler(probe_control, TRUE), "target Ctrl+C handler");
     DWORD count = 0;
@@ -59,6 +105,7 @@ static int screen_probe() {
           "enable probe VT");
     constexpr char cursor[] = "CURSOR-NO\x1b[2DOK\r\n";
     check(WriteFile(output, cursor, sizeof(cursor) - 1, &count, nullptr), "write cursor move");
+    screen_mouse_probe();
     return 0;
 }
 
@@ -194,8 +241,14 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
     const auto deadline = GetTickCount64() + 25000;
     bool resize_sent = false;
     bool control_sent = false;
+    bool mouse_sent = false;
     bool initialized = false, edit_sent = false, wait_sent = false, exit_sent = false;
     std::string transcript;
+    auto mouse_tracking = [&] {
+        const auto enabled = transcript.rfind("\x1b[?1003;1006h");
+        const auto disabled = transcript.rfind("\x1b[?1003;1006l");
+        return enabled != std::string::npos && (disabled == std::string::npos || enabled > disabled);
+    };
     auto send_text = [&](const char *text) {
         const auto length = static_cast<DWORD>(strlen(text));
         DWORD count = 0;
@@ -232,10 +285,21 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
             control_sent = true;
         }
         if (bash && !initialized && transcript.find("bash-") != std::string::npos) {
+            check(!mouse_tracking(), "initial Bash prompt enabled all-motion mouse tracking");
             send_text("export PS1='DEMO-READY> '; stty -echo; printf '\\nDEMO-INPUT\\n'\r");
             initialized = true;
         }
-        if (bash && !edit_sent && transcript.find("DEMO-INPUT\r\n") != std::string::npos) {
+        if (!mouse_sent && transcript.find("SCREEN-MOUSE-READY") != std::string::npos) {
+            check(mouse_tracking(), "native mouse mode did not reach the frontend");
+            send_text("\x1b[<0;10;5M\x1b[<32;11;5M\x1b[<0;11;5m\x1b[<35;12;5M\x1b[<64;12;5M");
+            mouse_sent = true;
+        }
+        if (mouse_sent && transcript.find("SCREEN-MOUSE-DONE") != std::string::npos)
+            check(!mouse_tracking(), "native mouse mode did not turn off at the frontend");
+        const auto demo_input = transcript.find("DEMO-INPUT\r\n");
+        if (bash && !edit_sent && demo_input != std::string::npos &&
+            transcript.find("DEMO-READY> ", demo_input) != std::string::npos) {
+            check(!mouse_tracking(), "idle Bash prompt enabled all-motion mouse tracking");
             // Move left inside a quoted argument, insert X, then execute the edited line.
             send_text("printf 'EDITED=%s\\n' '中文b\x1b[DX\x1b[C'\r");
             edit_sent = true;

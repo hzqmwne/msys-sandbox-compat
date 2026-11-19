@@ -26,7 +26,7 @@ Save-TestOutput $result $report 'screen'
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
     throw "Nested terminal rendering/state test failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
-Write-Output 'TERMINAL-SCREEN-PASS: rendered Unicode, cursor movement and restored console state'
+Write-Output 'TERMINAL-SCREEN-PASS: rendered Unicode, cursor movement, native mouse events and restored console state'
 
 $missing = Join-Path $state 'missing-program.exe'
 $info = New-TestProcessInfo $probe @('--drive-terminal',$probe,'--outer-failure',
@@ -52,7 +52,7 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('DEMO-CTRL-C-PASS') -or
     !$result.Output.Contains('OUTER-STATE-PASS') -or !$result.Output.Contains('EDITED=中文Xb')) {
     throw "Bash demo failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
-Write-Output 'TERMINAL-BASH-PASS: demo PATH, arrow-key editing, size, screen and Ctrl+C survival'
+Write-Output 'TERMINAL-BASH-PASS: no idle mouse tracking, demo PATH, arrow-key editing, size, screen and Ctrl+C survival'
 
 $winPS = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 $command = @'

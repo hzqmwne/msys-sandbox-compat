@@ -1,4 +1,5 @@
 #pragma once
+#include "conpty_input.h"
 #include "stream_write.h"
 #include <windows.h>
 #include <winternl.h>
@@ -55,12 +56,14 @@ class Pseudoconsole {
         } else if (GetConsoleMode(input_source, &original_input_mode)) {
             restore_input_mode = true;
             original_input_cp = GetConsoleCP();
-            if (!SetConsoleMode(input_source, (original_input_mode &
-                                               ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
-                                                 ENABLE_PROCESSED_INPUT | ENABLE_QUICK_EDIT_MODE)) |
-                                                  ENABLE_EXTENDED_FLAGS |
-                                                  ENABLE_VIRTUAL_TERMINAL_INPUT) ||
-                !original_input_cp || !SetConsoleCP(CP_UTF8))
+            // Disabling Quick Edit while keeping ENABLE_MOUSE_INPUT asks the outer
+            // terminal for mouse reports even when the inner application did not.
+            const auto mode = (original_input_mode &
+                               ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT |
+                                 ENABLE_QUICK_EDIT_MODE | ENABLE_MOUSE_INPUT)) |
+                              ENABLE_EXTENDED_FLAGS | ENABLE_VIRTUAL_TERMINAL_INPUT;
+            if (!SetConsoleMode(input_source, mode) || !original_input_cp ||
+                !SetConsoleCP(CP_UTF8))
                 throw std::runtime_error("configure ConPTY terminal input");
             if (follow_viewport)
                 viewport = viewport_size(output);
@@ -94,13 +97,25 @@ class Pseudoconsole {
             }
         });
         writer = std::thread([this] {
+            msys_sandbox_compat::ConptyInput terminal_input;
             char buffer[4096];
             DWORD count = 0;
             while (!stopping && ReadFile(input_source, buffer, sizeof(buffer), &count, nullptr) &&
                    count) {
-                if (!msys_sandbox_compat::write_all(input_write, buffer, count))
-                    break;
+                std::string_view bytes(buffer, count);
+                std::string translated;
+                if (restore_input_mode) {
+                    translated = terminal_input.translate(bytes);
+                    bytes = translated;
+                }
+                if (!msys_sandbox_compat::write_all(input_write, bytes.data(),
+                                                     static_cast<DWORD>(bytes.size())))
+                    return;
             }
+            const auto tail = terminal_input.remainder();
+            if (!stopping && !tail.empty())
+                msys_sandbox_compat::write_all(input_write, tail.data(),
+                                               static_cast<DWORD>(tail.size()));
         });
         if (viewport.X) {
             // Sample independently of VT reads so an idle terminal still resizes.

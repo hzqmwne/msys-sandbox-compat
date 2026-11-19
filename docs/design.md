@@ -91,7 +91,9 @@ relay 创建前核对最近已观察的默认策略，创建后比较父子 toke
 
 这个设计复用已有 EXE，增加一个原生宿主实例。输入脚本与标准输入统一通过句柄读取，脚本只打开一次。双向转发遇到短写会继续写入剩余字节，遇到写入失败或零进展则停止该方向的转发。关闭时仍取消阻塞输入并排空输出。
 
-交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。VT 输入仍沿原字节流转发。关闭时先结束尺寸采样，再释放 ConPTY。显式尺寸、脚本输入和重定向标准流沿用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
+交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。关闭时先结束尺寸采样，再释放 ConPTY。显式尺寸、脚本输入和重定向标准流沿用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
+
+外层控制台的鼠标跟踪由内层应用协商。桥接输入时，将旧版 conhost 封装成 Win32 字符键的 SGR 鼠标报告还原为 VT 序列，由内层 ConPTY 按应用的输入模式处理。脚本和重定向输入保持原字节流。
 
 对真实控制台句柄，桥接前保存各方向的 mode 与代码页，输入设置 raw VT / UTF-8，输出启用 processed / VT / UTF-8。收尾在最后一批输出排空之后恢复，包括目标启动失败的路径。compat 的等待实例和开发工具 psec-run 各自注册 Ctrl+C handler，防止控制台广播先终止等待宿主并触发 job 回收。该 handler 处理当前宿主的通知，子进程沿用自己的处理器。[控制台模式](https://learn.microsoft.com/en-us/windows/console/setconsolemode) · [控制事件处理](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
 
