@@ -26,7 +26,7 @@ Save-TestOutput $result $report 'screen'
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
     throw "Nested terminal rendering/state test failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
-Write-Output 'TERMINAL-SCREEN-PASS: rendered Unicode, cursor movement, native mouse events and restored console state'
+Write-Output 'TERMINAL-SCREEN-PASS: standalone Escape, Unicode, cursor movement, native mouse events and restored console state'
 
 $missing = Join-Path $state 'missing-program.exe'
 $info = New-TestProcessInfo $probe @('--drive-terminal',$probe,'--outer-failure',
@@ -37,6 +37,15 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
     throw "Terminal state did not recover from launch failure`n$($result.Output)`n$($result.Error)"
 }
 Write-Output 'TERMINAL-FAILURE-PASS: outer console state restored after target launch failed'
+
+$info = New-TestProcessInfo $probe @('--drive-close',$launcher,$policy,$compat,'--conpty',
+    $probe,'--close-target') $state
+$result = Invoke-TestProcess $info 35000
+Save-TestOutput $result $report 'outer-close'
+if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-CLOSE-PASS')) {
+    throw "Closing the outer ConPTY left test processes running`n$($result.Output)`n$($result.Error)"
+}
+Write-Output 'TERMINAL-CLOSE-PASS: closing the outer ConPTY releases the launcher, target and descendant'
 
 # Exercise the demo entry with its default Bash arguments and the selected build.
 $pwsh = (Get-Command pwsh).Source

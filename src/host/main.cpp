@@ -9,9 +9,17 @@ namespace fs = std::filesystem;
 
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 
+static bool has_console_stdio() {
+    DWORD mode = 0;
+    return GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) &&
+           GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) &&
+           GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode);
+}
+
 int wmain(int argc, wchar_t **argv) try {
     bool trace = false;
-    bool conpty = false;
+    bool force_conpty = false;
+    bool disable_conpty = false;
     bool fixed_terminal_size = false;
     bool native_relay = false;
     std::wstring input_script;
@@ -26,10 +34,13 @@ int wmain(int argc, wchar_t **argv) try {
             native_relay = true;
             ++first;
         } else if (option == L"--conpty") {
-            conpty = true;
+            force_conpty = true;
+            ++first;
+        } else if (option == L"--no-conpty") {
+            disable_conpty = true;
             ++first;
         } else if (option == L"--conpty-script" && first + 1 < argc) {
-            conpty = true;
+            force_conpty = true;
             input_script = argv[first + 1];
             first += 2;
         } else if (option == L"--conpty-size" && first + 1 < argc) {
@@ -50,9 +61,15 @@ int wmain(int argc, wchar_t **argv) try {
     if (first == argc) {
         fprintf(stderr, "Usage (inside a restricted context): msys-sandbox-compat [--trace] "
                         "[--native-relay] [--runtime DLL] PROGRAM "
-                        "[arguments...]\n");
+                        "[arguments...]\n"
+                        "Terminal options (before PROGRAM): "
+                        "[--conpty | --no-conpty | --conpty-script FILE] "
+                        "[--conpty-size WIDTHxHEIGHT]\n");
         return 2;
     }
+    if (force_conpty && disable_conpty)
+        throw std::runtime_error("--no-conpty conflicts with --conpty or --conpty-script");
+    const bool conpty = force_conpty || (!disable_conpty && has_console_stdio());
     check(SetConsoleCtrlHandler(wait_control, TRUE), "register waiting-host Ctrl+C handler");
     auto executable = fs::absolute(argv[first]);
     std::unique_ptr<AgentState> state;
@@ -71,22 +88,29 @@ int wmain(int argc, wchar_t **argv) try {
         state->api = resolve_api();
         session_tag = require_restricted_context();
     }
-    Pseudoconsole pty;
-    std::vector<BYTE> attribute_buffer;
-    if (conpty)
-        pty.create(input_script, terminal_size, !fixed_terminal_size);
-    HANDLE job = CreateJobObjectW(nullptr, nullptr);
+    using Handle = std::unique_ptr<void, decltype(&CloseHandle)>;
+    Handle job(CreateJobObjectW(nullptr, nullptr), CloseHandle);
     check(job != nullptr, "create process-tree job");
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    check(SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)),
+    check(SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)),
           "configure job");
-    HANDLE completion = CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1);
+    Handle completion(CreateIoCompletionPort(INVALID_HANDLE_VALUE, nullptr, 0, 1), CloseHandle);
     check(completion != nullptr, "create job completion port");
-    JOBOBJECT_ASSOCIATE_COMPLETION_PORT association{job, completion};
-    check(SetInformationJobObject(job, JobObjectAssociateCompletionPortInformation, &association,
+    JOBOBJECT_ASSOCIATE_COMPLETION_PORT association{job.get(), completion.get()};
+    check(SetInformationJobObject(job.get(), JobObjectAssociateCompletionPortInformation, &association,
                                   sizeof(association)),
           "associate job completion");
+    Pseudoconsole pty;
+    std::vector<BYTE> attribute_buffer;
+    if (conpty)
+        pty.create(completion.get(), input_script, terminal_size, !fixed_terminal_size);
+    auto check_conpty_output = [&] {
+        if (const auto error = pty.output_error()) {
+            SetLastError(error);
+            check(false, "forward ConPTY output");
+        }
+    };
     auto command = quote(executable.wstring());
     for (int index = first + 1; index < argc; ++index)
         command += L" " + quote(argv[index]);
@@ -99,7 +123,7 @@ int wmain(int argc, wchar_t **argv) try {
         check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
               "locate console session host");
         executable = own_path;
-        auto session_command = quote(executable.wstring());
+        auto session_command = quote(executable.wstring()) + L" --no-conpty";
         if (native_relay)
             session_command += L" --native-relay";
         if (trace)
@@ -140,7 +164,7 @@ int wmain(int argc, wchar_t **argv) try {
         pty.connected();
     }
     try {
-        check(AssignProcessToJobObject(job, child.hProcess), "assign tree job");
+        check(AssignProcessToJobObject(job.get(), child.hProcess), "assign tree job");
         if (inherited) {
             fprintf(stderr, "[launcher] pid=%lu prepared-by=inherited-relay\n", child.dwProcessId);
         } else {
@@ -184,23 +208,25 @@ int wmain(int argc, wchar_t **argv) try {
         ULONG_PTR key = 0;
         LPOVERLAPPED overlapped = nullptr;
         do {
-            check(GetQueuedCompletionStatus(completion, &message, &key, &overlapped, INFINITE),
+            check(GetQueuedCompletionStatus(completion.get(), &message, &key, &overlapped, INFINITE),
                   "wait process tree");
-        } while (message != JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO);
+            if (key == Pseudoconsole::output_failure_key)
+                check_conpty_output();
+        } while (key != reinterpret_cast<ULONG_PTR>(job.get()) ||
+                 message != JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO);
         DWORD result = 1;
         check(GetExitCodeProcess(child.hProcess, &result), "root exit code");
+        pty.close();
+        check_conpty_output();
         fprintf(stderr, "[summary] exit=%lu\n", result);
         CloseHandle(child.hProcess);
-        CloseHandle(completion);
-        CloseHandle(job);
         return static_cast<int>(result);
     } catch (...) {
         ::TerminateProcess(child.hProcess, 1);
-        CloseHandle(job);
+        job.reset();
         if (child.hThread)
             CloseHandle(child.hThread);
         CloseHandle(child.hProcess);
-        CloseHandle(completion);
         throw;
     }
 } catch (const std::exception &error) {

@@ -97,6 +97,15 @@ static int screen_probe() {
     while (!InterlockedCompareExchange(&interrupted, 0, 0) && GetTickCount64() < deadline)
         Sleep(10);
     check(InterlockedCompareExchange(&interrupted, 0, 0) != 0, "target received Ctrl+C");
+    constexpr char escape_ready[] = "ESCAPE-READY\r\n";
+    check(WriteFile(output, escape_ready, sizeof(escape_ready) - 1, &count, nullptr),
+          "report Escape readiness");
+    INPUT_RECORD key{};
+    do {
+        check(ReadConsoleInputW(GetStdHandle(STD_INPUT_HANDLE), &key, 1, &count) && count == 1,
+              "read standalone Escape");
+    } while (key.EventType != KEY_EVENT || !key.Event.KeyEvent.bKeyDown);
+    check(key.Event.KeyEvent.wVirtualKeyCode == VK_ESCAPE, "target received standalone Escape");
     constexpr wchar_t text[] = L"SCREEN-中文-é-Ａ\r\n";
     check(WriteConsoleW(output, text, _countof(text) - 1, &count, nullptr), "write Unicode screen");
     DWORD mode = 0;
@@ -110,6 +119,21 @@ static int screen_probe() {
 }
 
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
+
+static int close_target(const wchar_t *executable) {
+    auto command = msys_sandbox_compat::quote(executable) + L" --close-leaf";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION child{};
+    check(CreateProcessW(executable, command.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr,
+                         &startup, &child), "start close-test descendant");
+    CloseHandle(child.hThread);
+    printf("CLOSE-TREE=%lu,%lu\n", GetCurrentProcessId(), child.dwProcessId);
+    fflush(stdout);
+    WaitForSingleObject(child.hProcess, 30000);
+    CloseHandle(child.hProcess);
+    return 2;
+}
 
 static int outer_state(int argc, wchar_t **argv, bool failure) {
     check(argc >= 3, "outer-state target");
@@ -186,11 +210,12 @@ static int probe(bool fixed_size) {
 }
 
 static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
+    const bool disconnect = mode == L"--drive-close";
     const bool bash = mode == L"--drive-bash";
     const bool powershell = mode == L"--drive-powershell";
     const bool readline = mode == L"--drive-readline";
     const bool terminal = mode == L"--drive-terminal" || bash || powershell || readline;
-    const bool resize = mode != L"--drive-stdio" && !terminal;
+    const bool resize = mode != L"--drive-stdio" && !terminal && !disconnect;
     const bool fixed_size = mode == L"--drive-fixed";
     const char *completion_marker = terminal ? "OUTER-STATE-PASS"
                                     : resize ? "VIEWPORT-FINAL="
@@ -241,6 +266,7 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
     const auto deadline = GetTickCount64() + 25000;
     bool resize_sent = false;
     bool control_sent = false;
+    bool escape_sent = false;
     bool mouse_sent = false;
     bool initialized = false, edit_sent = false, wait_sent = false, exit_sent = false;
     std::string transcript;
@@ -267,6 +293,29 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
             transcript.append(buffer, count);
             fwrite(buffer, 1, count, stdout);
         }
+        if (disconnect) {
+            const auto marker = transcript.find("CLOSE-TREE=");
+            if (marker != std::string::npos && transcript.find('\n', marker) != std::string::npos) {
+                unsigned root_pid = 0, leaf_pid = 0;
+                check(sscanf_s(transcript.c_str() + marker, "CLOSE-TREE=%u,%u", &root_pid,
+                               &leaf_pid) == 2, "parse test process IDs");
+                Handle root(OpenProcess(SYNCHRONIZE, FALSE, root_pid), CloseHandle);
+                Handle leaf(OpenProcess(SYNCHRONIZE, FALSE, leaf_pid), CloseHandle);
+                check(root && leaf && WaitForSingleObject(root.get(), 0) == WAIT_TIMEOUT &&
+                          WaitForSingleObject(leaf.get(), 0) == WAIT_TIMEOUT,
+                      "test process tree still active");
+                receive.reset();
+                outer.reset();
+                send.reset();
+                const HANDLE watched[] = {process.get(), root.get(), leaf.get()};
+                const auto waited = WaitForMultipleObjects(_countof(watched), watched, TRUE, 8000);
+                if (waited != WAIT_OBJECT_0)
+                    TerminateProcess(process.get(), 1);
+                check(waited == WAIT_OBJECT_0, "outer close released the test process tree");
+                puts("OUTER-CLOSE-PASS");
+                return 0;
+            }
+        }
         if (resize && !resize_sent && transcript.find("VIEWPORT-READY=") != std::string::npos) {
             check(SUCCEEDED(ResizePseudoConsole(console, resized)), "resize outer pseudo console");
             resize_sent = true;
@@ -283,6 +332,11 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
                       count == sizeof(ctrl_c) - 1,
                   "send Ctrl+C to the outer terminal");
             control_sent = true;
+        }
+        if (!escape_sent && transcript.find("ESCAPE-READY") != std::string::npos) {
+            // The probe waits for this key before the driver sends any further input.
+            send_text("\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_");
+            escape_sent = true;
         }
         if (bash && !initialized && transcript.find("bash-") != std::string::npos) {
             check(!mouse_tracking(), "initial Bash prompt enabled all-motion mouse tracking");
@@ -345,6 +399,12 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
 int wmain(int argc, wchar_t **argv) try {
     check(argc >= 2, "select a test mode");
     const std::wstring_view mode(argv[1]);
+    if (mode == L"--close-target")
+        return close_target(argv[0]);
+    if (mode == L"--close-leaf") {
+        Sleep(30000);
+        return 3;
+    }
     if (mode == L"--screen-probe")
         return screen_probe();
     if (mode == L"--outer-state" || mode == L"--outer-failure")
@@ -354,7 +414,8 @@ int wmain(int argc, wchar_t **argv) try {
     check(argc >= 3 &&
               (mode == L"--drive" || mode == L"--drive-fixed" || mode == L"--drive-stdio" ||
                mode == L"--drive-terminal" || mode == L"--drive-bash" ||
-               mode == L"--drive-powershell" || mode == L"--drive-readline"),
+               mode == L"--drive-powershell" || mode == L"--drive-readline" ||
+               mode == L"--drive-close"),
           "select a driver mode");
     return drive(argc, argv, mode);
 } catch (const std::exception &error) {

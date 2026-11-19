@@ -38,7 +38,7 @@
 | `process-chain.ps1 -Environment WriteRestricted/FullRestricted` | 两种非 AppContainer 令牌下复用完整链路；记录无兼容基线，保持普通 MSYS 会话并存，验证实际受限令牌及文件写入/WRITE_DAC 拒绝 |
 | `git-hook.ps1` | 三种隔离模式中运行真实 `git init`、`git add`、`git status`，经 `--native-relay` 触发 MSYS `pre-commit`，并检查成功与拒绝提交、暂存内容和文件权限 |
 | `conpty.ps1` | TTY、120×40 尺寸、UTF-8 往返、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
-| `conpty-resize.ps1` | 外层 ConPTY 调整窗口后，PSEC 内原生探针在没有键盘输入的情况下观察到内层尺寸变化，显式 80×24 会话保持固定 |
+| `conpty-resize.ps1` | 外层 ConPTY 调整窗口后，PSEC 内原生探针在没有键盘输入的情况下观察到尺寸变化。验证自动启用、显式启用的固定尺寸和显式直连 |
 | `terminal-session.ps1` | 非 UTF-8 初始控制台中的嵌套会话，读回实际 Unicode 屏幕和光标移动，验证正常/启动失败后的状态恢复。通过 `run.ps1` 验证 Bash 中文方向键编辑、PATH、尺寸与 Ctrl+C，以及 Windows PowerShell 5.1 中文输入输出和真实 PSReadLine 交互命令的历史保存 |
 | `stdio.ps1` | PSEC 下 1 MiB 二进制 stdio 往返、stdin EOF 与管道读端提前关闭。在控制台中分别重定向 stdout、stderr 到文件，并检验原始字节和未重定向流。检查 ConPTY 根进程退出后的后代输出和根退出码 |
 | `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 Perl 断言（含线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |

@@ -15,6 +15,7 @@
 // Readers drain output independently of input and session teardown.
 class Pseudoconsole {
     std::thread resizer;
+    std::atomic<DWORD> output_error_code{ERROR_SUCCESS};
 
     static COORD viewport_size(HANDLE output) {
         CONSOLE_SCREEN_BUFFER_INFO info{};
@@ -28,6 +29,8 @@ class Pseudoconsole {
     }
 
   public:
+    static constexpr ULONG_PTR output_failure_key = 1;
+
     HPCON handle = nullptr;
     HANDLE input_read = nullptr, input_write = nullptr;
     HANDLE output_read = nullptr, output_write = nullptr;
@@ -41,7 +44,9 @@ class Pseudoconsole {
     HANDLE output_sink = nullptr;
     HANDLE input_source = nullptr;
     bool owns_input = false;
-    void create(const std::wstring &script, COORD dimensions = {100, 30},
+    DWORD output_error() const { return output_error_code.load(); }
+
+    void create(HANDLE completion, const std::wstring &script, COORD dimensions = {100, 30},
                 bool follow_viewport = false) {
         input_source = GetStdHandle(STD_INPUT_HANDLE);
         const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -88,12 +93,17 @@ class Pseudoconsole {
             fprintf(stderr, "CreatePseudoConsole HRESULT=%08lx\n", static_cast<ULONG>(result));
             throw std::runtime_error("CreatePseudoConsole");
         }
-        reader = std::thread([this] {
+        reader = std::thread([this, completion] {
             char buffer[8192];
             DWORD count = 0;
+            bool forwarding = true;
             while (ReadFile(output_read, buffer, sizeof(buffer), &count, nullptr) && count) {
-                if (!msys_sandbox_compat::write_all(GetStdHandle(STD_OUTPUT_HANDLE), buffer, count))
-                    break;
+                if (forwarding && !msys_sandbox_compat::write_all(output_sink, buffer, count)) {
+                    output_error_code = GetLastError();
+                    PostQueuedCompletionStatus(completion, 0, output_failure_key, nullptr);
+                    // Keep draining while the session host tears down the job and ConPTY.
+                    forwarding = false;
+                }
             }
         });
         writer = std::thread([this] {
@@ -116,6 +126,8 @@ class Pseudoconsole {
             if (!stopping && !tail.empty())
                 msys_sandbox_compat::write_all(input_write, tail.data(),
                                                static_cast<DWORD>(tail.size()));
+            // Source EOF ends this pump. Closing the VT input pipe requests
+            // console shutdown while attached clients may still be running.
         });
         if (viewport.X) {
             // Sample independently of VT reads so an idle terminal still resizes.
@@ -143,8 +155,9 @@ class Pseudoconsole {
             output_write = nullptr;
         }
     }
-    ~Pseudoconsole() {
-        stopping = true;
+    void close() {
+        if (stopping.exchange(true))
+            return;
         if (resizer.joinable())
             resizer.join();
         if (writer.joinable()) {
@@ -173,4 +186,6 @@ class Pseudoconsole {
         if (output_read)
             CloseHandle(output_read);
     }
+
+    ~Pseudoconsole() { close(); }
 };

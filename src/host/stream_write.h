@@ -7,8 +7,12 @@ inline bool write_all(HANDLE output, const char *buffer, DWORD count,
                       decltype(&::WriteFile) write = ::WriteFile) {
     while (count != 0) {
         DWORD written = 0;
-        if (!write(output, buffer, count, &written, nullptr) || written == 0)
+        if (!write(output, buffer, count, &written, nullptr))
             return false;
+        if (written == 0) {
+            SetLastError(ERROR_WRITE_FAULT);
+            return false;
+        }
         buffer += written;
         count -= written;
     }

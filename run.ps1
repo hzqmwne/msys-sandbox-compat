@@ -8,11 +8,13 @@ param(
     [switch]$NativeRelay,
     [switch]$ConPty,
     [string]$ConPtyScript = '',
-    [string]$TerminalSize
+    [string]$TerminalSize,
+    [switch]$NoConPty
 )
 $ErrorActionPreference = 'Stop'
 $BinaryDirectory = [IO.Path]::GetFullPath($BinaryDirectory)
 if ($Raw -and $NativeRelay) { throw '-NativeRelay requires the compatibility launcher' }
+if ($NoConPty -and ($ConPty -or $ConPtyScript)) { throw '-NoConPty conflicts with -ConPty or -ConPtyScript' }
 $defaultProgram = !$Program
 if ($defaultProgram) { $Program = Join-Path $GitRoot 'usr\bin\bash.exe' }
 if (($ConPty -or $ConPtyScript) -and !$PSBoundParameters.ContainsKey('CommandArguments')) {
@@ -39,10 +41,10 @@ $policy = @{ filesystem = @{
     readwritePaths = @($PSScriptRoot)
     deniedPaths = @((Join-Path $PSScriptRoot 'tests\fixtures\denied.txt'))
 } }
-$policyPath = Join-Path $state 'policy.json'
-$policy | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policyPath
+$policyPath = Join-Path $state ('policy-' + [Guid]::NewGuid().ToString('N') + '.json')
 $previousTemp=$env:TEMP; $previousTmp=$env:TMP; $previousHome=$env:HOME
 try {
+    $policy | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policyPath
     $env:TEMP=Join-Path $state 'tmp'; $env:TMP=$env:TEMP; $env:HOME=Join-Path $state 'home'
     $launchArgs=@($policyPath)
     if (!$Raw) {
@@ -52,7 +54,8 @@ try {
         if ($Trace) { $launchArgs += '--trace' }
         if ($ConPtyScript) { $launchArgs += @('--conpty-script',[IO.Path]::GetFullPath($ConPtyScript)) }
         elseif ($ConPty) { $launchArgs += '--conpty' }
-        if (($ConPty -or $ConPtyScript) -and $PSBoundParameters.ContainsKey('TerminalSize')) {
+        elseif ($NoConPty) { $launchArgs += '--no-conpty' }
+        if ($PSBoundParameters.ContainsKey('TerminalSize')) {
             $launchArgs += @('--conpty-size',$TerminalSize)
         }
     }
@@ -60,5 +63,8 @@ try {
     $launchArgs += $CommandArguments
     & (Join-Path (Split-Path $BinaryDirectory -Parent) 'tools/psec-run.exe') @launchArgs
     $result=$LASTEXITCODE
-} finally { $env:TEMP=$previousTemp; $env:TMP=$previousTmp; $env:HOME=$previousHome }
+} finally {
+    $env:TEMP=$previousTemp; $env:TMP=$previousTmp; $env:HOME=$previousHome
+    Remove-Item -LiteralPath $policyPath -ErrorAction SilentlyContinue
+}
 exit $result

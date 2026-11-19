@@ -20,13 +20,14 @@ $policy = Join-Path $state 'policy.json'
 $launcher = Get-PsecLauncher $binaries
 $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
 $probe = Join-Path $fixtures 'conpty-resize-probe.exe'
-foreach ($mode in @('adaptive', 'fixed')) {
-    $fixedSize = $mode -eq 'fixed'
+foreach ($mode in 'adaptive', 'fixed', 'auto-fixed', 'disabled') {
+    $fixedSize = $mode -in 'fixed', 'auto-fixed'
     $driverMode = if ($fixedSize) { '--drive-fixed' } else { '--drive' }
-    $processArgs = @($driverMode, $launcher, $policy, $compat, '--conpty')
-    $processArgs += if ($fixedSize) { @('--conpty-size', '80x24', $probe, '--probe-fixed') } else {
-        @($probe, '--probe')
-    }
+    $processArgs = @($driverMode, $launcher, $policy, $compat)
+    if ($mode -in 'adaptive', 'fixed') { $processArgs += '--conpty' }
+    if ($mode -eq 'disabled') { $processArgs += '--no-conpty' }
+    if ($mode -ne 'adaptive') { $processArgs += @('--conpty-size', '80x24') }
+    $processArgs += @($probe, $(if ($fixedSize) { '--probe-fixed' } else { '--probe' }))
     $info = New-TestProcessInfo $probe $processArgs $state
     $result = Invoke-TestProcess $info 30000
     Save-TestOutput $result $report $mode

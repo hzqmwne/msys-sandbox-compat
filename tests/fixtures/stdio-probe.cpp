@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <cstdio>
 #include <cwchar>
+#include <cstring>
 #include <fcntl.h>
 #include <io.h>
 #include <string_view>
@@ -66,6 +67,35 @@ static int write_until_pipe_closes() {
     return 11;
 }
 
+static bool read_console_input_byte() {
+    const auto input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0, count = 0;
+    char byte = 0;
+    return GetConsoleMode(input, &mode) &&
+           SetConsoleMode(input, mode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT)) &&
+           ReadFile(input, &byte, 1, &count, nullptr) && count == 1 && byte == 'A';
+}
+
+static int write_console_burst() {
+    puts("CONPTY-PIPE-READY");
+    if (fflush(stdout) || !read_console_input_byte())
+        return 15;
+
+    char buffer[4096];
+    memset(buffer, 'x', sizeof(buffer));
+    for (size_t i = 63; i < sizeof(buffer); i += 64)
+        buffer[i] = '\n';
+    const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
+    for (int i = 0; i < 400; ++i) {
+        DWORD count = 0;
+        buffer[0] = static_cast<char>('A' + i % 26);
+        if (!WriteFile(output, buffer, sizeof(buffer), &count, nullptr) || count != sizeof(buffer))
+            return 16;
+    }
+    puts("CONPTY-BURST-COMPLETE");
+    return 37;
+}
+
 static int mixed_stdio(bool redirect_stdout) {
     HANDLE redirected = GetStdHandle(redirect_stdout ? STD_OUTPUT_HANDLE : STD_ERROR_HANDLE);
     HANDLE console = GetStdHandle(redirect_stdout ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
@@ -85,6 +115,20 @@ static int mixed_stdio(bool redirect_stdout) {
     return 37;
 }
 
+static int redirected_input() {
+    const auto input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0, count = 0;
+    char data[2]{};
+    if (GetFileType(input) != FILE_TYPE_DISK ||
+        !GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) ||
+        !GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) ||
+        !ReadFile(input, data, sizeof(data), &count, nullptr) || count != 1 || data[0] != 'A' ||
+        !ReadFile(input, data, sizeof(data), &count, nullptr) || count != 0)
+        return 18;
+    puts("STDIO-CONSOLE");
+    return 37;
+}
+
 int wmain(int argc, wchar_t **argv) {
     if (argc < 2)
         return 7;
@@ -95,8 +139,18 @@ int wmain(int argc, wchar_t **argv) {
         return start_descendant();
     if (mode == L"--pipe-close")
         return write_until_pipe_closes();
+    if (mode == L"--conpty-burst")
+        return write_console_burst();
+    if (mode == L"--conpty-read-one") {
+        if (!read_console_input_byte())
+            return 17;
+        puts("CONPTY-INPUT-COMPLETE");
+        return 37;
+    }
     if (mode == L"--mixed-stdout" || mode == L"--mixed-stderr")
         return mixed_stdio(mode == L"--mixed-stdout");
+    if (mode == L"--mixed-stdin")
+        return redirected_input();
     if (mode == L"--after-parent" && argc == 3) {
         const auto parent = reinterpret_cast<HANDLE>(std::wcstoull(argv[2], nullptr, 10));
         const auto waited = WaitForSingleObject(parent, 10000);

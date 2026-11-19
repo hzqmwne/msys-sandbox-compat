@@ -80,8 +80,72 @@ try {
 }
 Write-Output 'STDIO-PIPE-CLOSE-PASS: producer saw ERROR_BROKEN_PIPE and returned exit=37'
 
+$info = New-TestProcessInfo $launcher @($policy, $compat, '--conpty', $probe, '--conpty-burst') $state
+$info.RedirectStandardInput = $true
+foreach ($sink in 'drain', 'close') {
+    $process = [Diagnostics.Process]::Start($info)
+    try {
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $ready = $process.StandardOutput.ReadLineAsync()
+            $remaining = [int][Math]::Max(0, ($deadline - [DateTime]::UtcNow).TotalMilliseconds)
+            if (!$ready.Wait($remaining) -or $null -eq ($line = $ready.GetAwaiter().GetResult())) {
+                throw 'ConPTY producer did not report readiness'
+            }
+        } until ($line.Contains('CONPTY-PIPE-READY'))
+        if ($sink -eq 'close') {
+            $process.StandardOutput.Close()
+        } else {
+            $stdout = $process.StandardOutput.ReadToEndAsync()
+        }
+        $process.StandardInput.BaseStream.WriteByte(65)
+        $process.StandardInput.Close()
+        if (!$process.WaitForExit(10000) -or !$stderr.Wait(5000)) {
+            throw "ConPTY producer did not exit with downstream set to $sink"
+        }
+        $errorText = $stderr.GetAwaiter().GetResult()
+        [IO.File]::WriteAllText((Join-Path $report "conpty-output-$sink.stderr.txt"), $errorText)
+        if ($sink -eq 'close') {
+            if ($process.ExitCode -ne 1 -or !$errorText.Contains('[fatal] forward ConPTY output')) {
+                throw "Expected ConPTY output failure (exit $($process.ExitCode))`n$errorText"
+            }
+        } elseif ($process.ExitCode -ne 37 -or !$stdout.Wait(5000) -or
+                  !$stdout.GetAwaiter().GetResult().Contains('CONPTY-BURST-COMPLETE')) {
+            throw "ConPTY output drain control failed (exit $($process.ExitCode))`n$errorText"
+        }
+    } finally {
+        if (!$process.HasExited) { $process.Kill($true) }
+        $process.Dispose()
+    }
+}
+Write-Output 'CONPTY-PIPE-CLOSE-PASS: full drain preserves target exit, closed downstream ends the session'
+
+$inputScript = Join-Path $state 'conpty-input.txt'
+[IO.File]::WriteAllText($inputScript, 'A')
+$info = New-TestProcessInfo $launcher @($policy, $compat, '--conpty-script', $inputScript,
+    $probe, '--conpty-read-one') $state
+$result = Invoke-TestProcess $info 30000
+Save-TestOutput $result $report 'conpty-script'
+if ($result.ExitCode -ne 37 -or !$result.Output.Contains('CONPTY-INPUT-COMPLETE')) {
+    throw "ConPTY script input did not let the target finish (exit $($result.ExitCode))`n$($result.Error)"
+}
+Write-Output 'CONPTY-SCRIPT-PASS: target consumes finite input and returns its exit code'
+
 $outer = Join-Path $fixtures 'conpty-resize-probe.exe'
 $cmd = Join-Path $env:SystemRoot 'System32/cmd.exe'
+$entry = Join-Path $state 'mixed-stdin.cmd'
+$command = (@($launcher,$policy,$compat,$probe,'--mixed-stdin').ForEach({ '"' + $_.Replace('%','%%') + '"' }) -join ' ')
+Set-Content -LiteralPath $entry -Encoding oem -Value @('@echo off', 'setlocal DisableDelayedExpansion',
+    ('{0} <"{1}"' -f $command,$inputScript.Replace('%','%%')), 'exit /b %errorlevel%')
+$info = New-TestProcessInfo $outer @('--drive-stdio',$cmd,'/d','/c',$entry) $state
+$result = Invoke-TestProcess $info 30000
+Save-TestOutput $result $report 'mixed-stdin'
+if ($result.ExitCode -ne 37 -or !$result.Output.Contains('STDIO-CONSOLE')) {
+    throw "Auto mode did not preserve redirected stdin and its EOF (exit $($result.ExitCode))`n$($result.Output)"
+}
+Write-Output 'STDIO-MIXED-PASS: stdin file reached EOF, stdout and stderr stayed attached to the console'
+
 $expected = [Text.Encoding]::Latin1.GetString([byte[]](83,84,68,73,79,0,255,13,10))
 foreach ($stream in 'stdout', 'stderr') {
     $entry = Join-Path $state "mixed-$stream.cmd"

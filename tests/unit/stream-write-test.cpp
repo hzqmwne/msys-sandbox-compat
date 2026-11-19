@@ -48,8 +48,8 @@ int main() {
     const bool complete = check("complete write", 5, {{5, TRUE}}, true, 5);
     const bool partial =
         check("consecutive short writes", 5, {{2, TRUE}, {1, TRUE}, {2, TRUE}}, true, 5);
-    const bool stalled =
-        check("zero progress after short write", 5, {{2, TRUE}, {0, TRUE}}, false, 2);
+    const bool stalled = check("zero progress after short write", 5, {{2, TRUE}, {0, TRUE}}, false, 2) &&
+                         GetLastError() == ERROR_WRITE_FAULT;
     const bool failed = check("failure after short write", 5, {{2, TRUE}, {0, FALSE}}, false, 2);
     const bool empty = check("empty buffer", 0, {}, true, 0);
     return complete && partial && stalled && failed && empty ? 0 : 1;
