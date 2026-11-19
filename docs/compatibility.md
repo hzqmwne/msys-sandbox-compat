@@ -43,6 +43,14 @@ relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，
 
 测试策略保留安装目录只读和 canary 拒绝边界。项目不创建普通非隔离回退路径，也不通过改写安装目录 ACL 来解决 IPC 授权问题。识别范围与沙箱策略是不同职责；命中 MSYS 不会自动取得额外文件写权限。
 
+## PSEC 下的磁盘文件重定向
+
+在受测的 Git for Windows MSYS 3.6.10 中，Bash 经 Windows 原生启动链接收磁盘文件作为 stdout 或 stderr 时，会在脚本执行前崩溃。文件在 PSEC 内外打开均可复现。
+
+MSYS 从继承的 Windows 标准句柄重建描述符时，会对磁盘文件调用 `QueryDosDeviceW(NULL, …)`，把 NT 设备路径映射到盘符。管道和 Windows `NUL` 走专用识别分支，直接启动的 MSYS 子进程沿用父进程的描述符状态，这些路径都跳过这次枚举。
+
+该枚举在受测 PSEC 中返回 `ERROR_ACCESS_DENIED`。Bash 为 stdout 和 stderr 设置行缓冲时会触发 `fstat`，MSYS 随后在 inode 回退中解引用空路径指针。继承的文件 stdin 也会遇到枚举失败，直接读取成功，显式执行 `fstat` 则复现崩溃。
+
 ## MSYS 运行时的共享映像节
 
 Git for Windows 的 MSYS 3.6.10 在 `.cygwin_` 可写共享映像节中保存 `wincap.caps`，其值是进程内的绝对指针。原生 PSEC 对照中，同一份 DLL 的两个实例在不同基址运行时，后启动的实例可能在 `DLL_PROCESS_ATTACH` 读取前一实例的地址并异常退出。保持未对齐实例存活时，共用同一文件的目标成功 0/4，使用字节相同的独立文件则成功 4/4。`BaseNamedObjects` 的隔离作用于有名称的 IPC 对象，映像节的这组共享数据随 DLL 文件映射。
