@@ -18,47 +18,55 @@ struct ReserveRange {
     SIZE_T size;
 };
 
-struct CreateInput {
-    SIZE_T bytes;
-    CreateAttribute entries[65]; // Room for 64 caller attributes and the appended range.
-    wchar_t path[image_path_chars];
-    ReserveRange range;
-};
+constexpr size_t reservation_tail =
+    sizeof(CreateAttribute) + sizeof(ReserveRange) + image_path_chars * sizeof(wchar_t);
+
+SIZE_T create_attribute_bytes(const NativeApi &api, const void *attributes) {
+    SIZE_T bytes = 0, received = 0;
+    if (!attributes ||
+        api.read(current_process(), attributes, &bytes, sizeof(bytes), &received) < 0 ||
+        received != sizeof(bytes) || bytes < sizeof(bytes) + sizeof(CreateAttribute) ||
+        (bytes - sizeof(bytes)) % sizeof(CreateAttribute) || bytes > SIZE_MAX - reservation_tail)
+        return 0;
+    return bytes;
+}
 } // namespace
 
 HeapReservation::HeapReservation(const NativeApi &api, void *attributes)
-    : storage_(api, attributes ? sizeof(CreateInput) : 0), attributes_(attributes) {
-    auto input = storage_.as<CreateInput>();
+    : HeapReservation(api, attributes, create_attribute_bytes(api, attributes)) {}
+
+HeapReservation::HeapReservation(const NativeApi &api, void *attributes, SIZE_T bytes)
+    : storage_(api, bytes ? bytes + reservation_tail : 0), attributes_(attributes) {
+    auto input = storage_.as<BYTE>();
     if (!input)
         return;
-    SIZE_T bytes = 0, read = 0;
-    if (api.read(current_process(), attributes, &bytes, sizeof(bytes), &read) < 0 ||
-        read != sizeof(bytes) || bytes < sizeof(bytes) + sizeof(CreateAttribute) ||
-        bytes > offsetof(CreateInput, path) - sizeof(CreateAttribute) ||
-        (bytes - sizeof(bytes)) % sizeof(CreateAttribute))
-        return;
+    auto total = reinterpret_cast<SIZE_T *>(input);
+    SIZE_T read = 0;
     if (api.read(current_process(), attributes, input, bytes, &read) < 0 || read != bytes ||
-        input->bytes != bytes)
+        *total != bytes)
         return;
     const auto count = (bytes - sizeof(bytes)) / sizeof(CreateAttribute);
+    auto entries = reinterpret_cast<CreateAttribute *>(input + sizeof(bytes));
     const CreateAttribute *image = nullptr;
     for (size_t index = 0; index < count; ++index) {
-        const auto &entry = input->entries[index];
+        const auto &entry = entries[index];
         if (entry.type == process_memory_reserve)
             return; // Preserve a reservation already supplied by the caller.
         if (entry.type == process_image_name)
             image = &entry;
     }
-    if (!image || !image->size || image->size >= sizeof(input->path) ||
+    auto range = reinterpret_cast<ReserveRange *>(entries + count + 1);
+    auto path = reinterpret_cast<wchar_t *>(range + 1);
+    if (!image || !image->size || image->size >= image_path_chars * sizeof(wchar_t) ||
         image->size % sizeof(wchar_t) ||
-        api.read(current_process(), image->value, input->path, image->size, &read) < 0 ||
+        api.read(current_process(), image->value, path, image->size, &read) < 0 ||
         read != image->size ||
-        !imports_msys(api, input->path, image->size / sizeof(wchar_t)))
+        !imports_msys(api, path, image->size / sizeof(wchar_t)))
         return;
 
-    input->range = {reinterpret_cast<void *>(msys_heap_base), msys_heap_extent};
-    input->entries[count] = {process_memory_reserve, sizeof(input->range), &input->range, nullptr};
-    input->bytes += sizeof(CreateAttribute);
+    *range = {reinterpret_cast<void *>(msys_heap_base), msys_heap_extent};
+    entries[count] = {process_memory_reserve, sizeof(*range), range, nullptr};
+    *total += sizeof(CreateAttribute);
     attributes_ = input;
 }
 

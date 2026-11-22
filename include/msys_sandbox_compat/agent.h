@@ -26,9 +26,9 @@ constexpr uint32_t msys_modules = bit(Module::propagation) | bit(Module::heap_wi
                                   bit(Module::token_dacl);
 constexpr uint32_t acl_modules = bit(Module::ipc) | bit(Module::process_dacl) | bit(Module::token_dacl);
 
-// AMD64 MSYS lays out cygheap at 32 GiB, userheap from 40 GiB, and mmap from
-// 64 GiB. Keep that address window clear only through kernel process creation.
-constexpr uintptr_t msys_heap_base = 0x800000000ULL;
+// AMD64 MSYS uses the range below mmap for runtime stacks, cygheap and userheap.
+// Keep that address window clear only through kernel process creation.
+constexpr uintptr_t msys_heap_base = 0x600000000ULL;
 constexpr size_t msys_heap_extent = 0x1000000000ULL - msys_heap_base;
 
 class HeapReservation {
@@ -37,6 +37,7 @@ class HeapReservation {
     void *attributes() const { return attributes_; }
 
   private:
+    HeapReservation(const NativeApi &api, void *attributes, SIZE_T bytes);
     NativeBuffer storage_;
     void *attributes_;
 };

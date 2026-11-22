@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <string>
 
 using namespace msys_sandbox_compat;
 namespace {
@@ -22,8 +23,50 @@ NativeApi native_api() {
     RESOLVE(protect, "NtProtectVirtualMemory");
     RESOLVE(query_memory, "NtQueryVirtualMemory");
     RESOLVE(flush_code, "NtFlushInstructionCache");
+    RESOLVE(open_file, "NtOpenFile");
+    RESOLVE(create_section, "NtCreateSection");
+    RESOLVE(map_section, "NtMapViewOfSection");
+    RESOLVE(unmap_section, "NtUnmapViewOfSection");
+    RESOLVE(close, "NtClose");
 #undef RESOLVE
     return api;
+}
+
+void creation_attributes(PCWSTR image) {
+    constexpr ULONG_PTR image_name = 0x20005, memory_reserve = 0x20007;
+    struct Attribute {
+        ULONG_PTR type;
+        SIZE_T size;
+        const void *value;
+        SIZE_T *returned;
+    };
+    struct {
+        SIZE_T bytes;
+        Attribute entries[70];
+    } input{};
+    auto path = std::wstring(L"\\??\\") + image;
+    for (auto &c : path)
+        if (c == L'/')
+            c = L'\\';
+    input.bytes = sizeof(input);
+    input.entries[69] = {image_name, path.size() * sizeof(wchar_t), path.c_str(), nullptr};
+    const auto api = native_api();
+    HeapReservation reservation(api, &input);
+    const auto expanded = static_cast<const decltype(input) *>(reservation.attributes());
+    bool pass = expanded != &input && expanded->bytes == sizeof(input) + sizeof(Attribute) &&
+                !memcmp(expanded->entries, input.entries, sizeof(input.entries));
+    if (pass) {
+        auto tail = reinterpret_cast<const Attribute *>(
+            reinterpret_cast<const BYTE *>(expanded) + sizeof(input));
+        uintptr_t expected[]{msys_heap_base, msys_heap_extent};
+        pass = tail->type == memory_reserve && tail->size == sizeof(expected) &&
+               !tail->returned && !memcmp(tail->value, expected, sizeof(expected));
+    }
+    check(pass, "extend-70-creation-attributes");
+
+    input.entries[0] = {memory_reserve, 0, nullptr, nullptr};
+    HeapReservation existing(api, &input);
+    check(existing.attributes() == &input, "preserve-caller-creation-reservation");
 }
 
 void planner_cases() {
@@ -260,7 +303,10 @@ void installer(bool relay) {
 }
 } // namespace
 
-int main() {
+int wmain(int argc, wchar_t **argv) {
+    if (argc != 2)
+        return 2;
+    creation_attributes(argv[1]);
     planner_cases();
     chained_entries();
     relocated_operations();

@@ -10,7 +10,7 @@ Date: 2026-11-18
 
 ## Decision
 
-已识别的 AMD64 MSYS 映像在创建时暂留 `[0x800000000, 0x1000000000)`。窗口覆盖 32–40 GiB 的 cygheap 和从 40 GiB 到 mmap 地址池下界 64 GiB 的 userheap 起始区间。父进程完成挂起准备后，核对自己追加的 reservation 并以 `MEM_RELEASE` 释放，在初始线程恢复或交还调用者前交回整个区间。调用者自己的预留继续由调用者管理。
+已识别的 AMD64 MSYS 映像在创建时暂留 `[0x600000000, 0x1000000000)`。窗口覆盖 24–32 GiB 的运行时线程栈地址池、32–40 GiB 的 cygheap 和从 40 GiB 到 mmap 地址池下界 64 GiB 的 userheap 起始区间。父进程完成挂起准备后，核对自己追加的 reservation 并以 `MEM_RELEASE` 释放，在初始线程恢复或交还调用者前交回整个区间。调用者自己的预留继续由调用者管理。
 
 两个堆的 reserve 和 commit 均交给原版 MSYS。删除 `NtAllocateVirtualMemory` hook 及记录运行时映射完成的状态。仅在创建后识别到 MSYS 时继续准备映像和对象，兼容层无需再预留地址。
 
