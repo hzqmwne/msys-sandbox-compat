@@ -41,7 +41,8 @@ int wmain(int argc, wchar_t **argv) try {
     bool force_conpty = false;
     bool disable_conpty = false;
     bool fixed_terminal_size = false;
-    bool native_relay = false;
+    bool enable_native_relay = false;
+    bool disable_native_relay = false;
     uint32_t disabled_modules = 0;
     std::wstring input_script;
     COORD terminal_size{100, 30};
@@ -52,7 +53,10 @@ int wmain(int argc, wchar_t **argv) try {
             trace = true;
             ++first;
         } else if (option == L"--native-relay") {
-            native_relay = true;
+            enable_native_relay = true;
+            ++first;
+        } else if (option == L"--no-native-relay") {
+            disable_native_relay = true;
             ++first;
         } else if (option == L"--disable-module") {
             if (first + 1 >= argc)
@@ -86,7 +90,7 @@ int wmain(int argc, wchar_t **argv) try {
     }
     if (first == argc) {
         fprintf(stderr, "Usage: msys-sandbox-compat [--trace] "
-                        "[--native-relay] [--disable-module NAME] [--runtime DLL] PROGRAM "
+                        "[--native-relay | --no-native-relay] [--disable-module NAME] [--runtime DLL] PROGRAM "
                         "[arguments...]\n"
                         "Terminal options (before PROGRAM): "
                         "[--conpty | --no-conpty | --conpty-script FILE] "
@@ -95,8 +99,12 @@ int wmain(int argc, wchar_t **argv) try {
     }
     if (force_conpty && disable_conpty)
         throw std::runtime_error("--no-conpty conflicts with --conpty or --conpty-script");
-    if (native_relay && (disabled_modules & bit(Module::propagation)))
+    if (enable_native_relay && disable_native_relay)
+        throw std::runtime_error("--no-native-relay conflicts with --native-relay");
+    const bool propagation_disabled = (disabled_modules & bit(Module::propagation)) != 0;
+    if (enable_native_relay && propagation_disabled)
         throw std::runtime_error("--native-relay requires the propagation module");
+    bool native_relay = !disable_native_relay && !propagation_disabled;
     const bool conpty = force_conpty || (!disable_conpty && has_console_stdio());
     check(SetConsoleCtrlHandler(wait_control, TRUE), "register waiting-host Ctrl+C handler");
     auto executable = fs::absolute(argv[first]);
@@ -104,6 +112,8 @@ int wmain(int argc, wchar_t **argv) try {
     auto inherited = inherited_agent();
     std::unique_ptr<void, decltype(&CloseHandle)> object_directory(nullptr, CloseHandle);
     if (inherited) {
+        if (disable_native_relay)
+            throw std::runtime_error("--no-native-relay conflicts with inherited relay");
         if (disabled_modules & ~inherited->disabled_modules)
             throw std::runtime_error("module options conflict with inherited relay");
         disabled_modules = inherited->disabled_modules;
@@ -155,8 +165,7 @@ int wmain(int argc, wchar_t **argv) try {
               "locate console session host");
         executable = own_path;
         auto session_command = quote(executable.wstring()) + L" --no-conpty";
-        if (native_relay)
-            session_command += L" --native-relay";
+        session_command += native_relay ? L" --native-relay" : L" --no-native-relay";
         if (trace)
             session_command += L" --trace";
         for (const auto &option : module_options)
@@ -205,10 +214,14 @@ int wmain(int argc, wchar_t **argv) try {
             fprintf(stderr, "[launcher] pid=%lu classification=skipped hooks=0 debugger=none\n",
                     child.dwProcessId);
         } else {
-            bool related = false;
+            bool related = false, wow64 = false;
             ImageRecord image{};
-            check_nt(identify_process(state->api, child.hProcess, related, &image),
-                     "classify actual root image");
+            const auto classification = identify_process(state->api, child.hProcess, related, &image);
+            if (classification < 0) {
+                query_wow64_process(state->api, child.hProcess, wow64);
+                if (!wow64)
+                    check_nt(classification, "classify actual root image");
+            }
             if (reserved && !related)
                 check_nt(status_invalid_image, "verify preflight MSYS root");
             if (related || native_relay)
@@ -243,7 +256,7 @@ int wmain(int argc, wchar_t **argv) try {
             fprintf(
                 stderr,
                 "[launcher] pid=%lu classification=live-imports root=%s hooks=%zu debugger=none\n",
-                child.dwProcessId, related ? "msys" : "native",
+                child.dwProcessId, wow64 ? "wow64" : related ? "msys" : "native",
                 std::bitset<hook_count>(installed).count());
             if (trace) {
                 fprintf(stderr, "[launcher] modules=%02lx", static_cast<ULONG>(modules));

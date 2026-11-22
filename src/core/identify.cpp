@@ -161,4 +161,12 @@ NTSTATUS identify_process(const NativeApi &api, HANDLE process, bool &related, I
     ImageRecord image{};
     return identify_executable(api, process, base, record ? *record : image, related);
 }
+
+NTSTATUS query_wow64_process(const NativeApi &api, HANDLE process, bool &wow64) {
+    ULONG_PTR peb = 0;
+    const auto status =
+        api.query_process(process, ProcessWow64Information, &peb, sizeof(peb), nullptr);
+    wow64 = status >= 0 && peb != 0;
+    return status;
+}
 } // namespace msys_sandbox_compat

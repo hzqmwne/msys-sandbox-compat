@@ -63,11 +63,15 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
         status = create(attributes);
     if (status < 0)
         return status;
-    bool related = false;
+    bool related = false, wow64 = false;
     auto prepared = status_success;
     if (!state.native_relay || owns_reservation || state.trace ||
-        (!state.plain_context && state.enabled(Module::process_dacl)))
+        (!state.plain_context && state.enabled(Module::process_dacl))) {
         prepared = identify_process(state.api, *process, related);
+        if (prepared < 0 && state.native_relay &&
+            query_wow64_process(state.api, *process, wow64) >= 0 && wow64)
+            prepared = status_success;
+    }
     if (owns_reservation && prepared >= 0 && !related)
         prepared = status_invalid_image;
     if (prepared < 0) {
@@ -90,7 +94,8 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
         prepared = clone_agent(*process, state);
         if (prepared < 0)
             goto failed;
-        agent_log(state, related ? "injected MSYS child" : "injected native relay",
+        agent_log(state, related ? "injected MSYS child"
+                                 : wow64 ? "injected WoW64 relay" : "injected native relay",
                   reinterpret_cast<ULONG_PTR>(*process));
     } else {
         agent_log(state, "native child left uninstrumented", reinterpret_cast<ULONG_PTR>(*process));

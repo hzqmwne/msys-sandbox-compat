@@ -7,15 +7,16 @@
 | 原版 EXE 与 `msys-2.0.dll` | 使用原安装文件，不修改分发包 |
 | fork、exec、管道、信号及线程中 fork | 受测组合通过回归与压力测试 |
 | MSYS 连续子进程链 | 通过创建 hook 传播 |
-| 进程链中的原生子进程 | 默认不注入；显式 relay 模式仅安装创建 hook |
+| 进程链中的原生子进程 | 默认 relay 只启用创建 hook。用 `--no-native-relay` 关闭原生传播 |
 | 原生根显式调用兼容入口 | 已由公开作用范围测试验证 |
-| MSYS 原生后代调用兼容入口启动原生目标 | 已验证；原生目标无兼容补丁，继承的 token 默认 DACL 不变 |
+| MSYS 原生后代调用兼容入口启动原生目标 | 关闭 relay 的作用范围对照通过，原生目标继承既有 token 默认 DACL |
 | MSYS 创建原生中间程序后显式回入 MSYS | 一层/三层原生桥接后 Bash、Perl、线程中 fork、管道与退出码通过回归 |
-| 原生中间程序直接创建 MSYS | `--native-relay` 下，一层/三层原生桥接后直接进入 Bash/Perl 已通过；默认模式仍需显式入口 |
+| 原生中间程序直接创建 MSYS | 默认 relay 覆盖 AMD64 和 WoW64 原生首进程及中间进程，支持两种位数交替后返回 AMD64 MSYS。配套宿主与 agent 继续使用 AMD64 产物 |
 | relay 的原生根、显式嵌套入口及挂起创建 | 受测 PSEC 和两种固定令牌均通过；仅创建入口被修改，保留退出码与挂起状态 |
 | 运行中新出现的 EXE/DLL | EXE 按直接导入识别，符合映射条件的 DLL 在首次映射时处理 |
 | ConPTY | 公开 API 路径在 PSEC 和两种固定非 AppContainer 受限令牌中通过交互回归。尺寸跟随通过 PSEC 内外两层 ConPTY 的原生探针验收 |
-| Git `pre-commit` | 在已初始化的工作区，原生 Git 通过 `--native-relay` 自动启动 MSYS hook。PSEC 和两种固定受限令牌通过提交成功、hook 拒绝提交及文件边界回归 |
+| 传统控制台中的 cmd | 可见传统控制台中，三路均为控制台句柄时自动使用内层 ConPTY。`--no-conpty` 和 stdout 文件重定向的对照均保留原控制台 |
+| Git `pre-commit` | 在已初始化的工作区，原生 Git 通过默认 relay 自动启动 MSYS hook。PSEC 和两种固定受限令牌通过提交成功、hook 拒绝提交及文件边界回归 |
 | 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
 | 非 AppContainer 完整 restricting SID 检查令牌 | 同一固定夹具通过上述工作负载与边界回归 |
 | 验收依据 | 参照相关配置构造的 PSEC 与两种受限令牌模型；按有效安全策略与进程创建条件判断适用性 |
@@ -29,7 +30,7 @@ EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原
 
 设置 PE `DYNAMIC_BASE` 的 DLL 由 Windows 选址。使用该标志的 `msys-2.0.dll` 版本需在目标环境单独验证并存、父子映像布局和 fork。当前 DLL 基址调整覆盖 `NtMapViewOfSection` 入口。
 
-relay 覆盖经受支持的 AMD64 `NtCreateUserProcess` 入口创建的后代，不接管已有进程、树外进程、绕过该入口的直接系统调用或纯原生进程运行后才动态加载 MSYS 的场景。它要求父子安全上下文与最近已观察的默认对象策略一致。完整 agent 内的默认 DACL 设置成功后会更新基准；未观察的策略改变在创建前拒绝。子进程切换凭据、限制、完整性或 package，默认 DACL 与基准不符，或必要查询失败时，已创建目标在恢复前回收。原生中间进程会驻留 agent 代码，但仅一个创建入口被修改；关闭该模式的默认行为保持不变。
+relay 覆盖经 AMD64 原生 `NtCreateUserProcess` 入口创建的后代，含经过该入口的 WoW64 调用。它要求父子安全上下文与最近已观察的默认对象策略一致。完整 agent 内的默认 DACL 设置成功后会更新基准。子进程切换凭据、限制、完整性或 package，默认 DACL 与基准不符，或必要查询失败时，已创建目标在恢复前回收。用 `--no-native-relay` 让自动传播在原生进程处结束。路径细节见 [ADR-0013](decisions/0013-default-relay-with-wow64.md)。
 
 两种受限令牌夹具均使用 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN`、禁用 Administrators，并将当前 logon SID、Everyone、Builtin Users、Authenticated Users 放入 restricting SID 列表；write 模式另加 `WRITE_RESTRICTED`。启动器为对象保留 logon/SYSTEM 授权和 OWNER RIGHTS 限制。测试只在带标记的独立工作目录配置 ACL，将兼容产物和夹具暂存为只读；Git/MSYS 仍从原安装位置加载。完整检查模式的读取也必须通过 restricting SID 检查，生产所需文件读取与执行必须在原策略允许范围内。
 
@@ -55,7 +56,9 @@ MSYS 从继承的 Windows 标准句柄重建描述符时，会对磁盘文件调
 
 ## MSYS 运行时的共享映像节
 
-Git for Windows 的 MSYS 3.6.10 在 `.cygwin_` 可写共享映像节中保存 `wincap.caps`，其值是进程内的绝对指针。原生 PSEC 对照中，同一份 DLL 的两个实例在不同基址运行时，后启动的实例可能在 `DLL_PROCESS_ATTACH` 读取前一实例的地址并异常退出。保持未对齐实例存活时，共用同一文件的目标成功 0/4，使用字节相同的独立文件则成功 4/4。`BaseNamedObjects` 的隔离作用于有名称的 IPC 对象，映像节的这组共享数据随 DLL 文件映射。
+本机复核中，普通 Windows Bash 与原生 PSEC 下的兼容 Bash 同时使用 Git for Windows MSYS 3.6.10 的同一路径 DLL，两者的 DLL 实载基址都是 `0x210040000`。两轮均完成 Bash 管道、命令替换、Git 操作和 Perl fork，PSEC 端按预期退出 37。PSEC 端沿用由 `4d9e784` 引入的 section 首选基址策略。适用条件见 [DLL 映射决策](decisions/0012-prefer-dll-image-base-at-map.md)。
+
+历史对照中，保持使用不同 DLL 基址的 PSEC 实例存活时，共用同一文件的目标成功 0/4，使用字节相同的独立文件则成功 4/4。该运行时的 `.cygwin_` 可写共享节保存 `wincap.caps` 绝对指针。实例落在不同基址时，后启动的实例可能在 `DLL_PROCESS_ATTACH` 访问前一实例的地址。这个条件仍可能出现在映像无法对齐的组合。
 
 Windows 按文件流维护映像节的共享状态。重新打开同一个文件或通过 NTFS 硬链接加载仍使用同一个文件流。当前兼容层使用原安装文件，`.cygwin_` 继续按文件流共享。命名 IPC 在 PSEC 下使用 Windows 提供的 AppContainer 命名空间，在非 AppContainer 受限令牌下使用本次启动的私有目录。跨进程协作数据的共享范围应与其命名对象一致。[Windows 映像节与文件流](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ns-wdm-_section_object_pointers) · [命名空间设计](design.md#hook-的职责)
 

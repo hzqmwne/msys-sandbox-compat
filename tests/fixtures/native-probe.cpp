@@ -124,7 +124,7 @@ int wmain(int argc, wchar_t **argv) {
         fclose(report);
     if (reenter) {
         auto runtime = std::filesystem::path(argv[3]).parent_path() / L"msys-2.0.dll";
-        std::wstring command = L"\"" + std::wstring(argv[2]) + L"\" --runtime \"" +
+        std::wstring command = L"\"" + std::wstring(argv[2]) + L"\" --no-native-relay --runtime \"" +
                                runtime.wstring() + L"\" \"" + argv[3] +
                                L"\" --noprofile --norc -c \"echo EXPLICIT-REENTRY\"";
         STARTUPINFOW startup{sizeof(startup)};

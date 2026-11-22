@@ -2,7 +2,7 @@
 
 ## 构建
 
-在 Windows AMD64 上安装 PowerShell 7、Visual Studio 的 C++ AMD64 工具与 Windows SDK，然后运行：
+在 Windows AMD64 上，用 Windows PowerShell 5 或 PowerShell 7 运行构建脚本。构建需要 Visual Studio C++ AMD64 工具和 Windows SDK。
 
 ```powershell
 .\build.ps1
@@ -15,14 +15,14 @@ CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构
 
 ## 示例入口
 
-先执行 `build.ps1 -Tools`。仓库内的 `run.ps1` 是演示入口，每次运行创建独立的 PSEC 策略文件，将 Windows 与所选 Git 根目录设为只读，项目根目录设为可写，进程工作目录继承调用者，并明确拒绝测试 canary。HOME、临时文件和运行状态位于 `unused/runtime`。
+先执行 `build.ps1 -Tools`，然后用 PowerShell 7 运行 `run.ps1`。演示每次创建独立的 PSEC 策略文件，将 Windows 与所选 Git 根目录设为只读，项目根目录设为可写，进程工作目录继承调用者，并明确拒绝测试 canary。HOME、临时文件和运行状态位于 `unused/runtime`。
 
 ```powershell
 .\run.ps1 -GitRoot 'C:\Program Files\Git'
 .\run.ps1 -ConPty
 .\run.ps1 -NoConPty
 .\run.ps1 -ConPty -TerminalSize '120x40'
-.\run.ps1 -NativeRelay
+.\run.ps1 -NoNativeRelay
 .\run.ps1 -Raw  # 不启用兼容层，用于失败基线对照
 ```
 
@@ -36,7 +36,7 @@ CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构
 
 ```text
 psec-run.exe policy.json program.exe [arguments...]
-msys-sandbox-compat.exe [--trace] [--native-relay] [--disable-module NAME]...
+msys-sandbox-compat.exe [--trace] [--native-relay | --no-native-relay] [--disable-module NAME]...
     [--conpty | --no-conpty | --conpty-script input.txt] [--conpty-size WIDTHxHEIGHT]
     program.exe [arguments...]
 ```
@@ -51,7 +51,7 @@ MSYS 兼容模块默认全部启用。可重复传入 `--disable-module NAME`，
 
 | 模块名 | 关闭时跳过的处理 |
 |---|---|
-| `propagation` | 子进程创建 hook 和自动传播。与 `--native-relay` 互斥 |
+| `propagation` | 子进程创建 hook 和自动传播，包括默认 relay。与显式 `--native-relay` 互斥 |
 | `heap-window` | 创建前的磁盘导入预检、临时堆窗口及其交还 |
 | `exe-placement` | 冷启动和 exec 时尝试未设置 `DYNAMIC_BASE` 的 EXE 首选基址，以及 fork 时按父进程实载地址对齐 |
 | `dll-placement` | DLL 定址 hook 及其中的 section 查询 |
@@ -73,7 +73,7 @@ ConPTY 模式收发 VT 字节流。标准输入是控制台且标准输出可查
 
 连接真实控制台时，终端桥启用原始 VT 输入和 VT 输出，并为相应方向设置 UTF-8 代码页。输出排空后恢复原模式和代码页。原生等待宿主处理自身收到的 Ctrl+C 通知，前台目标继续按其控制台处理规则响应按键。
 
-`--native-relay` 是显式选择的进程树传播模式，也可由 `run.ps1 -NativeRelay` 启用，并可与 ConPTY 组合。原生进程仅保留创建 hook，直接启动后续 MSYS 时自动完成兼容准备；默认仍不注入原生进程。已处于该树中的嵌套兼容入口复用已有 relay，无需重复加选项。该模式不修改磁盘 ACL 或放宽 token，遇到安全上下文或默认对象策略变化时拒绝传播。覆盖入口和限制见 [兼容范围](compatibility.md)。`-Raw` 与 `-NativeRelay` 不能同时使用。
+native relay 默认开启，覆盖 AMD64 和 WoW64 原生首进程及中间进程。两种位数可在同一启动链交替，后续 AMD64 MSYS 自动接入。用 `--no-native-relay` 或 `run.ps1 -NoNativeRelay` 关闭该功能。旧参数 `--native-relay` 和 `-NativeRelay` 仍可显式启用。已继承 relay 的嵌套兼容入口复用原状态，显式关闭会报错。覆盖入口和令牌核对规则见 [兼容范围](compatibility.md)及[当前设计](design.md#原生-relay)。
 
 ## 创建环境失败
 

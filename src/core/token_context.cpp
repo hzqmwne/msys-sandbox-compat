@@ -34,7 +34,30 @@ bool same_default(PACL acl, const AgentState &state) {
                      same_bytes(acl, state.token_default_dacl, acl->AclSize)
                : state.token_default_dacl_bytes == 0;
 }
-bool same_token_field(TOKEN_INFORMATION_CLASS kind, void *left, void *right) {
+bool same_access_flags(const NativeApi &api, HANDLE process, HANDLE child, ULONG left, ULONG right) {
+    constexpr ULONG token_virtualize_enabled = 0x0400;
+    const auto difference = left ^ right;
+    if (!difference)
+        return true;
+    if (difference != token_virtualize_enabled)
+        return false;
+    bool parent_wow64 = false, child_wow64 = false;
+    query_wow64_process(api, current_process(), parent_wow64);
+    query_wow64_process(api, process, child_wow64);
+    if (!parent_wow64 && !child_wow64)
+        return false;
+    // Windows can change this per-application UAC flag when creating a legacy
+    // x86 child or leaving WoW64. Confirm it with the public token information class.
+    ULONG parent_enabled = 0, child_enabled = 0, bytes = 0;
+    return api.query_token(reinterpret_cast<HANDLE>(-4), TokenVirtualizationEnabled, &parent_enabled,
+                           sizeof(parent_enabled), &bytes) >= 0 &&
+           api.query_token(child, TokenVirtualizationEnabled, &child_enabled,
+                           sizeof(child_enabled), &bytes) >= 0 &&
+           parent_enabled != child_enabled;
+}
+
+bool same_token_field(const NativeApi &api, HANDLE process, HANDLE child,
+                      TOKEN_INFORMATION_CLASS kind, void *left, void *right) {
     switch (kind) {
     case TokenUser:
     case TokenIntegrityLevel: {
@@ -72,8 +95,9 @@ bool same_token_field(TOKEN_INFORMATION_CLASS kind, void *left, void *right) {
                a->TokenType == b->TokenType;
     }
     case TokenAccessInformation:
-        return static_cast<TOKEN_ACCESS_INFORMATION *>(left)->Flags ==
-               static_cast<TOKEN_ACCESS_INFORMATION *>(right)->Flags;
+        return same_access_flags(api, process, child,
+                                 static_cast<TOKEN_ACCESS_INFORMATION *>(left)->Flags,
+                                 static_cast<TOKEN_ACCESS_INFORMATION *>(right)->Flags);
     default:
         return *static_cast<DWORD *>(left) == *static_cast<DWORD *>(right);
     }
@@ -121,7 +145,7 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
         status = api.query_token(child, kind, right, capacity, &returned);
         if (status < 0)
             break;
-        if (!same_token_field(kind, left, right)) {
+        if (!same_token_field(api, process, child, kind, left, right)) {
             agent_log(state, "relay token context differs", kind);
             status = status_access_denied;
             break;

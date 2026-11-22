@@ -12,14 +12,14 @@
 | 对象命名与显式 ACL | 将 MSYS 对象目录重定向到私有命名空间；对支持的 allow ACL，按原用户及 enabled groups 已有权限补受限 SID，保留描述符其他字段。已识别进程/线程的 DACL 同样适配。 |
 | 默认对象策略 | 拦截当前主 token 的 `TokenDefaultDacl` 设置，基于本次输入补受限 SID，不恢复启动快照；该策略作用于后续采用默认 DACL 的对象。 |
 | MSYS 地址布局 | 冷启动和 exec 按需尝试主 EXE 首选基址，fork 子进程按父进程的实载基址对齐。创建时暂留 MSYS 栈和堆窗口，恢复前释放。符合条件的 DLL 按 section 元数据尝试 PE 首选基址，失败后交回 Windows 选址。 |
-| 子进程传播 | 拦截 `NtCreateUserProcess`，在子进程恢复前识别、准备并复制 agent。默认不注入原生进程；开启 `--native-relay` 后，原生进程仅保留创建 hook，使后续 MSYS 自动接入。 |
+| 子进程传播 | 在子进程恢复前准备 agent。默认在 AMD64 和 WoW64 原生进程中启用创建 relay，使后续 AMD64 MSYS 自动接入。 |
 | 交互终端 | 使用公开 ConPTY API，由原生会话宿主持有初始标准句柄，向 MSYS 传递显式副本，支持交互输入、Ctrl+C 和作业控制。 |
 
 hook 位于 ntdll 入口，采用 MinHook 的 HDE64 与适配的指令搬迁核心，搬迁受支持的入口指令并保留已有跳转路径。搬迁后端与远程安装分开封装。宿主静态链接 CRT。早期 agent 无 CRT 初始化、普通导入或 TLS 依赖。实现细节见 [当前设计](docs/design.md)及 [DLL 映射决策](docs/decisions/0012-prefer-dll-image-base-at-map.md)。
 
 ## 构建与使用
 
-需要 PowerShell 7、Visual Studio C++ AMD64 工具和 Windows SDK，第三方源码已包含在仓库内。
+构建支持 Windows PowerShell 5 和 PowerShell 7，需要 Visual Studio C++ AMD64 工具和 Windows SDK。第三方源码已包含在仓库内。
 
 ```powershell
 .\build.ps1 -Install
@@ -29,9 +29,9 @@ hook 位于 ntdll 入口，采用 MinHook 的 HDE64 与适配的指令搬迁核�
   'C:\Program Files\Git\usr\bin\bash.exe' --noprofile --norc -c '(echo fork); printf "b\na\n" | /usr/bin/sort'
 ```
 
-生产部署只需同目录的 `msys-sandbox-compat.exe` 和 `msys-sandbox-compat.dll`，放在原策略允许读取/执行的位置。在程序路径前加 `--native-relay` 启用原生中间进程传播。终端桥默认按标准句柄自动选择，也可用 `--conpty` 或 `--no-conpty` 指定。完整参数见 [使用说明](docs/getting-started.md)。
+生产部署只需同目录的 `msys-sandbox-compat.exe` 和 `msys-sandbox-compat.dll`，放在原策略允许读取/执行的位置。在程序路径前加 `--no-native-relay` 可关闭原生中间进程传播。终端桥默认按标准句柄自动选择，也可用 `--conpty` 或 `--no-conpty` 指定。完整参数见 [使用说明](docs/getting-started.md)。
 
-本地演示可从允许创建 PSEC 的普通 PowerShell 运行：
+本地演示从允许创建 PSEC 的 PowerShell 7 运行：
 
 ```powershell
 .\build.ps1 -Tools

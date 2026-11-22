@@ -6,7 +6,12 @@
 
 ### 兼容模块
 
+- 默认启用原生 relay，支持 WoW64 原生首进程及 AMD64/WoW64 混合启动链。可通过 `--no-native-relay` 关闭。
 - 分离进程传播、堆窗口、EXE 与 DLL 布局、MSYS IPC 和两类 DACL 处理。用可重复的 `--disable-module NAME` 进行组合对照，关闭时跳过相应预检、元数据读取和 hook 安装。`--trace` 显示实际启用的模块。见[兼容模块对照](docs/getting-started.md#兼容模块对照)。
+
+### 构建
+
+- `build.ps1` 支持 Windows PowerShell 5 和 PowerShell 7。CTest 的 PowerShell 集成测试继续使用 pwsh。
 
 ### MSYS 内存布局
 
@@ -67,7 +72,7 @@
 
 ### 新增
 
-- 显式 `--native-relay` / `run.ps1 -NativeRelay`：原生根及中间进程仅保留创建 hook，后续直接创建的 MSYS 自动获得完整兼容；默认原生边界保持不变。
+- `--native-relay` / `run.ps1 -NativeRelay` 可显式选择原生传播，原生根及中间进程只启用创建 hook。
 - relay 传播只读核对安全上下文与已观察的默认对象策略，遇到不一致时拒绝，不补授权限；支持链内显式兼容入口、ConPTY 和调用者原有挂起状态。
 - PSEC 和两种固定受限令牌各新增自动链路与交互回归，覆盖真实 fork、直接回入、单 hook 原生范围、挂起语义及策略收紧负例。
 - 两种固定非 AppContainer 受限令牌的 ConPTY 交互验收：TTY、尺寸、Perl/线程 fork、原生命令、Ctrl+C、STOP/bg/fg、退出码与会话前后权限拒绝；复用既有生产实现和原测试策略。

@@ -63,7 +63,7 @@ public sealed class TerminalTest : IDisposable {
 "@
 [string[]]$prefix=if($existing){@()}elseif($restricted){@($(if($Environment -eq 'WriteRestricted'){'write'}else{'full'}),$state)}else{@($policy)}
 $targetArguments=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),'--conpty','--conpty-size','120x40',(Join-Path $GitRoot 'usr\bin\bash.exe'),'--noprofile','--norc','-i')
-if($NativeRelay){$targetArguments=@('--native-relay')+$targetArguments}
+if(!$NativeRelay){$targetArguments=@('--no-native-relay')+$targetArguments}
 $arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'))+$targetArguments}
 $launcher=if($existing){Join-Path $sourceBinaries 'msys-sandbox-compat.exe'}elseif($restricted){Join-Path $fixtureBinaries 'restricted-run.exe'}else{Get-PsecLauncher $sourceBinaries}
 $info=New-TestProcessInfo $launcher $arguments $state

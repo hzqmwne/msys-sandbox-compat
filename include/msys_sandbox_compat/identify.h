@@ -17,6 +17,7 @@ struct ImageRecord {
 
 NTSTATUS identify_process(const NativeApi &api, HANDLE process, bool &related,
                           ImageRecord *record = nullptr);
+NTSTATUS query_wow64_process(const NativeApi &api, HANDLE process, bool &wow64);
 bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars);
 NTSTATUS identify_executable(const NativeApi &api, HANDLE process, const void *base,
                              ImageRecord &image, bool &related);

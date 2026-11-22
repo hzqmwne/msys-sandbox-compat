@@ -11,7 +11,7 @@ $compat = Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $bridge = Join-Path (Get-TestFixtureDirectory $BinaryDirectory) 'native-bridge.exe'
 $bash = Join-Path $GitRoot 'usr\bin\bash.exe'
 $work = 'set -eu; test "$(/usr/bin/uname -s >/dev/null; printf fork-ok)" = fork-ok; echo ORDINARY-STARTUP-PASS; exit 37'
-$arguments = @('--no-conpty','--native-relay',$bridge,'--relay','--suspended','2',
+$arguments = @('--no-conpty',$bridge,'--relay','--suspended','2',
     $bash,'--noprofile','--norc','-c',$work)
 $result = Invoke-TestProcess (New-TestProcessInfo $compat $arguments $state)
 Save-TestOutput $result $evidence 'suspended-relay'
@@ -19,4 +19,24 @@ $suspended = [regex]::Matches($result.Error, 'suspended-preserved=1').Count
 if ($result.ExitCode -ne 37 -or $suspended -ne 3 -or
     !$result.Output.Contains('ORDINARY-STARTUP-PASS')) {
     throw "Ordinary startup exit=$($result.ExitCode), suspended children=$suspended"
+}
+
+$wow64 = Join-Path $env:SystemRoot 'SysWOW64\cmd.exe'
+if (Test-Path -LiteralPath $wow64) {
+    $client = Join-Path (Get-TestFixtureDirectory $BinaryDirectory) 'import-name\import-name-client.exe'
+    $outer = 'relay-x86-root.cmd'
+    $inner = 'relay-x86-child.cmd'
+    @('@echo off', 'echo RELAY-%PROCESSOR_ARCHITECTURE%',
+        ('"{0}" --relay --suspended 0 "{1}" /d /c {2}' -f $bridge,$wow64,$inner),
+        'exit /b %errorlevel%') |
+        Set-Content -LiteralPath (Join-Path $state $outer) -Encoding oem
+    @('@echo off', 'echo RELAY-%PROCESSOR_ARCHITECTURE%', ('"{0}" 060' -f $client),
+        'exit /b %errorlevel%') |
+        Set-Content -LiteralPath (Join-Path $state $inner) -Encoding oem
+    $result = Invoke-TestProcess (New-TestProcessInfo $compat @('--no-conpty',$wow64,'/d','/c',$outer) $state)
+    Save-TestOutput $result $evidence 'wow64-relay'
+    if ($result.ExitCode -ne 0 -or [regex]::Matches($result.Output, 'RELAY-x86').Count -ne 2 -or
+        !$result.Output.Contains('hooks=060') -or !$result.Error.Contains('suspended-preserved=1')) {
+        throw "Mixed architecture startup exit=$($result.ExitCode)"
+    }
 }

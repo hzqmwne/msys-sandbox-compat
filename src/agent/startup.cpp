@@ -13,8 +13,12 @@ NTSTATUS initialize_child(AgentState &state, BYTE *peb, CONTEXT &saved) {
     ImageRecord image{};
     bool related = false;
     auto status = identify_executable(api, process, reinterpret_cast<void *>(base), image, related);
-    if (status < 0)
-        return status;
+    if (status < 0) {
+        bool wow64 = false;
+        if (!state.native_relay || query_wow64_process(api, process, wow64) < 0 || !wow64)
+            return status;
+        // WoW64 calls the native system entry from its AMD64 thunk.
+    }
 
     const auto modules = state.effective_modules(related);
     if (modules & bit(Module::exe_placement)) {

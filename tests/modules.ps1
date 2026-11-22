@@ -54,7 +54,7 @@ $layoutOff = @('--disable-module','heap-window','--disable-module','exe-placemen
     '--disable-module','dll-placement')
 $absentLayout = @('heap preflight','released MSYS heap window',$exeAttempt,
     'image mapping requested base')
-Invoke-Case 'conpty-config' (@('--conpty') + $layoutOff + @($client,'1df')) `
+Invoke-Case 'conpty-config' (@('--conpty','--no-native-relay') + $layoutOff + @($client,'1df')) `
     @('modules=71','hooks=1df') $absentLayout
 Invoke-Case 'conpty-relay-config' (@('--conpty','--native-relay') + $layoutOff +
     @($bridge,'--relay','1',$client,'1df')) `
@@ -62,6 +62,8 @@ Invoke-Case 'conpty-relay-config' (@('--conpty','--native-relay') + $layoutOff +
 Invoke-Case 'inherited-relay-conflict' (@('--native-relay') + $layoutOff +
     @($bridge,'--relay','0',$compat,'--disable-module','ipc',$client)) `
     @('module options conflict with inherited relay') @('IMPORT-NAME-MATCH') 1
+Invoke-Case 'inherited-relay-disable' @($bridge,'--relay','0',$compat,'--no-native-relay',$client) `
+    @('--no-native-relay conflicts with inherited relay') @('IMPORT-NAME-MATCH') 1
 Invoke-Case 'propagation-relay-conflict' @('--disable-module','propagation','--native-relay',$client) `
     @('--native-relay requires the propagation module') @('IMPORT-NAME-MATCH') 1
 Invoke-Case 'unknown-module' @('--disable-module','unknown',$client) `

@@ -86,6 +86,7 @@ try {
         if (!$NativeRelay -or $case.Explicit) {
             $nativeArgs+=@($compat.Replace('\','/'))
             if ($NativeRelay) {$nativeArgs+='--trace'}
+            else {$nativeArgs+='--no-native-relay'}
             $nativeArgs+=@('--runtime',$runtime.Replace('\','/'))
         }
         $inner = Shell-Command ($nativeArgs+@($bash.Replace('\','/'),'--noprofile','--norc','-c',$payload))
@@ -98,7 +99,8 @@ try {
             else {$expectedBridges--}
             $prefix+$target+@($bash,'--noprofile','--norc','-c',$outer)
         } else {
-            $prefix+@($bridge,0,$compat,'--runtime',$runtime,$bash,'--noprofile','--norc','-c',$outer)
+            $prefix+@($bridge,0,$compat,'--no-native-relay','--runtime',$runtime,$bash,
+                '--noprofile','--norc','-c',$outer)
         }
         $info = New-TestProcessInfo $launcher $arguments $state
         $result = Invoke-TestProcess $info 60000

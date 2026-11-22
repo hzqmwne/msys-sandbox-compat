@@ -22,7 +22,7 @@
 
 为使内核创建 PEB 和初始线程栈时避开 MSYS 的栈和堆地址区，创建时先按 Native 参数中的映像路径做一次导入预检。命中后追加 `PS_ATTRIBUTE_MEMORY_RESERVE`，短暂预留 24–64 GiB 窗口。agent 使用已有的创建 hook。独立宿主仅在本次直接启动期间替换自身 KernelBase 的一个导入槽，仍由 `CreateProcessW` 处理标准句柄、环境与控制台。已继承 relay 的宿主调用由 relay 处理。
 
-识别返回状态码与命中结果。导入表越界或读取失败会返回错误。默认传播模式中无法确认的子进程保持原样，trace 标明识别不可用。根进程识别失败时直接报错。显式 relay 模式遇到无法分类或传播的子进程时终止本次挂起创建并返回失败。
+识别返回状态码与命中结果。导入表越界或读取失败会返回错误。启用 relay 时，已确认的 WoW64 进程走原生传播路径。其他无法分类或准备的目标按失败回收。关闭 relay 时，无法确认的后代保持原样，trace 标明识别不可用。
 
 实际挂起映像仍决定是否注入。创建前追加过预留的进程必须再次确认为 MSYS 才能恢复。完成挂起准备后，父进程在恢复或交还线程句柄前释放自己追加的预留。调用者已有的创建属性和预留原样保留。仅在创建后识别到 MSYS 时，继续准备实际映像及对象兼容，堆由 MSYS 自行分配。决定见 [ADR-0011](decisions/0011-release-heap-reservations-before-start.md)。
 
@@ -73,19 +73,19 @@ MSYS 冷启动分别设置 token 默认 DACL 和当前进程对象的 DACL。当
 
 MSYS 自身仍负责 fork 的复制、同步和恢复语义。兼容层解决环境导致的对象访问和地址布局障碍，并在相关子进程的初始线程恢复前复制 agent。它保留调用者原有的挂起状态，不用调试事件截获创建。
 
-默认模式的原生子进程保持原样，其后续创建操作不会经过 MSYS 父进程的 hook。Job 管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
+关闭 relay 时，自动传播在原生子进程处结束。Job 仍管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
 
 MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时基于当次请求补充受限主体，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。宿主仍在 MSYS 根进程恢复前检查真实 token 查询权限；从未受兼容处理的祖先继承了不兼容 token 时明确拒绝，这个错误检查不是成功验收。
 
-## 显式原生 relay
+## 原生 relay
 
-`--native-relay` 将传播范围扩展到本次启动的原生根和原生后代。仍手工映射同一 agent 映像，为共享识别/准备代码初始化原入口 trampoline；原生进程仅修改 `NtCreateUserProcess` 一个入口，不修改其对象 ACL、默认 DACL 或 MSYS 地址区。确认关联 MSYS 的子进程才应用完整 hook 和 MSYS 准备。调用者原有的挂起状态保留。
+relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。原生进程仅启用创建 hook。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与对象适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
 
 原生创建 hook 在恢复前识别并复制相应模式，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用原运行上下文；其创建调用已准备子进程，宿主不重复识别、复制完整状态或再次注入。首次映射在独立的 agent 状态副本中绑定 trampoline，不临时改写宿主 API。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代，省略嵌套启动器选项不会关闭已有 relay 或替换原上下文。
 
 各进程只为自身实际安装的 hook 读取入口和生成 trampoline。未改写的入口由当前进程直接调用，以便原生 relay 执行后代准备。复制 agent 时根据子进程的 hook 集合重新绑定其原入口调用。启用传播时，agent 同时保存后代可能启用的 handler 位置。宿主通过版本标记核对配套 DLL 和继承的 relay 状态。
 
-relay 创建前核对最近已观察的默认策略，创建后比较父子 token 身份与隔离上下文，并核对子进程默认 DACL。基准容纳 8 KiB ACL，仅在 relay 模式下建立和维护；完整 agent 的设置 hook 在成功后更新它，并与创建/克隆串行化。未观察的策略改变、上下文不一致或查询失败时拒绝传播，已创建目标在恢复前回收。非 relay 仅做当次 ACL 适配，不维护快照或持有策略锁。该模式不承诺跨凭据或其他安全上下文自动传播。决定见 [ADR-0006](decisions/0006-opt-in-native-relay.md) 及 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
+relay 创建后比较父子令牌身份与隔离上下文，受限环境还核对创建前后的默认 DACL。对于涉及 WoW64 的创建，允许 Windows 设置的每应用 UAC 虚拟化启用位变化，并通过独立的令牌信息类确认该值。其他令牌字段继续参与比较。受限 relay 的默认 DACL 基准容纳 8 KiB，MSYS 设置成功后更新，并与创建串行化。未观察到的默认策略改变、上下文不一致或查询失败时回收挂起的目标。决定见 [ADR-0006](decisions/0006-opt-in-native-relay.md) 及 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
 
 ## ConPTY
 
