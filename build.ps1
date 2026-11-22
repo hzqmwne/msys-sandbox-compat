@@ -1,3 +1,4 @@
+#requires -Version 5.0
 param(
     [ValidateSet('Release','RelWithDebInfo')][string]$Configuration='RelWithDebInfo',
     [switch]$Install,
@@ -6,11 +7,18 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'tools\msvc-env.ps1')
-& $cmake -S $PSScriptRoot -B (Join-Path $PSScriptRoot 'build') -G 'NMake Makefiles' "-DCMAKE_BUILD_TYPE=$Configuration" "-DBUILD_TESTING=$([int]$Tests.IsPresent)" "-DMSYS_SANDBOX_COMPAT_BUILD_TOOLS=$([int]$Tools.IsPresent)"
+$buildDirectory = Join-Path $PSScriptRoot 'build'
+$configureArgs = @(
+    '-S', $PSScriptRoot, '-B', $buildDirectory, '-G', 'NMake Makefiles'
+    "-DCMAKE_BUILD_TYPE=$Configuration"
+    "-DBUILD_TESTING=$([int]$Tests.IsPresent)"
+    "-DMSYS_SANDBOX_COMPAT_BUILD_TOOLS=$([int]$Tools.IsPresent)"
+)
+& $cmake @configureArgs
 if ($LASTEXITCODE) { throw 'CMake configure failed' }
-& $cmake --build (Join-Path $PSScriptRoot 'build')
+& $cmake --build $buildDirectory
 if ($LASTEXITCODE) { throw 'C++ build failed' }
 if ($Install) {
-    & $cmake --install (Join-Path $PSScriptRoot 'build') --prefix (Join-Path $PSScriptRoot 'build\package')
+    & $cmake --install $buildDirectory --prefix (Join-Path $buildDirectory 'package')
     if ($LASTEXITCODE) { throw 'Package installation failed' }
 }

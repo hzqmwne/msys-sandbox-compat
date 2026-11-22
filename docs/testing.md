@@ -1,6 +1,6 @@
 # 测试说明
 
-生产构建默认不包含开发工具与测试夹具，回归前使用 `build.ps1 -Tests`。测试应从允许创建 PSEC 和受限令牌的普通 PowerShell 7 执行，默认 Git 根为 `C:\Program Files\Git`，可通过各脚本的 `-GitRoot` 修改。
+生产构建默认不包含开发工具与测试夹具。回归前可用 Windows PowerShell 5 或 PowerShell 7 执行 `build.ps1 -Tests`。集成测试脚本通过 PowerShell 7 执行，运行环境需允许创建 PSEC 和受限令牌。默认 Git 根为 `C:\Program Files\Git`，可通过各脚本的 `-GitRoot` 修改。
 
 ```powershell
 .\build.ps1 -Tests
