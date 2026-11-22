@@ -26,8 +26,11 @@ function(add_compat_hook_backend target)
   set_source_files_properties("${PROJECT_SOURCE_DIR}/third_party/minhook/hde/hde64.c"
     PROPERTIES LANGUAGE CXX COMPILE_OPTIONS /wd4701)
 endfunction()
-set(compat_core src/core/identify.cpp src/core/process.cpp src/core/token_context.cpp src/core/object_security.cpp)
-add_library(msys-sandbox-compat-agent SHARED ${compat_core} src/agent/hooks.cpp src/agent/memory.cpp src/agent/stack_probe.asm)
+set(compat_core src/core/identify.cpp src/core/process.cpp src/core/image_layout.cpp
+  src/core/token_context.cpp src/core/object_security.cpp)
+add_library(msys-sandbox-compat-agent SHARED ${compat_core}
+  src/agent/hooks.cpp src/agent/ipc_hooks.cpp src/agent/image_hooks.cpp
+  src/agent/security_hooks.cpp src/agent/memory.cpp src/agent/stack_probe.asm)
 add_compat_hook_backend(msys-sandbox-compat-agent)
 target_include_directories(msys-sandbox-compat-agent PRIVATE include)
 set_target_properties(msys-sandbox-compat-agent PROPERTIES OUTPUT_NAME msys-sandbox-compat

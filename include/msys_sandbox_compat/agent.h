@@ -77,6 +77,8 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
 NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state);
 NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
                          const ProcessImage &image, AgentState &state);
+NTSTATUS prepare_exe_layout(const NativeApi &api, HANDLE process, HANDLE thread,
+                            const ProcessImage &image);
 NTSTATUS release_heap_reservation(const NativeApi &api, HANDLE process, const AgentState &state);
 NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source,
                      bool owns_reservation);
