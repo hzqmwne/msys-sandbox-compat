@@ -11,15 +11,13 @@ HANDLE configure_security(AgentState &state) {
     HANDLE token = GetCurrentProcessToken();
     alignas(TOKEN_APPCONTAINER_INFORMATION)
         BYTE package[sizeof(TOKEN_APPCONTAINER_INFORMATION) + SECURITY_MAX_SID_SIZE];
-    PSID package_sid = nullptr;
     DWORD size = 0;
-    if (adapt_acl || state.native_relay) {
-        check(GetTokenInformation(token, TokenAppContainerSid, package, sizeof(package), &size),
-              "TokenAppContainerSid");
-        package_sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
-        state.plain_context = !package_sid && !IsTokenRestricted(token);
-        adapt_acl = adapt_acl && !state.plain_context;
-    }
+    check(GetTokenInformation(token, TokenAppContainerSid, package, sizeof(package), &size),
+          "TokenAppContainerSid");
+    const auto package_sid =
+        reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
+    state.plain_context = !package_sid && !IsTokenRestricted(token);
+    adapt_acl = adapt_acl && !state.plain_context;
     PACL acl = nullptr;
     std::vector<BYTE> default_info;
     if ((state.native_relay && !state.plain_context) || (adapt_acl && !package_sid)) {
@@ -47,9 +45,9 @@ HANDLE configure_security(AgentState &state) {
     check(GetTokenInformation(token, TokenUser, user, sizeof(user), &size), "TokenUser");
     auto sid = package_sid;
     auto user_sid = reinterpret_cast<TOKEN_USER *>(user)->User.Sid;
-    check(IsValidSid(user_sid) && GetLengthSid(user_sid) <= sizeof(state.user_sid),
-          "user SID capacity");
-    state.user_sid_bytes = GetLengthSid(user_sid);
+    const DWORD user_bytes = IsValidSid(user_sid) ? GetLengthSid(user_sid) : 0;
+    check(user_bytes && user_bytes <= sizeof(state.user_sid), "user SID capacity");
+    state.user_sid_bytes = user_bytes;
     memcpy(state.user_sid, user_sid, state.user_sid_bytes);
     std::vector<BYTE> groups, restricting;
     if (!sid) {
@@ -99,9 +97,9 @@ HANDLE configure_security(AgentState &state) {
         }
         check(sid != nullptr, "configured restricted object SID required");
     }
-    check(IsValidSid(sid) && GetLengthSid(sid) <= sizeof(state.compat_sid),
-          "compatibility SID capacity");
-    state.compat_sid_bytes = GetLengthSid(sid);
+    const DWORD compat_bytes = IsValidSid(sid) ? GetLengthSid(sid) : 0;
+    check(compat_bytes && compat_bytes <= sizeof(state.compat_sid), "compatibility SID capacity");
+    state.compat_sid_bytes = compat_bytes;
     memcpy(state.compat_sid, sid, state.compat_sid_bytes);
     if (!state.enabled(Module::ipc))
         return nullptr;
@@ -121,6 +119,9 @@ HANDLE configure_security(AgentState &state) {
     check(GetTokenInformation(token, TokenSessionId, &session, sizeof(session), &size),
           "TokenSessionId");
     auto root = L"\\Sessions\\" + std::to_wstring(session) + L"\\" + relative;
+    if (!package_sid)
+        root += L"\\msys-sandbox-compat-" + std::to_wstring(GetCurrentProcessId());
+    check(root.size() < object_root_chars, "namespace capacity");
     HANDLE directory = nullptr;
     if (!package_sid) {
         SECURITY_DESCRIPTOR namespace_descriptor{};
@@ -128,8 +129,6 @@ HANDLE configure_security(AgentState &state) {
               "namespace descriptor");
         check(SetSecurityDescriptorDacl(&namespace_descriptor, TRUE, acl, FALSE),
               "namespace default ACL");
-        root += L"\\msys-sandbox-compat-" + std::to_wstring(GetCurrentProcessId());
-        check(root.size() < object_root_chars, "namespace capacity");
         UNICODE_STRING name{static_cast<USHORT>(root.size() * sizeof(wchar_t)),
                             static_cast<USHORT>((root.size() + 1) * sizeof(wchar_t)), root.data()};
         OBJECT_ATTRIBUTES attributes{};
@@ -139,7 +138,6 @@ HANDLE configure_security(AgentState &state) {
             state.api.create_directory(&directory, STANDARD_RIGHTS_REQUIRED | 0xf, &attributes),
             "restricted compatibility namespace");
     }
-    check(root.size() < object_root_chars, "namespace capacity");
     memcpy(state.object_root, root.c_str(), (root.size() + 1) * 2);
     state.root_chars = static_cast<uint32_t>(root.size());
     return directory;

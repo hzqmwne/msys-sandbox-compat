@@ -116,7 +116,6 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &s
             continue;
         const auto &hook = state.hooks[index];
         auto &item = pending[index];
-        item = {};
         auto status = read_hook_source(api, process, hook.target, item);
         if (status < 0)
             return status;
@@ -178,10 +177,13 @@ static ULONG section_protection(DWORD flags) {
 }
 
 NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, AgentState &state) {
-    auto pe = PeView(image, state.self_size).headers();
+    const PeView view(image, state.self_size);
+    const auto pe = view.headers();
     if (!pe)
         return status_invalid_image;
-    auto sections = IMAGE_FIRST_SECTION(pe);
+    const auto sections = view.sections(*pe);
+    if (!sections)
+        return status_invalid_image;
     for (WORD index = 0; index < pe->FileHeader.NumberOfSections; ++index) {
         PVOID region = reinterpret_cast<void *>(state.self_base + sections[index].VirtualAddress);
         SIZE_T extent = sections[index].Misc.VirtualSize;

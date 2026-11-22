@@ -57,6 +57,14 @@ class PeView {
         return reinterpret_cast<const T *>(base_ + offset);
     }
 
+    const IMAGE_SECTION_HEADER *sections(const IMAGE_NT_HEADERS64 &pe) const {
+        if (pe.FileHeader.SizeOfOptionalHeader < sizeof(pe.OptionalHeader))
+            return nullptr;
+        const auto offset = reinterpret_cast<const unsigned char *>(&pe.OptionalHeader) - base_;
+        return at<IMAGE_SECTION_HEADER>(offset + pe.FileHeader.SizeOfOptionalHeader,
+                                        pe.FileHeader.NumberOfSections);
+    }
+
     const char *string_at(size_t rva) const {
         auto text = at<char>(rva);
         if (!text)

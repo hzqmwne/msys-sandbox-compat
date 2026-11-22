@@ -122,6 +122,18 @@ int wmain(int argc, wchar_t **argv) try {
     const bool conpty = force_conpty || auto_conpty;
     check(SetConsoleCtrlHandler(wait_control, TRUE), "register waiting-host Ctrl+C handler");
     auto executable = fs::absolute(argv[first]);
+    fs::path launcher_path;
+    const auto own_path = [&]() -> const fs::path & {
+        if (launcher_path.empty()) {
+            std::wstring path(32768, L'\0');
+            const auto length = GetModuleFileNameW(nullptr, path.data(),
+                                                   static_cast<DWORD>(path.size()));
+            check(length && length < path.size(), "locate launcher executable");
+            path.resize(length);
+            launcher_path = std::move(path);
+        }
+        return launcher_path;
+    };
     std::unique_ptr<AgentState> state;
     auto inherited = inherited_agent();
     std::unique_ptr<void, decltype(&CloseHandle)> object_directory(nullptr, CloseHandle);
@@ -179,10 +191,7 @@ int wmain(int argc, wchar_t **argv) try {
         // handles. It starts the target with explicit inherited stdio, so
         // MSYS may close its own copies without FreeConsole later closing
         // recycled handle values from KernelBase's console state.
-        wchar_t own_path[32768];
-        check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
-              "locate console session host");
-        executable = own_path;
+        executable = own_path();
         auto session_command = quote(executable.wstring());
         if (auto_conpty)
             session_command += session_stdio.prepare(stdio, console);
@@ -252,7 +261,10 @@ int wmain(int argc, wchar_t **argv) try {
                 check_nt(status_invalid_image, "verify preflight MSYS root");
             if (related || native_relay)
                 object_directory.reset(configure_security(*state));
-            if (related && !state->plain_context && (state->modules() & acl_modules)) {
+            if (native_relay) {
+                check_nt(check_child_context(state->api, child.hProcess, *state),
+                         "root relay security context");
+            } else if (related && !state->plain_context && (state->modules() & acl_modules)) {
                 // A cold MSYS start needs a real primary-token handle. A token
                 // inherited through an MSYS-created native bridge may deny this,
                 // even though our own read-only pseudo-token queries succeeded.
@@ -261,21 +273,14 @@ int wmain(int argc, wchar_t **argv) try {
                       "query MSYS root token before initialization");
                 CloseHandle(root_token);
             }
-            if (native_relay)
-                check_nt(check_child_context(state->api, child.hProcess, *state),
-                         "root relay security context");
             if (related)
                 check_nt(adapt_child_objects(child.hProcess, child.hThread, *state),
                          "adapt MSYS root objects");
             const auto modules = state->effective_modules(related);
             const auto installed = selected_hooks(modules);
-            if (installed || ((modules & bit(Module::exe_placement)) && !image.dynamic_base)) {
-                wchar_t own_path[32768];
-                check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
-                      "locate agent");
+            if (installed || ((modules & bit(Module::exe_placement)) && !image.dynamic_base))
                 inject_root(child.hProcess, installed, *state,
-                            fs::path(own_path).parent_path() / L"msys-sandbox-compat.dll");
-            }
+                            own_path().parent_path() / L"msys-sandbox-compat.dll");
             if (reserved)
                 check_nt(release_heap_reservation(state->api, child.hProcess, *state),
                          "release MSYS heap window");

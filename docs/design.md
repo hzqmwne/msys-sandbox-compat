@@ -14,6 +14,8 @@
 
 最终仍交付兼容 EXE/DLL。宿主静态链接 CRT；早期 agent 无 CRT、普通/延迟导入、TLS、全局构造或 DllMain 依赖。当前采用 MinHook v1.3.4 的 HDE64 与适配的搬迁核心，不引入其完整运行时管理器。后端与安装器以独立的有界字节/逻辑地址/搬迁计划接口分开，CMake 集中选择后端，保留未来切换 Detours 的空间。见 [ADR-0009](decisions/0009-minhook-relocation-backend.md)。
 
+构建 launcher 前使用同一 PE 读取器校验已链接的 agent DLL，检查入口点、导入、TLS、所需导出、数据与执行节和 unwind 目录。校验器不随产品安装。部署时 launcher 继续验证从磁盘读取的 DLL、同构建 ABI，以及后续实际访问的 PE 文件与映像范围。冷启动与继承 relay 使用同一映像大小上限。
+
 ## 进程创建与识别
 
 外部隔离启动器负责原有策略，生产兼容层包含兼容 EXE/DLL。可选 psec-run 开发工具用于创建 PSEC 验证环境。宿主与 agent 共享 core 源码，分别按各自 CRT/栈约束编译。宿主以 `CREATE_SUSPENDED` 创建目标。直接导入 `msys-2.0.dll` 的 EXE 按 MSYS 处理，文件名比较忽略大小写。普通令牌也可启动，命名对象和 DACL 适配按令牌条件启用。

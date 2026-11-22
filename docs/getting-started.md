@@ -11,7 +11,7 @@
 .\build.ps1 -Tests  # 包含开发工具、测试程序和夹具
 ```
 
-CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构建缓存。默认仅构建兼容 EXE/DLL；`-Install` 将它们、公开文档和许可整理到 `build/package`。`-Tools` 构建 `build/tools/psec-run.exe`；`-Tests` 同时构建它和 `build/tests/bin` 下的回归夹具。开发工具与测试夹具均不安装。手动 CMake 对应 `-DMSYS_SANDBOX_COMPAT_BUILD_TOOLS=ON` 和 `-DBUILD_TESTING=ON`，二者默认关闭。
+CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构建缓存。默认构建兼容 EXE/DLL，并运行内部的 agent DLL 校验器。`-Install` 将兼容 EXE/DLL、公开文档和许可整理到 `build/package`。`-Tools` 构建 `build/tools/psec-run.exe`，`-Tests` 同时构建它和 `build/tests/bin` 下的回归夹具。校验器、开发工具与测试夹具均不安装。手动 CMake 对应 `-DMSYS_SANDBOX_COMPAT_BUILD_TOOLS=ON` 和 `-DBUILD_TESTING=ON`，二者默认关闭。
 
 ## 示例入口
 

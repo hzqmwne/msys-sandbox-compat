@@ -97,7 +97,13 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_map(HANDLE section, HANDLE 
         agent_log(state, "image mapping requested base", reinterpret_cast<ULONG_PTR>(preferred));
         agent_log(state, "image mapping status", static_cast<ULONG>(status));
         if (status >= 0) {
-            agent_log(state, "image mapping actual base", reinterpret_cast<ULONG_PTR>(*base));
+            if (state.trace) {
+                ULONG_PTR actual = 0;
+                SIZE_T received = 0;
+                if (api.read(current_process(), base, &actual, sizeof(actual), &received) >= 0 &&
+                    received == sizeof(actual))
+                    agent_log(state, "image mapping actual base", actual);
+            }
             return status;
         }
         // Failed maps leave the native in/out fields untouched. Undo our own input change.

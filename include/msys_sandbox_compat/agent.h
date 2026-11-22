@@ -3,6 +3,8 @@
 #include "identify.h"
 #include "inline_hook.h"
 #include "native_buffer.h"
+#include <limits.h>
+#include <type_traits>
 
 namespace msys_sandbox_compat {
 
@@ -120,6 +122,10 @@ struct AgentState {
 };
 
 static_assert(sizeof(void *) == 8, "The agent supports AMD64 only");
+static_assert(hook_count > 0 && hook_count <= sizeof(uint32_t) * CHAR_BIT);
+static_assert(std::is_trivially_copyable_v<AgentState> && std::is_standard_layout_v<AgentState>);
+static_assert(std::is_trivially_copyable_v<ParentStartData> &&
+              std::is_standard_layout_v<ParentStartData>);
 
 NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, AgentState &state);
 uint32_t selected_hooks(uint32_t modules);

@@ -40,12 +40,24 @@ target_link_options(msys-sandbox-compat-agent PRIVATE /NODEFAULTLIB /NOENTRY /IN
 # Keep the normal probe threshold: do not call __chkstk in every small hook
 # frame on MSYS-managed secondary-thread stacks.
 target_compile_options(msys-sandbox-compat-agent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/Gs4096>)
-add_executable(msys-sandbox-compat ${compat_core} src/host/main.cpp src/host/platform.cpp src/host/security.cpp src/host/bootstrap.cpp)
+add_executable(verify-agent-image EXCLUDE_FROM_ALL tools/verify-agent-image.cpp src/host/agent_image.cpp)
+target_include_directories(verify-agent-image PRIVATE include src/host)
+target_compile_options(verify-agent-image PRIVATE /EHsc)
+set(agent_validation_stamp "${CMAKE_CURRENT_BINARY_DIR}/agent-verified-$<CONFIG>.stamp")
+add_custom_command(OUTPUT "${agent_validation_stamp}"
+  COMMAND "$<TARGET_FILE:verify-agent-image>" "$<TARGET_FILE:msys-sandbox-compat-agent>"
+  COMMAND "${CMAKE_COMMAND}" -E touch "${agent_validation_stamp}"
+  DEPENDS verify-agent-image msys-sandbox-compat-agent
+  COMMENT "Checking the linked agent DLL" VERBATIM)
+add_custom_target(check-agent-image DEPENDS "${agent_validation_stamp}")
+
+add_executable(msys-sandbox-compat ${compat_core} src/host/main.cpp src/host/platform.cpp
+  src/host/security.cpp src/host/bootstrap.cpp src/host/agent_image.cpp)
 add_compat_hook_backend(msys-sandbox-compat)
 target_include_directories(msys-sandbox-compat PRIVATE include)
 target_compile_options(msys-sandbox-compat PRIVATE /EHsc)
 target_link_libraries(msys-sandbox-compat PRIVATE advapi32 userenv)
-add_dependencies(msys-sandbox-compat msys-sandbox-compat-agent)
+add_dependencies(msys-sandbox-compat check-agent-image)
 option(BUILD_TESTING "Build regression suites and fixtures" OFF)
 option(MSYS_SANDBOX_COMPAT_BUILD_TOOLS "Build the local PSEC development launcher" OFF)
 if(MSYS_SANDBOX_COMPAT_BUILD_TOOLS OR BUILD_TESTING)
