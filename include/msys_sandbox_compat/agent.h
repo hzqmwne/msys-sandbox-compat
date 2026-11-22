@@ -133,8 +133,8 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
 NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state);
 NTSTATUS adapt_child_objects(HANDLE process, HANDLE thread, AgentState &state);
 void capture_parent_image(const NativeApi &api, uintptr_t base, ParentStartData &image);
-NTSTATUS prepare_fork_exe(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
-                          const ImageRecord &image);
+NTSTATUS prepare_exe_layout(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
+                            const ImageRecord &image);
 NTSTATUS release_heap_reservation(const NativeApi &api, HANDLE process, const AgentState &state);
 NTSTATUS clone_agent(HANDLE process, AgentState &source);
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number = 0);

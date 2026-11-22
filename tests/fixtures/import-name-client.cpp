@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
     }
     const auto expected = argc == 2 ? strtoul(argv[1], nullptr, 16) : 0x1ff;
     const int marker = import_name_marker();
-    printf("IMPORT-NAME-MATCH marker=%d hooks=%03x\n", marker, installed);
+    printf("IMPORT-NAME-MATCH marker=%d hooks=%03x base=%p\n", marker, installed,
+           static_cast<void *>(GetModuleHandleW(nullptr)));
     return marker == 7 && installed == expected ? 0 : 1;
 }

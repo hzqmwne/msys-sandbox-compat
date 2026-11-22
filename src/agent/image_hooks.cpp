@@ -65,7 +65,8 @@ PVOID preferred_view_base(const NativeApi &api, HANDLE section, PVOID *base, ULO
 
     PVOID original = nullptr;
     // SectionOriginalBaseInformation identifies the preferred base of this section.
-    if (api.query_section(section, 3, &original, sizeof(original), nullptr) < 0 ||
+    if (api.query_section(section, section_original_base_information, &original, sizeof(original),
+                          nullptr) < 0 ||
         !original || (reinterpret_cast<uintptr_t>(original) & 0xffff) ||
         !within_zero_bits(reinterpret_cast<uintptr_t>(original), basic.size.QuadPart, zero))
         return nullptr;

@@ -12,6 +12,7 @@ constexpr NTSTATUS status_not_supported = static_cast<NTSTATUS>(0xc00000bb);
 constexpr NTSTATUS status_unsuccessful = static_cast<NTSTATUS>(0xc0000001);
 constexpr NTSTATUS status_access_denied = static_cast<NTSTATUS>(0xc0000022);
 constexpr ULONG thread_create_suspended = 1;
+constexpr ULONG section_original_base_information = 3;
 
 using AllocateMemory = NTSTATUS(NTAPI *)(HANDLE, PVOID *, ULONG_PTR, PSIZE_T, ULONG, ULONG);
 using FreeMemory = NTSTATUS(NTAPI *)(HANDLE, PVOID *, PSIZE_T, ULONG);

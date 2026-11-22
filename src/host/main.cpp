@@ -208,7 +208,8 @@ int wmain(int argc, wchar_t **argv) try {
                     child.dwProcessId);
         } else {
             bool related = false;
-            check_nt(identify_process(state->api, child.hProcess, related),
+            ImageRecord image{};
+            check_nt(identify_process(state->api, child.hProcess, related, &image),
                      "classify actual root image");
             if (reserved && !related)
                 check_nt(status_invalid_image, "verify preflight MSYS root");
@@ -231,7 +232,7 @@ int wmain(int argc, wchar_t **argv) try {
                          "adapt MSYS root objects");
             const auto modules = state->effective_modules(related);
             const auto installed = selected_hooks(modules);
-            if (installed) {
+            if (installed || ((modules & bit(Module::exe_placement)) && !image.dynamic_base)) {
                 wchar_t own_path[32768];
                 check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
                       "locate agent");

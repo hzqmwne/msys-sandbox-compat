@@ -69,6 +69,56 @@ void creation_attributes(PCWSTR image) {
     check(existing.attributes() == &input, "preserve-caller-creation-reservation");
 }
 
+constexpr uintptr_t preferred_exe_base = 0x170000000;
+int exe_map_attempts = 0;
+
+void preferred_exe_conflict() {
+    auto state = std::make_unique<AgentState>();
+    state->api = native_api();
+    state->api.query_process = [](HANDLE, PROCESSINFOCLASS, void *output, ULONG, PULONG) -> NTSTATUS {
+        constexpr wchar_t path[] = L"\\Device\\Test\\target.exe";
+        auto name = static_cast<UNICODE_STRING *>(output);
+        name->Buffer = reinterpret_cast<PWSTR>(name + 1);
+        name->Length = sizeof(path) - sizeof(wchar_t);
+        memcpy(name->Buffer, path, sizeof(path));
+        return status_success;
+    };
+    state->api.open_file = [](PHANDLE file, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO_STATUS_BLOCK,
+                              ULONG, ULONG) -> NTSTATUS {
+        *file = reinterpret_cast<HANDLE>(1);
+        return status_success;
+    };
+    state->api.create_section = [](PHANDLE section, ACCESS_MASK access, POBJECT_ATTRIBUTES,
+                                   PLARGE_INTEGER, ULONG, ULONG, HANDLE) -> NTSTATUS {
+        *section = reinterpret_cast<HANDLE>(2);
+        return access & SECTION_QUERY ? status_success : status_access_denied;
+    };
+    state->api.close = [](HANDLE) -> NTSTATUS { return status_success; };
+    state->api.query_section = [](HANDLE, ULONG kind, void *output, SIZE_T, PSIZE_T) -> NTSTATUS {
+        *static_cast<PVOID *>(output) = reinterpret_cast<PVOID>(preferred_exe_base);
+        return kind == section_original_base_information ? status_success : status_not_supported;
+    };
+    state->api.map_section = [](HANDLE, HANDLE, PVOID *address, ULONG_PTR, SIZE_T, PLARGE_INTEGER,
+                                PSIZE_T, ULONG, ULONG, ULONG) -> NTSTATUS {
+        if (*address == reinterpret_cast<PVOID>(preferred_exe_base))
+            ++exe_map_attempts;
+        return static_cast<NTSTATUS>(0xc0000018); // STATUS_CONFLICTING_ADDRESSES
+    };
+    constexpr uintptr_t original = 0x180000000;
+    uintptr_t base = original;
+    BYTE peb[64]{};
+    memcpy(peb + 0x10, &base, sizeof(base));
+    ImageRecord image{0x4000, 0x1000, 0, 0, false};
+    CONTEXT saved{};
+    saved.ContextFlags = CONTEXT_INTEGER;
+    saved.Rcx = base + image.entry_rva;
+    const auto status = prepare_exe_layout(*state, peb, saved, base, image);
+    check(status == status_success && exe_map_attempts == 1 && base == original &&
+              !memcmp(peb + 0x10, &original, sizeof(original)) &&
+              saved.Rcx == original + image.entry_rva,
+          "preferred-exe-conflict-keeps-original-startup");
+}
+
 void planner_cases() {
     BYTE source[hook_source_bytes]{};
     memset(source, 0x90, sizeof(source));
@@ -307,6 +357,7 @@ int wmain(int argc, wchar_t **argv) {
     if (argc != 2)
         return 2;
     creation_attributes(argv[1]);
+    preferred_exe_conflict();
     planner_cases();
     chained_entries();
     relocated_operations();

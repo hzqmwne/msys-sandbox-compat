@@ -35,6 +35,7 @@ NativeApi resolve_api(const AgentState &state) {
     const auto file_images = bit(Module::heap_window) | bit(Module::exe_placement);
     if (modules & file_images) {
         RESOLVE(open_file, "NtOpenFile");
+        RESOLVE(unmap_section, "NtUnmapViewOfSection");
     }
     if (modules & (file_images | bit(Module::ipc))) {
         RESOLVE(create_section, "NtCreateSection");
@@ -42,10 +43,7 @@ NativeApi resolve_api(const AgentState &state) {
     if (modules & (file_images | bit(Module::dll_placement))) {
         RESOLVE(map_section, "NtMapViewOfSection");
     }
-    if (state.enabled(Module::heap_window)) {
-        RESOLVE(unmap_section, "NtUnmapViewOfSection");
-    }
-    if (state.enabled(Module::dll_placement)) {
+    if (modules & (bit(Module::dll_placement) | bit(Module::exe_placement))) {
         RESOLVE(query_section, "NtQuerySection");
     }
     if (state.enabled(Module::ipc)) {
@@ -73,8 +71,11 @@ NativeApi resolve_api(const AgentState &state) {
         RESOLVE(resume, "NtResumeThread");
         RESOLVE(create_process, "NtCreateUserProcess");
     }
-    if (selected_hooks(modules)) {
+    const auto hooks = selected_hooks(modules);
+    if (hooks || state.enabled(Module::exe_placement)) {
         RESOLVE(terminate, "NtTerminateProcess");
+    }
+    if (hooks) {
         RESOLVE(add_function_table, "RtlAddFunctionTable");
     }
 #undef RESOLVE

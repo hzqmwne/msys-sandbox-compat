@@ -18,10 +18,10 @@ NTSTATUS initialize_child(AgentState &state, BYTE *peb, CONTEXT &saved) {
 
     const auto modules = state.effective_modules(related);
     if (modules & bit(Module::exe_placement)) {
-        status = prepare_fork_exe(state, peb, saved, base, image);
+        status = prepare_exe_layout(state, peb, saved, base, image);
         if (status < 0)
             return status;
-        if (modules & bit(Module::propagation))
+        if ((modules & bit(Module::propagation)) && !state.local.image.image_base)
             capture_parent_image(api, base, state.local.image);
     }
     const auto installed = selected_hooks(modules);

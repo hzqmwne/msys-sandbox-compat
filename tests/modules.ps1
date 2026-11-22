@@ -14,7 +14,9 @@ $launcher = Get-PsecLauncher $BinaryDirectory
 $compat = Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $fixtures = Get-TestFixtureDirectory $BinaryDirectory
 $client = Join-Path $fixtures 'import-name\import-name-client.exe'
+$fixedClient = Join-Path $fixtures 'import-name\import-name-fixed.exe'
 $bridge = Join-Path $fixtures 'native-bridge.exe'
+$exeAttempt = 'preferred EXE (mapped|mapping skipped)'
 
 function Invoke-Case([string]$Name, [string[]]$Arguments, [string[]]$Required = @(),
                      [string[]]$Absent = @(), [int]$ExitCode = 0, [string]$CompatPath = $compat) {
@@ -34,12 +36,12 @@ function Invoke-Case([string]$Name, [string[]]$Arguments, [string[]]$Required = 
 
 Invoke-Case 'dll-placement-off' @('--disable-module','dll-placement',$client,'1df') `
     @('hooks=1df','root heap preflight','released MSYS heap window','root=msys hooks=8') `
-    @('image mapping requested base','prepare EXE preferred base')
+    @('image mapping requested base',$exeAttempt)
 Invoke-Case 'exe-placement-off' @('--disable-module','exe-placement',$client) `
-    @('hooks=1ff','root heap preflight','released MSYS heap window') @('prepare EXE preferred base')
+    @('hooks=1ff','root heap preflight','released MSYS heap window') @($exeAttempt)
 Invoke-Case 'heap-window-off' @('--native-relay','--disable-module','heap-window',
     $bridge,'--relay','0',$client) @('hooks=1ff') `
-    @('heap preflight','released MSYS heap window','prepare EXE preferred base')
+    @('heap preflight','released MSYS heap window',$exeAttempt)
 Invoke-Case 'propagation-off' @('--disable-module','propagation',$client,'1bf') `
     @('hooks=1bf','root=msys hooks=8')
 Invoke-Case 'ipc-and-dacl-off' @('--disable-module','ipc','--disable-module','process-dacl',
@@ -50,7 +52,7 @@ Invoke-Case 'relay-policy-with-token-dacl-off' @('--native-relay','--disable-mod
 
 $layoutOff = @('--disable-module','heap-window','--disable-module','exe-placement',
     '--disable-module','dll-placement')
-$absentLayout = @('heap preflight','released MSYS heap window','prepare EXE preferred base',
+$absentLayout = @('heap preflight','released MSYS heap window',$exeAttempt,
     'image mapping requested base')
 Invoke-Case 'conpty-config' (@('--conpty') + $layoutOff + @($client,'1df')) `
     @('modules=71','hooks=1df') $absentLayout
@@ -75,7 +77,12 @@ $preparationOnly = @('--disable-module','dll-placement','--disable-module','prop
     '--disable-module','ipc','--disable-module','process-dacl','--disable-module','token-dacl')
 Invoke-Case 'root-preparation-without-agent' ($preparationOnly + @($client,'000')) `
     @('hooks=000','root=msys hooks=0','root heap preflight') `
-    @('image mapping requested base','prepare EXE preferred base') -CompatPath $standalone
+    @('image mapping requested base',$exeAttempt) -CompatPath $standalone
+Invoke-Case 'fixed-root-exe-placement-only' ($preparationOnly +
+    @('--disable-module','heap-window',$fixedClient,'000')) `
+    @('hooks=000 base=0*170000000','preferred EXE mapped 0*170000000') @('heap preflight')
+Invoke-Case 'fixed-root-exe-placement-off' ($allOff + @($fixedClient,'000')) `
+    @('hooks=000 base=(?!0*170000000\b)[0-9a-f]+') @($exeAttempt)
 $canary = Join-Path $PSScriptRoot 'fixtures\denied.txt'
 $allowed = Join-Path $PSScriptRoot 'fixtures\allowed.txt'
 $probe = Join-Path $fixtures 'native-probe.exe'

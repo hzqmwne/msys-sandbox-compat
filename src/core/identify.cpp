@@ -69,7 +69,8 @@ struct ImageReader {
         if (pe.FileHeader.Characteristics & IMAGE_FILE_DLL)
             return status_success;
         image = {size, pe.OptionalHeader.AddressOfEntryPoint, pe.FileHeader.TimeDateStamp,
-                 pe.OptionalHeader.CheckSum};
+                 pe.OptionalHeader.CheckSum,
+                 (pe.OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE) != 0};
         const auto &imports = pe.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
         if (imports.VirtualAddress > size || imports.Size > size - imports.VirtualAddress)
             return status_invalid_image;
@@ -146,7 +147,7 @@ NTSTATUS identify_executable(const NativeApi &api, HANDLE process, const void *b
     return reader.inspect(image, related);
 }
 
-NTSTATUS identify_process(const NativeApi &api, HANDLE process, bool &related) {
+NTSTATUS identify_process(const NativeApi &api, HANDLE process, bool &related, ImageRecord *record) {
     related = false;
     PROCESS_BASIC_INFORMATION basic{};
     auto status = api.query_process(process, ProcessBasicInformation, &basic, sizeof(basic), nullptr);
@@ -158,6 +159,6 @@ NTSTATUS identify_process(const NativeApi &api, HANDLE process, bool &related) {
     if (status < 0)
         return status;
     ImageRecord image{};
-    return identify_executable(api, process, base, image, related);
+    return identify_executable(api, process, base, record ? *record : image, related);
 }
 } // namespace msys_sandbox_compat

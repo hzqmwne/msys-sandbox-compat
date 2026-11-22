@@ -134,26 +134,16 @@ bool is_runtime_fork(const NativeApi &api, const BYTE *peb) {
            !runtime.startup_count && runtime.bytes == data.Length && runtime.intro == runtime_intro &&
            runtime.magic && runtime.type == fork_type;
 }
-} // namespace
 
-NTSTATUS prepare_fork_exe(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
-                          const ImageRecord &image) {
-    auto &api = state.api;
-    const auto &parent = state.parent;
-    if (base == parent.image_base || !is_runtime_fork(api, peb))
-        return status_success;
-    if (!parent.image_base || !parent.image_path[0] || image.entry_rva >= image.image_size ||
-        (saved.ContextFlags & CONTEXT_INTEGER) != CONTEXT_INTEGER ||
-        saved.Rcx != base + image.entry_rva)
-        return status_invalid_image;
-
+NTSTATUS map_exe(const NativeApi &api, const wchar_t *path, const ImageRecord &image,
+                 uintptr_t base, uintptr_t &target) {
     size_t chars = 0;
-    while (chars < image_path_chars && parent.image_path[chars])
+    while (chars < image_path_chars && path[chars])
         ++chars;
-    if (chars == image_path_chars)
+    if (!chars || chars == image_path_chars)
         return status_invalid_image;
     const auto bytes = static_cast<USHORT>(chars * sizeof(wchar_t));
-    UNICODE_STRING name{bytes, bytes, const_cast<PWSTR>(parent.image_path)};
+    UNICODE_STRING name{bytes, bytes, const_cast<PWSTR>(path)};
     OBJECT_ATTRIBUTES attributes{};
     InitializeObjectAttributes(&attributes, &name, OBJ_CASE_INSENSITIVE, nullptr, nullptr);
     IO_STATUS_BLOCK io{};
@@ -164,31 +154,80 @@ NTSTATUS prepare_fork_exe(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_
     if (status < 0)
         return status;
     HANDLE section = nullptr;
-    status = api.create_section(&section, SECTION_MAP_READ | SECTION_MAP_EXECUTE, nullptr, nullptr,
+    const auto access = SECTION_MAP_READ | SECTION_MAP_EXECUTE | (target ? 0 : SECTION_QUERY);
+    status = api.create_section(&section, access, nullptr, nullptr,
                                 PAGE_READONLY, SEC_IMAGE, file);
     api.close(file);
     if (status < 0)
         return status;
-    auto address = reinterpret_cast<void *>(parent.image_base);
+    if (!target) {
+        // An already mapped image header can reflect relocation. Query the section.
+        PVOID preferred = nullptr;
+        status = api.query_section(section, section_original_base_information, &preferred,
+                                   sizeof(preferred), nullptr);
+        target = reinterpret_cast<uintptr_t>(preferred);
+        if (status >= 0 && (!target || (target & 0xffff)))
+            status = status_invalid_image;
+        if (status < 0 || target == base) {
+            api.close(section);
+            return status;
+        }
+    }
+    auto address = reinterpret_cast<void *>(target);
     SIZE_T extent = 0;
     const auto process = current_process();
     status = api.map_section(section, process, &address, 0, 0, nullptr, &extent, 2, 0, PAGE_READONLY);
     api.close(section);
-    if (status < 0 || address != reinterpret_cast<void *>(parent.image_base))
-        return status < 0 ? status : status_unsuccessful;
+    if (status < 0)
+        return status;
+    if (address != reinterpret_cast<void *>(target)) {
+        if (address && address != reinterpret_cast<void *>(base))
+            api.unmap_section(process, address);
+        return status_unsuccessful;
+    }
 
     ImageRecord mapped{};
     bool related = false;
     status = identify_executable(api, process, address, mapped, related);
     if (status < 0 || !related || mapped.image_size != image.image_size ||
         mapped.entry_rva != image.entry_rva || mapped.timestamp != image.timestamp ||
-        mapped.checksum != image.checksum)
+        mapped.checksum != image.checksum || mapped.dynamic_base != image.dynamic_base) {
+        api.unmap_section(process, address);
         return status < 0 ? status : status_invalid_image;
+    }
+    return status_success;
+}
+} // namespace
 
+NTSTATUS prepare_exe_layout(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
+                            const ImageRecord &image) {
+    const bool fork = is_runtime_fork(state.api, peb);
+    auto target = fork ? state.parent.image_base : 0;
+    if (fork ? target == base : image.dynamic_base)
+        return status_success;
+    if ((fork && !target) || image.entry_rva >= image.image_size ||
+        (saved.ContextFlags & CONTEXT_INTEGER) != CONTEXT_INTEGER ||
+        saved.Rcx != base + image.entry_rva)
+        return fork ? status_invalid_image : status_success;
+
+    auto &current = state.local.image;
+    if (!fork)
+        capture_parent_image(state.api, base, current);
+    auto status = map_exe(state.api, fork ? state.parent.image_path : current.image_path, image,
+                          base, target);
+    if (status < 0 || target == base) {
+        if (!fork && status < 0)
+            agent_log(state, "preferred EXE mapping skipped", static_cast<ULONG>(status));
+        return fork ? status : status_success;
+    }
     // Windows still uses the original view even after its loader switches bases.
-    base = parent.image_base;
+    base = target;
     memcpy(peb + 0x10, &base, sizeof(base));
     saved.Rcx = base + image.entry_rva;
+    if (!fork) {
+        current.image_base = base;
+        agent_log(state, "preferred EXE mapped", base);
+    }
     return status_success;
 }
 
