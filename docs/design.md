@@ -32,7 +32,7 @@
 
 宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。父端依据实际挂起映像决定传播和创建阶段的对象 DACL 适配。IPC 模块使用当前兼容树的命名空间，三个 ACL 相关模块共享所需的 SID 信息，受限 relay 独立维护策略基准。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
 
-父端准备 agent、模块配置及普通的父端映像数据结构，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。
+父端准备 agent、模块配置及普通的父端映像数据结构，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。见 [ADR-0015](decisions/0015-initialize-at-child-loader-entry.md)。
 
 冷启动与 exec 时，未设置 `DYNAMIC_BASE` 的 MSYS 主 EXE 可尝试一次 PE 首选基址。首选址已使用时直接继续，尝试失败时沿用 Windows 已选定的基址。设置该标志的映像沿用 Windows 选址。fork 子进程仍在基址不同于父端实载基址时按父端路径对齐。新视图验证成功后才更新 PEB 和应用启动上下文，原视图继续保留。MSYS 启动后自行分配 cygheap 和 userheap。
 
@@ -90,6 +90,8 @@ relay 创建后比较父子令牌身份与隔离上下文，受限环境还核�
 ## ConPTY
 
 stdin、stdout、stderr 都是控制台句柄时默认启用 ConPTY。主机在既有受限上下文内用公开 API 创建 ConPTY，再复用兼容宿主 EXE 的一个原生实例持有自动标准句柄。该实例显式直连目标。真实 MSYS 目标只继承明确的句柄副本，避免 MSYS 关闭标准流后，控制台清理使用旧数值误关复用的句柄。agent 不重开 CONIN$/CONOUT$。
+
+部分标准流重定向时的候选方案见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md)。其中的八种组合表记录了 MSYS2 在传统 `cmd` 中的实际行为，并给出了拟定的自动选路。
 
 在受测 PSEC 配置中，Low IL 客户端连接外部 Medium IL conhost 时，控制台连接策略拒绝 MSYS 所需的读屏和输入事件写回。外部普通 conhost 降至 Low 后，打开客户端进程时又会遇到目标进程 DACL 中的 AppContainer package SID 所触发的访问限制。普通 Untrusted 调用者在同一 PSEC 配置下也无法打开客户端进程。同一 PSEC 内创建的 conhost 已验证可以查询客户端 token，并通过后续控制台策略检查。[微软控制台访问规则](https://learn.microsoft.com/en-us/windows/console/console-buffer-security-and-access-rights#wrong-way-verbs)
 

@@ -15,7 +15,7 @@
 | relay 的原生根、显式嵌套入口及挂起创建 | 受测 PSEC 和两种固定令牌均通过；仅创建入口被修改，保留退出码与挂起状态 |
 | 运行中新出现的 EXE/DLL | EXE 按直接导入识别，符合映射条件的 DLL 在首次映射时处理 |
 | ConPTY | 公开 API 路径在 PSEC 和两种固定非 AppContainer 受限令牌中通过交互回归。尺寸跟随通过 PSEC 内外两层 ConPTY 的原生探针验收 |
-| 传统控制台中的 cmd | 可见传统控制台中，三路均为控制台句柄时自动使用内层 ConPTY。`--no-conpty` 和 stdout 文件重定向的对照均保留原控制台 |
+| 传统控制台中的 cmd | 可见传统控制台中，三路均为控制台句柄时自动使用内层 ConPTY。`--no-conpty` 和 stdout 文件重定向的对照均保留原控制台。MSYS2 原生启动的八组实测与拟定自动选路见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md) |
 | Git `pre-commit` | 在已初始化的工作区，原生 Git 通过默认 relay 自动启动 MSYS hook。PSEC 和两种固定受限令牌通过提交成功、hook 拒绝提交及文件边界回归 |
 | 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
 | 非 AppContainer 完整 restricting SID 检查令牌 | 同一固定夹具通过上述工作负载与边界回归 |

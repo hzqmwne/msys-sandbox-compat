@@ -16,6 +16,7 @@
 ### MSYS 内存布局
 
 - 为已识别的 MSYS 进程在创建时暂留堆窗口，并在恢复执行前释放。原版 MSYS 自行预留和提交 cygheap 与 userheap，删除 `NtAllocateVirtualMemory` hook。
+- 冷启动和 exec 时可为未设置 `DYNAMIC_BASE` 的 MSYS 主 EXE 尝试一次 PE 首选基址，失败时沿用原选址。fork 仍按父进程实载地址对齐。
 - 按 EXE 自身的普通导入表识别直接依赖 `msys-2.0.dll` 的程序。DLL 映射从现有 section 查询标志、映像长度和首选基址，取消路径检查和临时视图。对基址未指定、未设置 `DYNAMIC_BASE` 且整个首选区间满足 `ZeroBits` 的 AMD64 映像 DLL 尝试首选址，失败时恢复原请求并重试。见 [ADR-0012](docs/decisions/0012-prefer-dll-image-base-at-map.md)。
 
 ### 终端转发
@@ -37,7 +38,8 @@
 
 - 移除生产入口的默认 Git 安装路径。旧命令的 `--runtime DLL` 参数仍可解析，参数值被忽略。
 - 默认策略快照与策略锁仅用于 relay，其他 token 的设置在拿锁前透传；普通模式只适配当次 ACL。
-- 仅提前确认受限上下文并准备可继承的会话标记，兼容 SID、命名空间和快照延至确认需要注入时建立；非 relay 不受快照容量限制。
+- 移除 `MSYS_SANDBOX_COMPAT_SESSION`。非 AppContainer 受限进程树的兼容目录按创建宿主 PID 命名，目录路径由 agent 传给支持的后代。
+- 将正式兼容初始化移至子进程首次进入加载器时，保留应用启动上下文和调用方的初始挂起语义。见 [ADR-0015](docs/decisions/0015-initialize-at-child-loader-entry.md)。
 - 安装失败统一终止挂起的新进程，删除跨入口回滚及无消费者的计划字段；ACL 结果复用已预留空间的输入副本。
 - ACL 拒绝用例按未执行和恢复后的正对照验收，Win32 错误码仅记录；设计细节归并到实现说明，测试文档不维护固定数量。
 - 移除原生 PSEC 的原版 Bash 拒绝诊断断言。PSEC 继续检查真实兼容负载与权限边界，非 AppContainer 受限令牌的进程链保留原版执行记录。

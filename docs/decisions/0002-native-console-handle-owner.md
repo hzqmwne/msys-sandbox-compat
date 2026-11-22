@@ -2,7 +2,8 @@
 
 Status: Accepted
 Date: 2026-10-20
-Related: ADR-0001
+Related: ADR-0001、[ADR-0014](0014-conpty-preserve-redirected-stdio.md)
+Partially superseded by: [ADR-0013](0013-default-relay-with-wow64.md) 在原生会话宿主默认启用 relay。
 
 ## Context
 

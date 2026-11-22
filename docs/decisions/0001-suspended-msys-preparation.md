@@ -1,7 +1,7 @@
 # ADR-0001：挂起创建、按导入名识别与严格原生边界
 
 Status: Accepted
-Partially superseded by: ADR-0004 更新 token 默认 DACL 的处理，ADR-0006 增加显式原生 relay，[ADR-0012](0012-prefer-dll-image-base-at-map.md) 将 EXE 识别收窄到直接普通导入。
+Partially superseded by: ADR-0004 更新 token 默认 DACL 的处理，ADR-0006 增加显式原生 relay，[ADR-0012](0012-prefer-dll-image-base-at-map.md) 将 EXE 识别收窄到直接普通导入，[ADR-0015](0015-initialize-at-child-loader-entry.md) 将正式初始化移到子进程的加载器入口。
 Date: 2026-10-20
 
 ## Context
