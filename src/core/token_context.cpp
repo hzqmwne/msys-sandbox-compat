@@ -127,7 +127,7 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
             break;
         }
     }
-    if (status >= 0) {
+    if (status >= 0 && !state.plain_context) {
         ULONG returned = 0;
         status = api.query_token(child, TokenDefaultDacl, right, capacity, &returned);
         if (status >= 0) {

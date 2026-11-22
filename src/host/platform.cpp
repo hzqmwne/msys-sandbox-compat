@@ -45,11 +45,6 @@ NativeApi resolve_api(const AgentState &state) {
     if (state.enabled(Module::heap_window)) {
         RESOLVE(unmap_section, "NtUnmapViewOfSection");
     }
-    if (state.enabled(Module::exe_placement)) {
-        RESOLVE(get_context, "NtGetContextThread");
-        RESOLVE(set_context, "NtSetContextThread");
-        RESOLVE(read_file, "NtReadFile");
-    }
     if (state.enabled(Module::dll_placement)) {
         RESOLVE(query_section, "NtQuerySection");
     }
@@ -76,10 +71,10 @@ NativeApi resolve_api(const AgentState &state) {
     }
     if (state.enabled(Module::propagation)) {
         RESOLVE(resume, "NtResumeThread");
-        RESOLVE(terminate, "NtTerminateProcess");
         RESOLVE(create_process, "NtCreateUserProcess");
     }
     if (selected_hooks(modules)) {
+        RESOLVE(terminate, "NtTerminateProcess");
         RESOLVE(add_function_table, "RtlAddFunctionTable");
     }
 #undef RESOLVE

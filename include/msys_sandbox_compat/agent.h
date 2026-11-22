@@ -7,7 +7,7 @@
 namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
-constexpr uint32_t agent_abi = 2;
+constexpr uint32_t agent_abi = 3;
 
 enum class Module : uint32_t {
     propagation = 1u << 0,
@@ -52,6 +52,7 @@ enum class HookId : size_t {
     create_process,
     set_token,
     set_security,
+    startup,
     count
 };
 constexpr size_t hook_count = static_cast<size_t>(HookId::count);
@@ -75,9 +76,16 @@ struct HookSlot {
     uintptr_t trampoline;
 };
 
+struct ParentStartData {
+    uintptr_t image_base;
+    wchar_t image_path[image_path_chars];
+};
+
 struct ProcessState {
     volatile LONG unwind_registered;
     volatile LONG policy_lock;
+    BYTE loader_entry[hook_patch_bytes];
+    ParentStartData image;
 };
 
 struct AgentState {
@@ -96,15 +104,18 @@ struct AgentState {
     unsigned char token_default_dacl[8192];
     uint32_t token_default_dacl_bytes;
     uint32_t object_policy_valid;
+    uint32_t plain_context;
     HookSlot hooks[hook_count];
     // Process-local fields are reset when cloning into a new suspended child.
     ProcessState local;
+    ParentStartData parent;
     uint32_t disabled_modules;
 
     uint32_t modules() const { return msys_modules & ~disabled_modules; }
     bool enabled(Module module) const { return (modules() & bit(module)) != 0; }
     uint32_t effective_modules(bool msys) const {
-        return msys ? modules() : native_relay ? bit(Module::propagation) : 0;
+        return msys ? (plain_context ? modules() & ~acl_modules : modules())
+                    : native_relay ? bit(Module::propagation) : 0;
     }
 };
 
@@ -114,16 +125,18 @@ NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, 
 uint32_t selected_hooks(uint32_t modules);
 NativeApi bind_original_calls(const AgentState &state, uint32_t installed);
 NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &state,
-                        uint32_t installed);
+                        uint32_t installed, BYTE *loader_entry = nullptr);
+NTSTATUS replace_entry(const NativeApi &api, HANDLE process, void *entry, const BYTE *code);
+NTSTATUS stage_startup(const NativeApi &api, HANDLE process, const AgentState &state,
+                        AgentState *remote, const ParentStartData &parent);
 NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state);
 NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state);
-NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
-                         const ProcessImage &image, AgentState &state);
-NTSTATUS prepare_exe_layout(const NativeApi &api, HANDLE process, HANDLE thread,
-                            const ProcessImage &image);
+NTSTATUS adapt_child_objects(HANDLE process, HANDLE thread, AgentState &state);
+void capture_parent_image(const NativeApi &api, uintptr_t base, ParentStartData &image);
+NTSTATUS prepare_fork_exe(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
+                          const ImageRecord &image);
 NTSTATUS release_heap_reservation(const NativeApi &api, HANDLE process, const AgentState &state);
-NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source,
-                     bool owns_reservation);
+NTSTATUS clone_agent(HANDLE process, AgentState &source);
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number = 0);
 
 } // namespace msys_sandbox_compat

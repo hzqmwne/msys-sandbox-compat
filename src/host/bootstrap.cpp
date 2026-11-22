@@ -230,8 +230,9 @@ void inject_root(HANDLE process, uint32_t installed, const AgentState &host_stat
         reinterpret_cast<uintptr_t>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "__chkstk"));
     check(stack_probe != 0, "ntdll stack probe");
     memcpy(mapped.data() + probe_rva, &stack_probe, sizeof(stack_probe));
-    const auto possible = state.enabled(Module::propagation) ? selected_hooks(state.modules())
-                                                            : installed;
+    const auto possible = state.enabled(Module::propagation)
+                              ? selected_hooks(state.effective_modules(true))
+                              : installed;
     visit_hooks(api, [&](HookId id, const char *name, auto &entry) {
         if (!(possible & bit(id)))
             return;
@@ -242,11 +243,22 @@ void inject_root(HANDLE process, uint32_t installed, const AgentState &host_stat
                               state.self_base + thunk_rva + index * hook_trampoline_bytes};
     });
     const NativeApi &originals = host_state.api;
-    api = bind_original_calls(state, installed);
+    const auto startup_handler = view.exported_rva("start_agent");
+    const auto startup_entry = reinterpret_cast<uintptr_t>(
+        GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "LdrInitializeThunk"));
+    check(startup_handler && startup_entry, "loader startup entries");
+    const auto startup = static_cast<size_t>(HookId::startup);
+    state.hooks[startup] = {startup_entry, state.self_base + startup_handler,
+                           state.self_base + thunk_rva + startup * hook_trampoline_bytes};
     memcpy(mapped.data() + state_rva, &state, sizeof(state));
     check_nt(originals.write(process, remote, mapped.data(), mapped.size(), nullptr),
              "write agent");
-    check_nt(install_hooks(originals, process, state, installed), "install root inline hooks");
+    if (state.enabled(Module::exe_placement))
+        capture_parent_image(originals, reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)),
+                             state.local.image);
+    auto remote_state = reinterpret_cast<AgentState *>(state.self_base + state_rva);
+    check_nt(stage_startup(originals, process, state, remote_state, state.local.image),
+             "stage root initialization");
     check_nt(protect_agent(originals, process, mapped.data(), state), "agent section protection");
 }
 } // namespace msys_sandbox_compat

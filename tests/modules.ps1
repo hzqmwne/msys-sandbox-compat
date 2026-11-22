@@ -33,13 +33,13 @@ function Invoke-Case([string]$Name, [string[]]$Arguments, [string[]]$Required = 
 }
 
 Invoke-Case 'dll-placement-off' @('--disable-module','dll-placement',$client,'1df') `
-    @('hooks=1df','root heap preflight','released MSYS heap window','prepare EXE preferred base','root=msys hooks=8') `
-    @('image mapping requested base')
+    @('hooks=1df','root heap preflight','released MSYS heap window','root=msys hooks=8') `
+    @('image mapping requested base','prepare EXE preferred base')
 Invoke-Case 'exe-placement-off' @('--disable-module','exe-placement',$client) `
     @('hooks=1ff','root heap preflight','released MSYS heap window') @('prepare EXE preferred base')
 Invoke-Case 'heap-window-off' @('--native-relay','--disable-module','heap-window',
-    $bridge,'--relay','0',$client) @('hooks=1ff','prepare EXE preferred base') `
-    @('heap preflight','released MSYS heap window')
+    $bridge,'--relay','0',$client) @('hooks=1ff') `
+    @('heap preflight','released MSYS heap window','prepare EXE preferred base')
 Invoke-Case 'propagation-off' @('--disable-module','propagation',$client,'1bf') `
     @('hooks=1bf','root=msys hooks=8')
 Invoke-Case 'ipc-and-dacl-off' @('--disable-module','ipc','--disable-module','process-dacl',
@@ -74,8 +74,8 @@ Copy-Item -LiteralPath $compat -Destination $standalone -Force
 $preparationOnly = @('--disable-module','dll-placement','--disable-module','propagation',
     '--disable-module','ipc','--disable-module','process-dacl','--disable-module','token-dacl')
 Invoke-Case 'root-preparation-without-agent' ($preparationOnly + @($client,'000')) `
-    @('hooks=000','root=msys hooks=0','root heap preflight','prepare EXE preferred base') `
-    @('image mapping requested base') -CompatPath $standalone
+    @('hooks=000','root=msys hooks=0','root heap preflight') `
+    @('image mapping requested base','prepare EXE preferred base') -CompatPath $standalone
 $canary = Join-Path $PSScriptRoot 'fixtures\denied.txt'
 $allowed = Join-Path $PSScriptRoot 'fixtures\allowed.txt'
 $probe = Join-Path $fixtures 'native-probe.exe'

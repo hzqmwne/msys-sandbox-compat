@@ -11,7 +11,7 @@ void check(bool success, const char *operation);
 void check_nt(NTSTATUS status, const char *operation);
 NativeApi resolve_api(const AgentState &state);
 AgentState *inherited_agent();
-std::wstring require_restricted_context(bool ipc);
+std::wstring prepare_session_tag(bool ipc);
 HANDLE configure_security(AgentState &state, const std::wstring &session_tag);
 BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool conpty,
                  const AgentState *state, PROCESS_INFORMATION &child, bool &reserved);

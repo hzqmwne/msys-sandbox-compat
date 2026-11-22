@@ -20,8 +20,6 @@ using WriteMemory = NTSTATUS(NTAPI *)(HANDLE, void *, const void *, SIZE_T, PSIZ
 using ProtectMemory = NTSTATUS(NTAPI *)(HANDLE, PVOID *, PSIZE_T, ULONG, PULONG);
 using QueryMemory = NTSTATUS(NTAPI *)(HANDLE, const void *, ULONG, void *, SIZE_T, PSIZE_T);
 using QueryProcess = NTSTATUS(NTAPI *)(HANDLE, PROCESSINFOCLASS, void *, ULONG, PULONG);
-using GetContext = NTSTATUS(NTAPI *)(HANDLE, PCONTEXT);
-using SetContext = NTSTATUS(NTAPI *)(HANDLE, const CONTEXT *);
 using ResumeThread = NTSTATUS(NTAPI *)(HANDLE, PULONG);
 using TerminateProcess = NTSTATUS(NTAPI *)(HANDLE, NTSTATUS);
 using CreateSection = NTSTATUS(NTAPI *)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PLARGE_INTEGER,
@@ -35,8 +33,6 @@ using OpenFile = NTSTATUS(NTAPI *)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO
                                    ULONG, ULONG);
 using WriteFile = NTSTATUS(NTAPI *)(HANDLE, HANDLE, void *, void *, PIO_STATUS_BLOCK, const void *,
                                     ULONG, PLARGE_INTEGER, PULONG);
-using ReadFile = NTSTATUS(NTAPI *)(HANDLE, HANDLE, void *, void *, PIO_STATUS_BLOCK, void *, ULONG,
-                                   PLARGE_INTEGER, PULONG);
 using FlushCode = NTSTATUS(NTAPI *)(HANDLE, const void *, SIZE_T);
 using Close = NTSTATUS(NTAPI *)(HANDLE);
 using SetSecurity = NTSTATUS(NTAPI *)(HANDLE, SECURITY_INFORMATION, PSECURITY_DESCRIPTOR);
@@ -67,8 +63,6 @@ struct NativeApi {
     ProtectMemory protect;
     QueryMemory query_memory;
     QueryProcess query_process;
-    GetContext get_context;
-    SetContext set_context;
     ResumeThread resume;
     TerminateProcess terminate;
     CreateSection create_section;
@@ -78,7 +72,6 @@ struct NativeApi {
     QueryObject query_object;
     OpenFile open_file;
     WriteFile write_file;
-    ReadFile read_file;
     FlushCode flush_code;
     Close close;
     SetSecurity set_security;

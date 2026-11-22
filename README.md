@@ -11,7 +11,7 @@
 | 运行时识别与早期介入 | 挂起创建目标。实际 EXE 的普通导入表直接声明 `msys-2.0.dll` 时，在初始线程恢复前手工映射兼容 agent。 |
 | 对象命名与显式 ACL | 将 MSYS 对象目录重定向到私有命名空间；对支持的 allow ACL，按原用户及 enabled groups 已有权限补受限 SID，保留描述符其他字段。已识别进程/线程的 DACL 同样适配。 |
 | 默认对象策略 | 拦截当前主 token 的 `TokenDefaultDacl` 设置，基于本次输入补受限 SID，不恢复启动快照；该策略作用于后续采用默认 DACL 的对象。 |
-| fork 地址布局 | 按需为主 EXE 补建首选地址视图。创建时暂留 MSYS 堆窗口，恢复前释放，由运行时自行分配。符合条件的 DLL 按 section 元数据尝试 PE 首选基址，失败后交回 Windows 选址。 |
+| fork 地址布局 | fork 子进程按父进程的实载基址对齐主 EXE。创建时暂留 MSYS 栈和堆窗口，恢复前释放。符合条件的 DLL 按 section 元数据尝试 PE 首选基址，失败后交回 Windows 选址。 |
 | 子进程传播 | 拦截 `NtCreateUserProcess`，在子进程恢复前识别、准备并复制 agent。默认不注入原生进程；开启 `--native-relay` 后，原生进程仅保留创建 hook，使后续 MSYS 自动接入。 |
 | 交互终端 | 使用公开 ConPTY API，由原生会话宿主持有初始标准句柄，向 MSYS 传递显式副本，支持交互输入、Ctrl+C 和作业控制。 |
 

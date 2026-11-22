@@ -2,14 +2,15 @@
 #include <securityappcontainer.h>
 
 namespace msys_sandbox_compat {
-std::wstring require_restricted_context(bool ipc) {
+std::wstring prepare_session_tag(bool ipc) {
+    if (!ipc)
+        return {};
     auto token = GetCurrentProcessToken();
     DWORD appcontainer = 0, bytes = 0;
     check(GetTokenInformation(token, TokenIsAppContainer, &appcontainer, sizeof(appcontainer),
                               &bytes),
           "TokenIsAppContainer");
-    check(appcontainer || IsTokenRestricted(token), "restricted execution context required");
-    if (appcontainer || !ipc)
+    if (appcontainer || !IsTokenRestricted(token))
         return {};
     // Publish only the launch tag before CreateProcess so later native bridges
     // inherit it. SID selection and namespace creation can wait for classification.
@@ -25,7 +26,7 @@ std::wstring require_restricted_context(bool ipc) {
 }
 
 HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
-    const bool adapt_acl = (state.modules() & acl_modules) != 0;
+    bool adapt_acl = (state.modules() & acl_modules) != 0;
     if (!adapt_acl && !state.native_relay)
         return nullptr;
     // MSYS-created native descendants can deny reopening their primary token.
@@ -35,14 +36,16 @@ HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
         BYTE package[sizeof(TOKEN_APPCONTAINER_INFORMATION) + SECURITY_MAX_SID_SIZE];
     PSID package_sid = nullptr;
     DWORD size = 0;
-    if (adapt_acl) {
+    if (adapt_acl || state.native_relay) {
         check(GetTokenInformation(token, TokenAppContainerSid, package, sizeof(package), &size),
               "TokenAppContainerSid");
         package_sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
+        state.plain_context = !package_sid && !IsTokenRestricted(token);
+        adapt_acl = adapt_acl && !state.plain_context;
     }
     PACL acl = nullptr;
     std::vector<BYTE> default_info;
-    if (state.native_relay || !package_sid) {
+    if ((state.native_relay && !state.plain_context) || (adapt_acl && !package_sid)) {
         DWORD default_bytes = 0;
         GetTokenInformation(token, TokenDefaultDacl, nullptr, 0, &default_bytes);
         default_info.resize(default_bytes);
@@ -52,7 +55,7 @@ HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
         acl = reinterpret_cast<TOKEN_DEFAULT_DACL *>(default_info.data())->DefaultDacl;
         check(!acl || IsValidAcl(acl), "sandbox default DACL");
     }
-    if (state.native_relay) {
+    if (state.native_relay && !state.plain_context) {
         check(!acl || acl->AclSize <= sizeof(state.token_default_dacl),
               "relay default DACL capacity");
         if (acl) {

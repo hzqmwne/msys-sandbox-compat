@@ -86,11 +86,25 @@ NativeApi bind_original_calls(const AgentState &state, uint32_t installed) {
     return api;
 }
 
+NTSTATUS replace_entry(const NativeApi &api, HANDLE process, void *entry, const BYTE *code) {
+    PVOID region = entry;
+    SIZE_T extent = hook_patch_bytes;
+    ULONG protection = 0, ignored = 0;
+    auto status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &protection);
+    if (status < 0)
+        return status;
+    SIZE_T transferred = 0;
+    status = api.write(process, entry, code, hook_patch_bytes, &transferred);
+    const auto restored = api.protect(process, &region, &extent, protection, &ignored);
+    if (status < 0 || restored < 0)
+        return status < 0 ? status : restored;
+    return transferred == hook_patch_bytes ? status_success : status_unsuccessful;
+}
+
 NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &state,
-                        uint32_t installed) {
-    // The new image is still writable and its initial thread is suspended.
-    // On failure the caller terminates this new process; partial installation
-    // is never resumed, so there is no cross-entry rollback transaction.
+                        uint32_t installed, BYTE *loader_entry) {
+    // The target is suspended or executing only the initial startup routine.
+    // Its caller terminates the new process on partial installation.
     // Keep batch storage off MSYS secondary-thread stacks. Each child's own
     // entry bytes are read again; no predecessor addresses are cloned blindly.
     NativeBuffer storage(api, sizeof(PendingHook) * hook_count);
@@ -137,37 +151,24 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &s
             api.read(process, reinterpret_cast<void *>(hook.target), current, verify, &transferred);
         if (status < 0 || transferred != verify || !same_code(current, item.source, verify))
             return status < 0 ? status : status_not_supported;
-        PVOID region = reinterpret_cast<void *>(hook.target);
-        SIZE_T extent = hook_patch_bytes;
-        ULONG protection = 0, ignored = 0;
-        status = api.protect(process, &region, &extent, PAGE_EXECUTE_READWRITE, &protection);
+        if (loader_entry && index == static_cast<size_t>(HookId::startup)) {
+            status = api.write(process, loader_entry, current, hook_patch_bytes, &transferred);
+            if (status < 0 || transferred != hook_patch_bytes)
+                return status < 0 ? status : status_unsuccessful;
+        }
+        status = replace_entry(api, process, reinterpret_cast<void *>(hook.target), item.plan.patch);
         if (status < 0)
             return status;
-        transferred = 0;
-        status = api.write(process, reinterpret_cast<void *>(hook.target), item.plan.patch,
-                           hook_patch_bytes, &transferred);
-        const auto restored = api.protect(process, &region, &extent, protection, &ignored);
-        if (status < 0 || transferred != hook_patch_bytes || restored < 0)
-            return status < 0 ? status : restored < 0 ? restored : status_unsuccessful;
     }
     return api.flush_code(process, nullptr, 0);
 }
 
-NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
-                         const ProcessImage &image, AgentState &state) {
-    if (state.enabled(Module::process_dacl)) {
-        // Set only this positively identified child's object ACLs.
-        auto status = adapt_kernel_object(api, process, state);
-        if (status < 0)
-            return status;
-        status = adapt_kernel_object(api, thread, state);
-        if (status < 0)
-            return status;
-    }
-    if (!state.enabled(Module::exe_placement))
+NTSTATUS adapt_child_objects(HANDLE process, HANDLE thread, AgentState &state) {
+    if (state.plain_context || !state.enabled(Module::process_dacl))
         return status_success;
-    agent_log(state, "prepare EXE preferred base", image.record.preferred_base);
-    return prepare_exe_layout(api, process, thread, image);
+    const auto &api = state.api;
+    auto status = adapt_kernel_object(api, process, state);
+    return status < 0 ? status : adapt_kernel_object(api, thread, state);
 }
 
 static ULONG section_protection(DWORD flags) {
@@ -195,47 +196,42 @@ NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, 
     return status_success;
 }
 
-NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &source,
-                     bool owns_reservation) {
+NTSTATUS stage_startup(const NativeApi &api, HANDLE process, const AgentState &state,
+                        AgentState *remote, const ParentStartData &parent) {
+    NativeBuffer storage(api, sizeof(ProcessState));
+    auto local = storage.as<ProcessState>();
+    if (!local)
+        return status_unsuccessful;
+    auto status = api.write(process, &remote->local, local, sizeof(*local), nullptr);
+    if (status < 0)
+        return status;
+    status = api.write(process, &remote->parent, &parent, sizeof(parent), nullptr);
+    if (status < 0)
+        return status;
+    const auto child_api = bind_original_calls(state, 0);
+    status = api.write(process, &remote->api, &child_api, sizeof(child_api), nullptr);
+    if (status < 0)
+        return status;
+    return install_hooks(api, process, state, bit(HookId::startup), remote->local.loader_entry);
+}
+
+NTSTATUS clone_agent(HANDLE process, AgentState &source) {
     auto &api = source.api;
-    auto status = status_success;
-    if (source.native_relay) {
-        status = check_child_context(api, process, source);
-        if (status < 0)
-            return status;
-    }
-    if (image.related) {
-        status = prepare_process(api, process, thread, image, source);
-        if (status < 0)
-            return status;
-    }
     PVOID remote = reinterpret_cast<void *>(source.self_base);
     SIZE_T size = source.self_size;
-    status = api.allocate(process, &remote, 0, &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    auto status = api.allocate(process, &remote, 0, &size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (status < 0 || reinterpret_cast<uintptr_t>(remote) != source.self_base)
         return status < 0 ? status : status_unsuccessful;
-    // All agent internal addresses and trampoline addresses are identical in
-    // descendants. Each child's entry bytes are rebuilt by install_hooks.
+    // Preserve the agent's relocated addresses. The child rebuilds its own
+    // runtime hooks before Windows initializes its imports.
     status = api.write(process, remote, reinterpret_cast<void *>(source.self_base),
                        source.self_size, nullptr);
     if (status < 0)
         return status;
-    ProcessState local{};
-    status = api.write(process, &source.local, &local, sizeof(local), nullptr);
+    status = stage_startup(api, process, source, &source, source.local.image);
     if (status < 0)
         return status;
-    const auto installed = selected_hooks(source.effective_modules(image.related));
-    // A native relay can prepare an MSYS child and vice versa. Bind calls to
-    // the original implementations according to the child's own hook set.
-    const auto child_api = bind_original_calls(source, installed);
-    status = api.write(process, &source.api, &child_api, sizeof(child_api), nullptr);
-    if (status < 0)
-        return status;
-    status = install_hooks(api, process, source, installed);
-    if (status < 0)
-        return status;
-    status = protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);
-    return status >= 0 && owns_reservation ? release_heap_reservation(api, process, source) : status;
+    return protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);
 }
 
 void agent_log(const AgentState &state, const char *event, ULONG_PTR number) {

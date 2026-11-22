@@ -70,67 +70,126 @@ HeapReservation::HeapReservation(const NativeApi &api, void *attributes, SIZE_T 
     attributes_ = input;
 }
 
-NTSTATUS prepare_exe_layout(const NativeApi &api, HANDLE process, HANDLE thread,
-                            const ProcessImage &image) {
-    PROCESS_BASIC_INFORMATION basic{};
-    auto status = api.query_process(process, ProcessBasicInformation, &basic, sizeof(basic), nullptr);
-    if (status < 0)
-        return status;
-    uintptr_t original = 0;
-    auto peb_image = reinterpret_cast<BYTE *>(basic.PebBaseAddress) + 0x10;
-    status = api.read(process, peb_image, &original, sizeof(original), nullptr);
-    if (status < 0 || original == image.record.preferred_base)
-        return status;
+void capture_parent_image(const NativeApi &api, uintptr_t base, ParentStartData &image) {
+    image.image_base = base;
+    image.image_path[0] = 0;
+    constexpr auto capacity = sizeof(UNICODE_STRING) + sizeof(image.image_path);
+    NativeBuffer storage(api, capacity);
+    auto name = storage.as<UNICODE_STRING>();
+    if (!name)
+        return;
+    ULONG bytes = 0;
+    const auto status = api.query_process(current_process(), static_cast<PROCESSINFOCLASS>(27),
+                                          name, capacity, &bytes);
+    const auto start = reinterpret_cast<uintptr_t>(name);
+    const auto text = reinterpret_cast<uintptr_t>(name->Buffer);
+    if (status >= 0 && text >= start + sizeof(*name) && text - start < capacity &&
+        !(name->Length % sizeof(wchar_t)) && name->Length < sizeof(image.image_path) &&
+        name->Length <= capacity - (text - start)) {
+        memcpy(image.image_path, name->Buffer, name->Length);
+        image.image_path[name->Length / sizeof(wchar_t)] = 0;
+    }
+}
 
-    UNICODE_STRING name{};
-    name.Buffer = const_cast<PWSTR>(image.path);
-    size_t path_chars = 0;
-    while (image.path[path_chars])
-        ++path_chars;
-    name.Length = static_cast<USHORT>(path_chars * sizeof(wchar_t));
-    name.MaximumLength = name.Length;
+namespace {
+bool is_runtime_fork(const NativeApi &api, const BYTE *peb) {
+    // AMD64 RTL_USER_PROCESS_PARAMETERS stores STARTUPINFO's reserved payload
+    // in RuntimeData. Read only the shared child_info prefix.
+    struct RuntimeChild {
+        DWORD startup_count;
+        DWORD bytes;
+        DWORD intro;
+        DWORD magic;
+        WORD type;
+    };
+    constexpr size_t parameters_offset = 0x20;
+    constexpr size_t flags_offset = 0x08;
+    constexpr size_t runtime_data_offset = 0xe0;
+    constexpr ULONG normalized = 1;
+    constexpr DWORD runtime_intro = 0xaf00fa64;
+    constexpr WORD fork_type = 3;
+    uintptr_t parameters = 0;
+    memcpy(&parameters, peb + parameters_offset, sizeof(parameters));
+    if (!parameters)
+        return false;
+    ULONG flags = 0;
+    UNICODE_STRING data{};
+    const auto process = current_process();
+    if (api.read(process, reinterpret_cast<void *>(parameters + flags_offset), &flags,
+                 sizeof(flags), nullptr) < 0 ||
+        api.read(process, reinterpret_cast<void *>(parameters + runtime_data_offset), &data,
+                 sizeof(data), nullptr) < 0 ||
+        !data.Buffer || data.Length < sizeof(RuntimeChild) || data.Length > data.MaximumLength)
+        return false;
+    auto buffer = reinterpret_cast<uintptr_t>(data.Buffer);
+    if (!(flags & normalized)) {
+        if (buffer > UINTPTR_MAX - parameters)
+            return false;
+        buffer += parameters;
+    }
+    RuntimeChild runtime{};
+    SIZE_T received = 0;
+    return api.read(process, reinterpret_cast<void *>(buffer), &runtime, sizeof(runtime),
+                    &received) >= 0 && received == sizeof(runtime) &&
+           !runtime.startup_count && runtime.bytes == data.Length && runtime.intro == runtime_intro &&
+           runtime.magic && runtime.type == fork_type;
+}
+} // namespace
+
+NTSTATUS prepare_fork_exe(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
+                          const ImageRecord &image) {
+    auto &api = state.api;
+    const auto &parent = state.parent;
+    if (base == parent.image_base || !is_runtime_fork(api, peb))
+        return status_success;
+    if (!parent.image_base || !parent.image_path[0] || image.entry_rva >= image.image_size ||
+        (saved.ContextFlags & CONTEXT_INTEGER) != CONTEXT_INTEGER ||
+        saved.Rcx != base + image.entry_rva)
+        return status_invalid_image;
+
+    size_t chars = 0;
+    while (chars < image_path_chars && parent.image_path[chars])
+        ++chars;
+    if (chars == image_path_chars)
+        return status_invalid_image;
+    const auto bytes = static_cast<USHORT>(chars * sizeof(wchar_t));
+    UNICODE_STRING name{bytes, bytes, const_cast<PWSTR>(parent.image_path)};
     OBJECT_ATTRIBUTES attributes{};
     InitializeObjectAttributes(&attributes, &name, OBJ_CASE_INSENSITIVE, nullptr, nullptr);
     IO_STATUS_BLOCK io{};
     HANDLE file = nullptr;
-    status = api.open_file(&file, FILE_READ_DATA | FILE_EXECUTE | SYNCHRONIZE, &attributes, &io,
-                           FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
+    auto status = api.open_file(&file, FILE_READ_DATA | FILE_EXECUTE | SYNCHRONIZE, &attributes,
+                                &io, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                FILE_SYNCHRONOUS_IO_NONALERT | FILE_NON_DIRECTORY_FILE);
     if (status < 0)
         return status;
     HANDLE section = nullptr;
-    status = api.create_section(&section, SECTION_ALL_ACCESS, nullptr, nullptr, PAGE_READONLY,
-                                SEC_IMAGE, file);
+    status = api.create_section(&section, SECTION_MAP_READ | SECTION_MAP_EXECUTE, nullptr, nullptr,
+                                PAGE_READONLY, SEC_IMAGE, file);
     api.close(file);
     if (status < 0)
         return status;
-    PVOID address = reinterpret_cast<void *>(image.record.preferred_base);
+    auto address = reinterpret_cast<void *>(parent.image_base);
     SIZE_T extent = 0;
-    status =
-        api.map_section(section, process, &address, 0, 0, nullptr, &extent, 2, 0, PAGE_READONLY);
+    const auto process = current_process();
+    status = api.map_section(section, process, &address, 0, 0, nullptr, &extent, 2, 0, PAGE_READONLY);
     api.close(section);
-    if (status < 0 || address != reinterpret_cast<void *>(image.record.preferred_base))
+    if (status < 0 || address != reinterpret_cast<void *>(parent.image_base))
         return status < 0 ? status : status_unsuccessful;
-    // A CONTEXT is over 1 KiB on AMD64. This function also runs during fork
-    // on MSYS-managed secondary-thread stacks; keep that storage off-stack.
-    NativeBuffer context_storage(api, sizeof(CONTEXT));
-    auto context = context_storage.as<CONTEXT>();
-    if (!context)
-        return status_unsuccessful;
-    context->ContextFlags = CONTEXT_FULL;
-    status = api.get_context(thread, context);
-    if (status < 0)
-        return status;
-    if (context->Rcx >= original && context->Rcx < original + image.record.image_size)
-        context->Rcx += image.record.preferred_base - original;
-    if (context->Rip >= original && context->Rip < original + image.record.image_size)
-        context->Rip += image.record.preferred_base - original;
-    status = api.write(process, peb_image, &image.record.preferred_base,
-                       sizeof(image.record.preferred_base), nullptr);
-    if (status < 0)
-        return status;
-    // The original randomized SEC_IMAGE view remains mapped: kernel thread
-    // creation still uses its metadata even after PEB.ImageBase is replaced.
-    return api.set_context(thread, context);
+
+    ImageRecord mapped{};
+    bool related = false;
+    status = identify_executable(api, process, address, mapped, related);
+    if (status < 0 || !related || mapped.image_size != image.image_size ||
+        mapped.entry_rva != image.entry_rva || mapped.timestamp != image.timestamp ||
+        mapped.checksum != image.checksum)
+        return status < 0 ? status : status_invalid_image;
+
+    // Windows still uses the original view even after its loader switches bases.
+    base = parent.image_base;
+    memcpy(peb + 0x10, &base, sizeof(base));
+    saved.Rcx = base + image.entry_rva;
+    return status_success;
 }
 
 NTSTATUS release_heap_reservation(const NativeApi &api, HANDLE process, const AgentState &state) {

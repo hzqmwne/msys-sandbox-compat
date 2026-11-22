@@ -16,7 +16,7 @@ static size_t maps, allocation_bytes, memory_reads, file_opens, path_queries;
 alignas(void *) static BYTE mock_peb[0x10 + sizeof(void *)];
 static int failures;
 static const wchar_t *app = L"\\Device\\Review\\app\\";
-static bool fail_allocation, reject_root_reopen;
+static bool fail_allocation;
 
 static Image &image(const std::wstring &name, const std::vector<std::string> &imports,
                     bool dll = true, LONG pe_offset = 0x100) {
@@ -71,8 +71,6 @@ static NTSTATUS NTAPI open_file(PHANDLE handle, ACCESS_MASK, POBJECT_ATTRIBUTES 
     ++file_opens;
     auto name = attributes->ObjectName;
     auto path = std::wstring(name->Buffer, name->Length / sizeof(wchar_t));
-    if (reject_root_reopen && path == std::wstring(app) + L"root.exe")
-        return status_unsuccessful;
     auto found = files.find(path);
     if (found == files.end())
         return static_cast<NTSTATUS>(0xc0000034);
@@ -115,17 +113,6 @@ static NTSTATUS NTAPI query_process(HANDLE, PROCESSINFOCLASS kind, void *buffer,
     }
     return status_unsuccessful;
 }
-static NTSTATUS NTAPI read_file(HANDLE file, HANDLE, void *, void *, PIO_STATUS_BLOCK io, void *out,
-                                ULONG bytes, PLARGE_INTEGER offset, PULONG) {
-    auto object = reinterpret_cast<Image *>(file);
-    if (offset->QuadPart < 0 ||
-        static_cast<size_t>(offset->QuadPart) + bytes > object->bytes.size())
-        return status_unsuccessful;
-    memcpy(out, object->bytes.data() + offset->QuadPart, bytes);
-    io->Information = bytes;
-    return 0;
-}
-
 int main() {
     NativeApi api{};
     api.allocate = allocate;
@@ -137,7 +124,6 @@ int main() {
     api.map_section = map_section;
     api.unmap_section = unmap_section;
     api.close = close_handle;
-    api.read_file = read_file;
     image(L"target.dll", {"msys-2.0.dll"});
     auto inspect = [&](const char *label, std::vector<std::string> names, LONG pe_offset = 0x100) {
         auto &root = image(L"root.exe", names, false, pe_offset);
@@ -168,16 +154,11 @@ int main() {
     inspect("process_layout_controls", {"msys-2.0.dll"});
     auto *loaded_root = files.at(std::wstring(app) + L"root.exe")->bytes.data();
     memcpy(mock_peb + 0x10, &loaded_root, sizeof(loaded_root));
-    ProcessImage process_image{};
+    bool related = false;
     path_queries = file_opens = allocation_bytes = 0;
-    reject_root_reopen = true;
-    auto status = identify_process(api, current_process(), process_image, false);
-    expect(status >= 0 && process_image.related && !path_queries && !file_opens && !allocation_bytes,
-           "disabled EXE placement skips process path lookup and file reopening");
-    status = identify_process(api, current_process(), process_image, true);
-    expect(status < 0 && process_image.related && path_queries == 1 && file_opens == 1,
-           "enabled EXE placement reads metadata and preserves positive classification on failure");
-    reject_root_reopen = false;
+    auto status = identify_process(api, current_process(), related);
+    expect(status >= 0 && related && !path_queries && !file_opens && !allocation_bytes,
+           "live process classification skips path lookup and file reopening");
     fail_allocation = true;
     direct = inspect("direct_import_without_allocation", {"msys-2.0.dll"});
     expect(direct.first >= 0 && direct.second, "direct imports work without allocating");

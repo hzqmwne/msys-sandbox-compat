@@ -85,7 +85,7 @@ int wmain(int argc, wchar_t **argv) try {
             break;
     }
     if (first == argc) {
-        fprintf(stderr, "Usage (inside a restricted context): msys-sandbox-compat [--trace] "
+        fprintf(stderr, "Usage: msys-sandbox-compat [--trace] "
                         "[--native-relay] [--disable-module NAME] [--runtime DLL] PROGRAM "
                         "[arguments...]\n"
                         "Terminal options (before PROGRAM): "
@@ -117,7 +117,7 @@ int wmain(int argc, wchar_t **argv) try {
         state->trace = trace;
         state->native_relay = native_relay;
         state->disabled_modules = disabled_modules;
-        session_tag = require_restricted_context(state->enabled(Module::ipc));
+        session_tag = prepare_session_tag(state->enabled(Module::ipc));
         if (state->modules())
             state->api = resolve_api(*state);
     }
@@ -207,13 +207,14 @@ int wmain(int argc, wchar_t **argv) try {
             fprintf(stderr, "[launcher] pid=%lu classification=skipped hooks=0 debugger=none\n",
                     child.dwProcessId);
         } else {
-            ProcessImage image{};
-            check_nt(identify_process(state->api, child.hProcess, image,
-                                      state->enabled(Module::exe_placement)),
+            bool related = false;
+            check_nt(identify_process(state->api, child.hProcess, related),
                      "classify actual root image");
-            if (reserved && !image.related)
+            if (reserved && !related)
                 check_nt(status_invalid_image, "verify preflight MSYS root");
-            if (image.related && (state->modules() & acl_modules)) {
+            if (related || native_relay)
+                object_directory.reset(configure_security(*state, session_tag));
+            if (related && !state->plain_context && (state->modules() & acl_modules)) {
                 // A cold MSYS start needs a real primary-token handle. A token
                 // inherited through an MSYS-created native bridge may deny this,
                 // even though our own read-only pseudo-token queries succeeded.
@@ -222,17 +223,13 @@ int wmain(int argc, wchar_t **argv) try {
                       "query MSYS root token before initialization");
                 CloseHandle(root_token);
             }
-            if (image.related || native_relay) {
-                object_directory.reset(configure_security(*state, session_tag));
-                if (native_relay)
-                    check_nt(check_child_context(state->api, child.hProcess, *state),
-                             "root relay security context");
-                if (image.related)
-                    check_nt(prepare_process(state->api, child.hProcess, child.hThread, image,
-                                             *state),
-                             "prepare MSYS root");
-            }
-            const auto modules = state->effective_modules(image.related);
+            if (native_relay)
+                check_nt(check_child_context(state->api, child.hProcess, *state),
+                         "root relay security context");
+            if (related)
+                check_nt(adapt_child_objects(child.hProcess, child.hThread, *state),
+                         "adapt MSYS root objects");
+            const auto modules = state->effective_modules(related);
             const auto installed = selected_hooks(modules);
             if (installed) {
                 wchar_t own_path[32768];
@@ -247,7 +244,7 @@ int wmain(int argc, wchar_t **argv) try {
             fprintf(
                 stderr,
                 "[launcher] pid=%lu classification=live-imports root=%s hooks=%zu debugger=none\n",
-                child.dwProcessId, image.related ? "msys" : "native",
+                child.dwProcessId, related ? "msys" : "native",
                 std::bitset<hook_count>(installed).count());
             if (trace) {
                 fprintf(stderr, "[launcher] modules=%02lx", static_cast<ULONG>(modules));

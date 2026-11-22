@@ -36,7 +36,7 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
     auto &state = g_agent_state;
     register_unwind();
     PolicyGuard guard(state);
-    if (state.native_relay) {
+    if (state.native_relay && !state.plain_context) {
         auto permitted = check_object_policy(state.api, reinterpret_cast<HANDLE>(-4), state);
         if (permitted < 0) {
             if (process)
@@ -63,27 +63,42 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
         status = create(attributes);
     if (status < 0)
         return status;
-    NativeBuffer storage(state.api, sizeof(ProcessImage));
-    auto image = storage.as<ProcessImage>();
-    auto prepared = image ? identify_process(state.api, *process, *image,
-                                             state.enabled(Module::exe_placement))
-                          : status_unsuccessful;
-    if (owns_reservation && prepared >= 0 && !image->related)
+    bool related = false;
+    auto prepared = status_success;
+    if (!state.native_relay || owns_reservation || state.trace ||
+        (!state.plain_context && state.enabled(Module::process_dacl)))
+        prepared = identify_process(state.api, *process, related);
+    if (owns_reservation && prepared >= 0 && !related)
         prepared = status_invalid_image;
     if (prepared < 0) {
-        if (owns_reservation || state.native_relay || (image && image->related))
+        if (owns_reservation || state.native_relay || related)
             goto failed;
         agent_log(state, "child classification unavailable; left uninstrumented",
                   static_cast<ULONG>(prepared));
-    } else if (image->related || state.native_relay) {
-        agent_log(state, "child modules", state.effective_modules(image->related));
-        prepared = clone_agent(*process, *thread, *image, state, owns_reservation);
+    } else if (related || state.native_relay) {
+        agent_log(state, "child modules", state.effective_modules(related));
+        if (state.native_relay) {
+            prepared = check_child_context(state.api, *process, state);
+            if (prepared < 0)
+                goto failed;
+        }
+        if (related) {
+            prepared = adapt_child_objects(*process, *thread, state);
+            if (prepared < 0)
+                goto failed;
+        }
+        prepared = clone_agent(*process, state);
         if (prepared < 0)
             goto failed;
-        agent_log(state, image->related ? "injected MSYS child" : "injected native relay",
+        agent_log(state, related ? "injected MSYS child" : "injected native relay",
                   reinterpret_cast<ULONG_PTR>(*process));
     } else {
         agent_log(state, "native child left uninstrumented", reinterpret_cast<ULONG_PTR>(*process));
+    }
+    if (owns_reservation) {
+        prepared = release_heap_reservation(state.api, *process, state);
+        if (prepared < 0)
+            goto failed;
     }
     if (!(thread_flags & thread_create_suspended)) {
         prepared = state.api.resume(*thread, nullptr);
