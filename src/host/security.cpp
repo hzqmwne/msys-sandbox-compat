@@ -2,30 +2,7 @@
 #include <securityappcontainer.h>
 
 namespace msys_sandbox_compat {
-std::wstring prepare_session_tag(bool ipc) {
-    if (!ipc)
-        return {};
-    auto token = GetCurrentProcessToken();
-    DWORD appcontainer = 0, bytes = 0;
-    check(GetTokenInformation(token, TokenIsAppContainer, &appcontainer, sizeof(appcontainer),
-                              &bytes),
-          "TokenIsAppContainer");
-    if (appcontainer || !IsTokenRestricted(token))
-        return {};
-    // Publish only the launch tag before CreateProcess so later native bridges
-    // inherit it. SID selection and namespace creation can wait for classification.
-    wchar_t tag[32]{};
-    auto count = GetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", tag, _countof(tag));
-    check(count < _countof(tag), "inherited compatibility session");
-    for (DWORD i = 0; i < count; ++i)
-        check(tag[i] >= L'0' && tag[i] <= L'9', "compatibility session tag");
-    auto identity = count ? std::wstring(tag) : std::to_wstring(GetCurrentProcessId());
-    check(SetEnvironmentVariableW(L"MSYS_SANDBOX_COMPAT_SESSION", identity.c_str()),
-          "inherit compatibility session");
-    return identity;
-}
-
-HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
+HANDLE configure_security(AgentState &state) {
     bool adapt_acl = (state.modules() & acl_modules) != 0;
     if (!adapt_acl && !state.native_relay)
         return nullptr;
@@ -132,7 +109,7 @@ HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
     // non-AppContainer restricting principal above.
     // AppContainer namespaces are supplied by Windows. Restricted tokens need
     // a per-launch directory so unrelated MSYS sessions cannot precreate it
-    // with a different ACL. Native intermediaries inherit the launch tag.
+    // with a different ACL. The agent carries this directory within the tree.
     wchar_t relative[object_root_chars]{};
     ULONG chars = 0;
     if (package_sid)
@@ -151,7 +128,7 @@ HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
               "namespace descriptor");
         check(SetSecurityDescriptorDacl(&namespace_descriptor, TRUE, acl, FALSE),
               "namespace default ACL");
-        root += L"\\msys-sandbox-compat-" + session_tag;
+        root += L"\\msys-sandbox-compat-" + std::to_wstring(GetCurrentProcessId());
         check(root.size() < object_root_chars, "namespace capacity");
         UNICODE_STRING name{static_cast<USHORT>(root.size() * sizeof(wchar_t)),
                             static_cast<USHORT>((root.size() + 1) * sizeof(wchar_t)), root.data()};

@@ -102,7 +102,6 @@ int wmain(int argc, wchar_t **argv) try {
     auto executable = fs::absolute(argv[first]);
     std::unique_ptr<AgentState> state;
     auto inherited = inherited_agent();
-    std::wstring session_tag;
     std::unique_ptr<void, decltype(&CloseHandle)> object_directory(nullptr, CloseHandle);
     if (inherited) {
         if (disabled_modules & ~inherited->disabled_modules)
@@ -117,7 +116,6 @@ int wmain(int argc, wchar_t **argv) try {
         state->trace = trace;
         state->native_relay = native_relay;
         state->disabled_modules = disabled_modules;
-        session_tag = prepare_session_tag(state->enabled(Module::ipc));
         if (state->modules())
             state->api = resolve_api(*state);
     }
@@ -214,7 +212,7 @@ int wmain(int argc, wchar_t **argv) try {
             if (reserved && !related)
                 check_nt(status_invalid_image, "verify preflight MSYS root");
             if (related || native_relay)
-                object_directory.reset(configure_security(*state, session_tag));
+                object_directory.reset(configure_security(*state));
             if (related && !state->plain_context && (state->modules() & acl_modules)) {
                 // A cold MSYS start needs a real primary-token handle. A token
                 // inherited through an MSYS-created native bridge may deny this,

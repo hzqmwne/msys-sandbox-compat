@@ -15,7 +15,7 @@ Extends: ADR-0001、ADR-0003、ADR-0004；增加非 AppContainer 受限令牌路
 
 兼容宿主接受已有 AppContainer SID 或实际受限令牌。非 AppContainer 路径沿用启动器默认对象 DACL 创建 MSYS 对象描述符，不给所有 restricting SID 增加通用授权。ADR-0004 的默认 DACL 保留同样适用。
 
-在当前 session 的 BaseNamedObjects 下创建每次启动的私有目录，由宿主保持句柄直至进程树退出。数字启动标记经内部环境变量继承，使显式兼容入口在原生中间程序之后复用该目录。PSEC 继续使用 Windows 提供的 AppContainer 命名空间。
+在当前 Windows 会话的 BaseNamedObjects 下按创建者宿主 PID 命名私有目录，由宿主保持句柄直至进程树退出。agent 在兼容树内传递目录路径。关闭 native relay 时，经过原生中间程序后的显式兼容入口建立新树和新目录。PSEC 继续使用 Windows 提供的 AppContainer 命名空间。
 
 隔离启动器负责 token、文件和对象策略；生产兼容层不创建替代 token 或补授文件访问。固定测试夹具在标记工作目录内准备只读兼容产物及权限 canary，原版 MSYS 仍从原安装位置加载。
 

@@ -28,9 +28,9 @@
 
 ## 初始准备
 
-宿主按模块和令牌条件准备会话标记、命名空间和传播策略。普通令牌使用 Windows 自身的对象路径和 ACL。
+宿主按模块和令牌条件准备命名空间和传播策略。普通令牌使用 Windows 自身的对象路径和 ACL。
 
-宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。父端依据实际挂起映像决定传播和创建阶段的对象 DACL 适配。IPC 模块持有命名空间与会话标记，三个 ACL 相关模块共享所需的 SID 信息，受限 relay 独立维护策略基准。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
+宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。父端依据实际挂起映像决定传播和创建阶段的对象 DACL 适配。IPC 模块使用当前兼容树的命名空间，三个 ACL 相关模块共享所需的 SID 信息，受限 relay 独立维护策略基准。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
 
 父端准备 agent、模块配置及普通的父端映像数据结构，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。
 
@@ -67,7 +67,7 @@ MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启
 MSYS 冷启动分别设置 token 默认 DACL 和当前进程对象的 DACL。当前进程伪句柄的独立 DACL 设置复用同一转换器，原系统调用执行授权检查。Git for Windows 的新运行时通过进程句柄检查控制台所有者是否仍存活，这条设置路径会影响该检查。
 宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄。PSEC 对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化。查询取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
 
-非 AppContainer 受限令牌没有 package 私有命名空间。宿主在当前 session 的 `BaseNamedObjects` 下创建每次启动的目录，目录初始策略沿用启动器默认 DACL，实际对象按当次输入适配，不遍历 restricting SID 并全部授权。目录句柄保持到进程树退出；内部环境变量 `MSYS_SANDBOX_COMPAT_SESSION` 携带数字启动标记，使原生中间程序后的显式兼容入口复用同一目录。普通 MSYS 和其他兼容会话的对象不会占用该目录。PSEC 路径不使用此标记。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
+非 AppContainer 受限令牌使用当前 Windows 会话的 `BaseNamedObjects`。宿主按自身 PID 命名兼容目录，沿用启动器默认 DACL，并持有目录句柄直到进程树退出。实际对象按当次输入适配。agent 在兼容树内传递目录路径。关闭 relay 时，经过原生中间程序后的显式兼容入口建立新树和新目录。默认 ConPTY 由内层宿主创建目录。AppContainer 使用 Windows 提供的 package 命名空间。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
 
 ## fork 与进程链
 

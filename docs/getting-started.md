@@ -55,7 +55,7 @@ MSYS 兼容模块默认全部启用。可重复传入 `--disable-module NAME`，
 | `heap-window` | 创建前的磁盘导入预检、临时堆窗口及其交还 |
 | `exe-placement` | 冷启动和 exec 时尝试未设置 `DYNAMIC_BASE` 的 EXE 首选基址，以及 fork 时按父进程实载地址对齐 |
 | `dll-placement` | DLL 定址 hook 及其中的 section 查询 |
-| `ipc` | MSYS 命名对象路径和显式 ACL 适配，以及相应的命名空间与会话标记 |
+| `ipc` | MSYS 命名对象路径和显式 ACL 适配，以及相应的命名空间准备 |
 | `process-dacl` | MSYS 进程和线程对象 DACL 适配 |
 | `token-dacl` | MSYS 主 token 默认 DACL 适配 |
 
