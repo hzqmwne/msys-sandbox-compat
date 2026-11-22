@@ -7,6 +7,24 @@
 namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
+constexpr uint32_t agent_abi = 2;
+
+enum class Module : uint32_t {
+    propagation = 1u << 0,
+    heap_window = 1u << 1,
+    exe_placement = 1u << 2,
+    dll_placement = 1u << 3,
+    ipc = 1u << 4,
+    process_dacl = 1u << 5,
+    token_dacl = 1u << 6
+};
+
+constexpr uint32_t bit(Module module) { return static_cast<uint32_t>(module); }
+constexpr uint32_t msys_modules = bit(Module::propagation) | bit(Module::heap_window) |
+                                  bit(Module::exe_placement) | bit(Module::dll_placement) |
+                                  bit(Module::ipc) | bit(Module::process_dacl) |
+                                  bit(Module::token_dacl);
+constexpr uint32_t acl_modules = bit(Module::ipc) | bit(Module::process_dacl) | bit(Module::token_dacl);
 
 // AMD64 MSYS lays out cygheap at 32 GiB, userheap from 40 GiB, and mmap from
 // 64 GiB. Keep that address window clear only through kernel process creation.
@@ -36,6 +54,19 @@ enum class HookId : size_t {
     count
 };
 constexpr size_t hook_count = static_cast<size_t>(HookId::count);
+constexpr uint32_t bit(HookId hook) { return 1u << static_cast<size_t>(hook); }
+
+template <typename Visit> void visit_hooks(NativeApi &api, Visit visit) {
+    visit(HookId::directory, "hook_directory", api.create_directory);
+    visit(HookId::section, "hook_section", api.create_section);
+    visit(HookId::mutant, "hook_mutant", api.create_mutant);
+    visit(HookId::symbolic_link, "hook_link", api.create_link);
+    visit(HookId::named_pipe, "hook_pipe", api.create_pipe);
+    visit(HookId::map_view, "hook_map", api.map_section);
+    visit(HookId::create_process, "hook_process", api.create_process);
+    visit(HookId::set_token, "hook_set_token", api.set_token);
+    visit(HookId::set_security, "hook_set_security", api.set_security);
+}
 
 struct HookSlot {
     uintptr_t target;
@@ -67,12 +98,22 @@ struct AgentState {
     HookSlot hooks[hook_count];
     // Process-local fields are reset when cloning into a new suspended child.
     ProcessState local;
+    uint32_t disabled_modules;
+
+    uint32_t modules() const { return msys_modules & ~disabled_modules; }
+    bool enabled(Module module) const { return (modules() & bit(module)) != 0; }
+    uint32_t effective_modules(bool msys) const {
+        return msys ? modules() : native_relay ? bit(Module::propagation) : 0;
+    }
 };
 
 static_assert(sizeof(void *) == 8, "The agent supports AMD64 only");
 
 NTSTATUS protect_agent(const NativeApi &api, HANDLE process, const void *image, AgentState &state);
-NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys);
+uint32_t selected_hooks(uint32_t modules);
+NativeApi bind_original_calls(const AgentState &state, uint32_t installed);
+NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &state,
+                        uint32_t installed);
 NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state);
 NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state);
 NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,

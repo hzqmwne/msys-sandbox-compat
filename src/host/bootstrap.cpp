@@ -4,7 +4,6 @@
 #include <fstream>
 #include <iterator>
 #include <psapi.h>
-#include <type_traits>
 
 namespace msys_sandbox_compat {
 namespace {
@@ -26,6 +25,7 @@ NTSTATUS NTAPI reserve_root_heaps(PHANDLE process, PHANDLE thread, ACCESS_MASK p
         return original_root_create(process, thread, process_access, thread_access, process_attrs,
                                     thread_attrs, process_flags, thread_flags, parameters,
                                     create_info, attributes);
+    agent_log(root->state, "root heap preflight");
     HeapReservation reserve(root->state.api, attributes);
     auto status = original_root_create(process, thread, process_access, thread_access, process_attrs,
                                        thread_attrs, process_flags, thread_flags, parameters,
@@ -77,7 +77,8 @@ BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool
                               CREATE_SUSPENDED | (conpty ? EXTENDED_STARTUPINFO_PRESENT : 0),
                               nullptr, nullptr, &startup.StartupInfo, &child);
     };
-    auto slot = state && !conpty ? root_create_slot() : nullptr;
+    auto slot = state && !conpty && state->enabled(Module::heap_window) ? root_create_slot()
+                                                                        : nullptr;
     DWORD protection = 0;
     if (!slot || !VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &protection))
         return create();
@@ -138,6 +139,10 @@ AgentState *inherited_agent() {
     auto handler_rva = view.exported_rva("hook_process");
     if (!state_rva || !handler_rva || base + handler_rva != handler)
         return nullptr;
+    const auto abi_rva = view.exported_rva("g_agent_abi");
+    const auto abi = abi_rva ? view.at<uint32_t>(abi_rva) : nullptr;
+    check_nt(abi && *abi == agent_abi ? status_success : status_not_supported,
+             "inherited relay agent state version");
     auto state = view.at<AgentState>(state_rva);
     if (!state || !state->native_relay || state->self_base != reinterpret_cast<uintptr_t>(base) ||
         state->self_size != size)
@@ -150,7 +155,7 @@ AgentState *inherited_agent() {
                : nullptr;
 }
 
-void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, AgentState &host_state,
+void inject_root(HANDLE process, uint32_t installed, const AgentState &host_state,
                  const std::filesystem::path &agent) {
     auto payload = std::make_unique<AgentState>(host_state);
     auto &state = *payload;
@@ -214,6 +219,10 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
         used += block->SizeOfBlock;
     }
     auto state_rva = view.exported_rva("g_agent_state");
+    const auto abi_rva = view.exported_rva("g_agent_abi");
+    const auto abi = abi_rva ? view.at<uint32_t>(abi_rva) : nullptr;
+    check_nt(abi && *abi == agent_abi ? status_success : status_not_supported,
+             "agent state version");
     auto thunk_rva = view.exported_rva("g_agent_thunks");
     auto probe_rva = view.exported_rva("g_native_chkstk");
     check(state_rva && thunk_rva && probe_rva, "agent data exports");
@@ -221,33 +230,23 @@ void inject_root(HANDLE process, HANDLE thread, const ProcessImage &image, Agent
         reinterpret_cast<uintptr_t>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "__chkstk"));
     check(stack_probe != 0, "ntdll stack probe");
     memcpy(mapped.data() + probe_rva, &stack_probe, sizeof(stack_probe));
-    NativeApi originals = api;
-    auto bind = [&](HookId id, const char *name, auto &entry) {
+    const auto possible = state.enabled(Module::propagation) ? selected_hooks(state.modules())
+                                                            : installed;
+    visit_hooks(api, [&](HookId id, const char *name, auto &entry) {
+        if (!(possible & bit(id)))
+            return;
         auto handler = view.exported_rva(name);
         check(handler != 0, "agent handler export");
         auto index = static_cast<size_t>(id);
-        auto &hook = state.hooks[index];
-        hook = {reinterpret_cast<uintptr_t>(entry), state.self_base + handler,
-                state.self_base + thunk_rva + index * hook_trampoline_bytes};
-        entry = reinterpret_cast<std::remove_reference_t<decltype(entry)>>(hook.trampoline);
-    };
-    if (state.native_relay)
-        check_nt(check_child_context(originals, process, state), "root relay security context");
-    if (image.related)
-        check_nt(prepare_process(originals, process, thread, image, state), "prepare MSYS root");
-    bind(HookId::directory, "hook_directory", api.create_directory);
-    bind(HookId::section, "hook_section", api.create_section);
-    bind(HookId::mutant, "hook_mutant", api.create_mutant);
-    bind(HookId::symbolic_link, "hook_link", api.create_link);
-    bind(HookId::named_pipe, "hook_pipe", api.create_pipe);
-    bind(HookId::map_view, "hook_map", api.map_section);
-    bind(HookId::create_process, "hook_process", api.create_process);
-    bind(HookId::set_token, "hook_set_token", api.set_token);
-    bind(HookId::set_security, "hook_set_security", api.set_security);
+        state.hooks[index] = {reinterpret_cast<uintptr_t>(entry), state.self_base + handler,
+                              state.self_base + thunk_rva + index * hook_trampoline_bytes};
+    });
+    const NativeApi &originals = host_state.api;
+    api = bind_original_calls(state, installed);
     memcpy(mapped.data() + state_rva, &state, sizeof(state));
     check_nt(originals.write(process, remote, mapped.data(), mapped.size(), nullptr),
              "write agent");
-    check_nt(install_hooks(originals, process, state, image.related), "install root inline hooks");
+    check_nt(install_hooks(originals, process, state, installed), "install root inline hooks");
     check_nt(protect_agent(originals, process, mapped.data(), state), "agent section protection");
 }
 } // namespace msys_sandbox_compat

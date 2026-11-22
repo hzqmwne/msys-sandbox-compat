@@ -4,6 +4,7 @@
 #include "msys_sandbox_compat/object_security.h"
 #include <string.h>
 #include <intrin.h>
+#include <type_traits>
 
 namespace msys_sandbox_compat {
 
@@ -12,7 +13,6 @@ struct PendingHook {
     HookPlan plan;
     BYTE source[hook_source_bytes];
     size_t source_size;
-    bool selected;
 };
 
 bool same_code(const BYTE *left, const BYTE *right, size_t count) {
@@ -58,7 +58,36 @@ NTSTATUS read_hook_source(const NativeApi &api, HANDLE process, uintptr_t addres
 
 } // namespace
 
-NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, bool msys) {
+uint32_t selected_hooks(uint32_t modules) {
+    uint32_t selected = 0;
+    if (modules & bit(Module::propagation))
+        selected |= bit(HookId::create_process);
+    if (modules & bit(Module::ipc))
+        selected |= bit(HookId::directory) | bit(HookId::section) | bit(HookId::mutant) |
+                    bit(HookId::symbolic_link) | bit(HookId::named_pipe);
+    if (modules & bit(Module::dll_placement))
+        selected |= bit(HookId::map_view);
+    if (modules & bit(Module::process_dacl))
+        selected |= bit(HookId::set_security);
+    if (modules & bit(Module::token_dacl))
+        selected |= bit(HookId::set_token);
+    return selected;
+}
+
+NativeApi bind_original_calls(const AgentState &state, uint32_t installed) {
+    NativeApi api = state.api;
+    visit_hooks(api, [&](HookId id, const char *, auto &entry) {
+        const auto &slot = state.hooks[static_cast<size_t>(id)];
+        if (slot.target) {
+            const auto address = installed & bit(id) ? slot.trampoline : slot.target;
+            entry = reinterpret_cast<std::remove_reference_t<decltype(entry)>>(address);
+        }
+    });
+    return api;
+}
+
+NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &state,
+                        uint32_t installed) {
     // The new image is still writable and its initial thread is suspended.
     // On failure the caller terminates this new process; partial installation
     // is never resumed, so there is no cross-entry rollback transaction.
@@ -69,10 +98,11 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, 
     if (!pending)
         return status_unsuccessful;
     for (size_t index = 0; index < hook_count; ++index) {
+        if (!(installed & (1u << index)))
+            continue;
         const auto &hook = state.hooks[index];
         auto &item = pending[index];
         item = {};
-        item.selected = msys || index == static_cast<size_t>(HookId::create_process);
         auto status = read_hook_source(api, process, hook.target, item);
         if (status < 0)
             return status;
@@ -84,18 +114,19 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, 
             return status_not_supported;
         }
     }
-    // Relays also need unpatched original entries for classification/preparation.
     // Write all trampolines before exposing any handler to the target process.
     for (size_t index = 0; index < hook_count; ++index) {
+        if (!(installed & (1u << index)))
+            continue;
         auto status = api.write(process, reinterpret_cast<void *>(state.hooks[index].trampoline),
                                 pending[index].plan.trampoline, hook_trampoline_bytes, nullptr);
         if (status < 0)
             return status;
     }
     for (size_t index = 0; index < hook_count; ++index) {
-        auto &item = pending[index];
-        if (!item.selected)
+        if (!(installed & (1u << index)))
             continue;
+        auto &item = pending[index];
         const auto &hook = state.hooks[index];
         BYTE current[hook_source_bytes]{};
         size_t verify = item.plan.consumed;
@@ -124,12 +155,19 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, AgentState &state, 
 
 NTSTATUS prepare_process(const NativeApi &api, HANDLE process, HANDLE thread,
                          const ProcessImage &image, AgentState &state) {
-    // Set only this positively identified child's object ACLs.
-    auto status = adapt_kernel_object(api, process, state);
-    if (status < 0)
-        return status;
-    status = adapt_kernel_object(api, thread, state);
-    return status < 0 ? status : prepare_exe_layout(api, process, thread, image);
+    if (state.enabled(Module::process_dacl)) {
+        // Set only this positively identified child's object ACLs.
+        auto status = adapt_kernel_object(api, process, state);
+        if (status < 0)
+            return status;
+        status = adapt_kernel_object(api, thread, state);
+        if (status < 0)
+            return status;
+    }
+    if (!state.enabled(Module::exe_placement))
+        return status_success;
+    agent_log(state, "prepare EXE preferred base", image.record.preferred_base);
+    return prepare_exe_layout(api, process, thread, image);
 }
 
 static ULONG section_protection(DWORD flags) {
@@ -186,7 +224,14 @@ NTSTATUS clone_agent(HANDLE process, HANDLE thread, const ProcessImage &image, A
     status = api.write(process, &source.local, &local, sizeof(local), nullptr);
     if (status < 0)
         return status;
-    status = install_hooks(api, process, source, image.related);
+    const auto installed = selected_hooks(source.effective_modules(image.related));
+    // A native relay can prepare an MSYS child and vice versa. Bind calls to
+    // the original implementations according to the child's own hook set.
+    const auto child_api = bind_original_calls(source, installed);
+    status = api.write(process, &source.api, &child_api, sizeof(child_api), nullptr);
+    if (status < 0)
+        return status;
+    status = install_hooks(api, process, source, installed);
     if (status < 0)
         return status;
     status = protect_agent(api, process, reinterpret_cast<void *>(source.self_base), source);

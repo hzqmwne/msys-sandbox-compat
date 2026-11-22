@@ -6,6 +6,7 @@ param(
     [switch]$Raw,
     [switch]$Trace,
     [switch]$NativeRelay,
+    [string[]]$DisableModule = @(),
     [switch]$ConPty,
     [string]$ConPtyScript = '',
     [string]$TerminalSize,
@@ -14,6 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $BinaryDirectory = [IO.Path]::GetFullPath($BinaryDirectory)
 if ($Raw -and $NativeRelay) { throw '-NativeRelay requires the compatibility launcher' }
+if ($Raw -and $DisableModule) { throw '-DisableModule requires the compatibility launcher' }
 if ($NoConPty -and ($ConPty -or $ConPtyScript)) { throw '-NoConPty conflicts with -ConPty or -ConPtyScript' }
 $defaultProgram = !$Program
 if ($defaultProgram) { $Program = Join-Path $GitRoot 'usr\bin\bash.exe' }
@@ -50,6 +52,7 @@ try {
     if (!$Raw) {
         $launchArgs += (Join-Path $BinaryDirectory 'msys-sandbox-compat.exe')
         if ($NativeRelay) { $launchArgs += '--native-relay' }
+        foreach ($module in $DisableModule) { $launchArgs += @('--disable-module',$module) }
         $launchArgs += @('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
         if ($Trace) { $launchArgs += '--trace' }
         if ($ConPtyScript) { $launchArgs += @('--conpty-script',[IO.Path]::GetFullPath($ConPtyScript)) }

@@ -49,7 +49,7 @@ endforeach()
 # a host that permits their creation. They share runtime fixtures, so serialize.
 find_program(MSYS_SANDBOX_COMPAT_POWERSHELL NAMES pwsh)
 if(MSYS_SANDBOX_COMPAT_POWERSHELL)
-  foreach(suite verify scope conpty conpty-resize terminal-session stdio late-package process-chain git-hook)
+  foreach(suite verify scope modules conpty conpty-resize terminal-session stdio late-package process-chain git-hook)
     add_test(NAME psec.${suite} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
       -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")

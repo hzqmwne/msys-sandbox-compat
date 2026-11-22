@@ -36,7 +36,7 @@ CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构
 
 ```text
 psec-run.exe policy.json program.exe [arguments...]
-msys-sandbox-compat.exe [--trace] [--native-relay]
+msys-sandbox-compat.exe [--trace] [--native-relay] [--disable-module NAME]...
     [--conpty | --no-conpty | --conpty-script input.txt] [--conpty-size WIDTHxHEIGHT]
     program.exe [arguments...]
 ```
@@ -44,6 +44,22 @@ msys-sandbox-compat.exe [--trace] [--native-relay]
 `psec-run.exe` 是普通宿主调用的 PSEC 开发验证工具。`msys-sandbox-compat.exe` 在既有 PSEC 或非 AppContainer 受限令牌上下文内调用，负责兼容准备，并从自身目录定位 `msys-sandbox-compat.dll`。EXE 的普通导入表直接声明 `msys-2.0.dll` 即按 MSYS 处理，名称忽略大小写。旧命令中的 `--runtime DLL` 仍可传入，参数值被忽略，实际 DLL 由 Windows 加载器选择。
 
 排查 DLL 映射时，可用 `--trace` 查看尝试的 PE 首选址、该次映射状态、成功时的实址以及失败后的重试事件。见 [DLL 映射范围](design.md#dll-映射范围)。
+
+### 兼容模块对照
+
+MSYS 兼容模块默认全部启用。可重复传入 `--disable-module NAME`，例如 `--trace --disable-module dll-placement`。演示脚本对应 `-DisableModule dll-placement,exe-placement`。开关对本次启动和兼容层传播到的后代有效。
+
+| 模块名 | 关闭时跳过的处理 |
+|---|---|
+| `propagation` | 子进程创建 hook 和自动传播。与 `--native-relay` 互斥 |
+| `heap-window` | 创建前的磁盘导入预检、临时堆窗口及其交还 |
+| `exe-placement` | 进程映像路径查询、重新打开 EXE 读取 PE 首选基址，以及 EXE 重映射 |
+| `dll-placement` | DLL 定址 hook 及其中的 section 查询 |
+| `ipc` | MSYS 命名对象路径和显式 ACL 适配，以及相应的命名空间与会话标记 |
+| `process-dacl` | MSYS 进程和线程对象 DACL 适配 |
+| `token-dacl` | MSYS 主 token 默认 DACL 适配 |
+
+关闭模块可能重现该模块处理的兼容故障。隔离上下文检查与 relay 的策略核对仍然生效。嵌套启动器复用已有 relay 的配置，尝试关闭该树中已启用的模块会报错。ConPTY 继续由自己的选项控制。`--trace` 显示根进程实际启用的模块与后代的模块位掩码，位序按表格从最低位开始。
 
 接入受限令牌启动器时，将其启动目标设为 `msys-sandbox-compat.exe PROGRAM ...`，保留启动器既有 token、对象和文件策略。兼容 EXE/DLL 应部署在原策略已允许读取/执行的位置；原版 MSYS 安装文件也必须已具备原策略允许的访问。兼容层不修改任何磁盘 ACL、不放宽 restricted token，也不借非受限进程代读被拒绝的文件。缺少访问时记录该配置下的兼容阻碍，不能通过补权把它算作成功。已验收配置见 [兼容范围](compatibility.md)，测试用 `restricted-run.exe` 不作为产品启动器分发。
 

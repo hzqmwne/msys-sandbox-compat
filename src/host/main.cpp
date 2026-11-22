@@ -1,11 +1,31 @@
 #include "host.h"
 #include "msys_sandbox_compat/agent.h"
+#include <bitset>
 #include <cstdio>
 #include <stdexcept>
 #include "pseudoconsole.h"
 
 using namespace msys_sandbox_compat;
 namespace fs = std::filesystem;
+
+namespace {
+constexpr struct {
+    const wchar_t *name;
+    Module module;
+} module_options[] = {
+    {L"propagation", Module::propagation},        {L"heap-window", Module::heap_window},
+    {L"exe-placement", Module::exe_placement},  {L"dll-placement", Module::dll_placement},
+    {L"ipc", Module::ipc},                       {L"process-dacl", Module::process_dacl},
+    {L"token-dacl", Module::token_dacl},
+};
+
+uint32_t module_option(const std::wstring &name) {
+    for (const auto &option : module_options)
+        if (name == option.name)
+            return bit(option.module);
+    throw std::runtime_error("unknown compatibility module");
+}
+} // namespace
 
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 
@@ -22,6 +42,7 @@ int wmain(int argc, wchar_t **argv) try {
     bool disable_conpty = false;
     bool fixed_terminal_size = false;
     bool native_relay = false;
+    uint32_t disabled_modules = 0;
     std::wstring input_script;
     COORD terminal_size{100, 30};
     int first = 1;
@@ -33,6 +54,11 @@ int wmain(int argc, wchar_t **argv) try {
         } else if (option == L"--native-relay") {
             native_relay = true;
             ++first;
+        } else if (option == L"--disable-module") {
+            if (first + 1 >= argc)
+                throw std::runtime_error("--disable-module requires a module name");
+            disabled_modules |= module_option(argv[first + 1]);
+            first += 2;
         } else if (option == L"--conpty") {
             force_conpty = true;
             ++first;
@@ -60,7 +86,7 @@ int wmain(int argc, wchar_t **argv) try {
     }
     if (first == argc) {
         fprintf(stderr, "Usage (inside a restricted context): msys-sandbox-compat [--trace] "
-                        "[--native-relay] [--runtime DLL] PROGRAM "
+                        "[--native-relay] [--disable-module NAME] [--runtime DLL] PROGRAM "
                         "[arguments...]\n"
                         "Terminal options (before PROGRAM): "
                         "[--conpty | --no-conpty | --conpty-script FILE] "
@@ -69,6 +95,8 @@ int wmain(int argc, wchar_t **argv) try {
     }
     if (force_conpty && disable_conpty)
         throw std::runtime_error("--no-conpty conflicts with --conpty or --conpty-script");
+    if (native_relay && (disabled_modules & bit(Module::propagation)))
+        throw std::runtime_error("--native-relay requires the propagation module");
     const bool conpty = force_conpty || (!disable_conpty && has_console_stdio());
     check(SetConsoleCtrlHandler(wait_control, TRUE), "register waiting-host Ctrl+C handler");
     auto executable = fs::absolute(argv[first]);
@@ -77,6 +105,9 @@ int wmain(int argc, wchar_t **argv) try {
     std::wstring session_tag;
     std::unique_ptr<void, decltype(&CloseHandle)> object_directory(nullptr, CloseHandle);
     if (inherited) {
+        if (disabled_modules & ~inherited->disabled_modules)
+            throw std::runtime_error("module options conflict with inherited relay");
+        disabled_modules = inherited->disabled_modules;
         if (trace)
             inherited->trace = 1;
         trace = inherited->trace != 0;
@@ -85,8 +116,10 @@ int wmain(int argc, wchar_t **argv) try {
         state = std::make_unique<AgentState>();
         state->trace = trace;
         state->native_relay = native_relay;
-        state->api = resolve_api();
-        session_tag = require_restricted_context();
+        state->disabled_modules = disabled_modules;
+        session_tag = require_restricted_context(state->enabled(Module::ipc));
+        if (state->modules())
+            state->api = resolve_api(*state);
     }
     using Handle = std::unique_ptr<void, decltype(&CloseHandle)>;
     Handle job(CreateJobObjectW(nullptr, nullptr), CloseHandle);
@@ -128,6 +161,9 @@ int wmain(int argc, wchar_t **argv) try {
             session_command += L" --native-relay";
         if (trace)
             session_command += L" --trace";
+        for (const auto &option : module_options)
+            if (disabled_modules & bit(option.module))
+                session_command += std::wstring(L" --disable-module ") + option.name;
         command = session_command + L" " + command;
     }
     STARTUPINFOEXW startup{};
@@ -167,13 +203,17 @@ int wmain(int argc, wchar_t **argv) try {
         check(AssignProcessToJobObject(job.get(), child.hProcess), "assign tree job");
         if (inherited) {
             fprintf(stderr, "[launcher] pid=%lu prepared-by=inherited-relay\n", child.dwProcessId);
+        } else if (!state->modules()) {
+            fprintf(stderr, "[launcher] pid=%lu classification=skipped hooks=0 debugger=none\n",
+                    child.dwProcessId);
         } else {
             ProcessImage image{};
-            check_nt(identify_process(state->api, child.hProcess, image),
+            check_nt(identify_process(state->api, child.hProcess, image,
+                                      state->enabled(Module::exe_placement)),
                      "classify actual root image");
             if (reserved && !image.related)
                 check_nt(status_invalid_image, "verify preflight MSYS root");
-            if (image.related) {
+            if (image.related && (state->modules() & acl_modules)) {
                 // A cold MSYS start needs a real primary-token handle. A token
                 // inherited through an MSYS-created native bridge may deny this,
                 // even though our own read-only pseudo-token queries succeeded.
@@ -184,10 +224,21 @@ int wmain(int argc, wchar_t **argv) try {
             }
             if (image.related || native_relay) {
                 object_directory.reset(configure_security(*state, session_tag));
+                if (native_relay)
+                    check_nt(check_child_context(state->api, child.hProcess, *state),
+                             "root relay security context");
+                if (image.related)
+                    check_nt(prepare_process(state->api, child.hProcess, child.hThread, image,
+                                             *state),
+                             "prepare MSYS root");
+            }
+            const auto modules = state->effective_modules(image.related);
+            const auto installed = selected_hooks(modules);
+            if (installed) {
                 wchar_t own_path[32768];
                 check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
                       "locate agent");
-                inject_root(child.hProcess, child.hThread, image, *state,
+                inject_root(child.hProcess, installed, *state,
                             fs::path(own_path).parent_path() / L"msys-sandbox-compat.dll");
             }
             if (reserved)
@@ -197,9 +248,14 @@ int wmain(int argc, wchar_t **argv) try {
                 stderr,
                 "[launcher] pid=%lu classification=live-imports root=%s hooks=%zu debugger=none\n",
                 child.dwProcessId, image.related ? "msys" : "native",
-                image.related  ? hook_count
-                : native_relay ? 1
-                               : 0);
+                std::bitset<hook_count>(installed).count());
+            if (trace) {
+                fprintf(stderr, "[launcher] modules=%02lx", static_cast<ULONG>(modules));
+                for (const auto &option : module_options)
+                    if (modules & bit(option.module))
+                        fprintf(stderr, " %ls", option.name);
+                fputc('\n', stderr);
+            }
         }
         check(::ResumeThread(child.hThread) != static_cast<DWORD>(-1), "resume root");
         CloseHandle(child.hThread);

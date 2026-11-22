@@ -223,25 +223,35 @@ void installer(bool relay) {
     memset(pages, 0x90, 8192);
     const BYTE original[] = {0xb8, 41, 0, 0, 0, 0xc3};
     const BYTE replacement[] = {0xb8, 42, 0, 0, 0, 0xc3};
+    state->native_relay = relay;
+    const auto installed = selected_hooks(state->effective_modules(!relay));
     for (size_t i = 0; i < hook_count; ++i) {
         auto target = pages + i * 32, destination = pages + 1024 + i * 32;
         memcpy(target, original, sizeof(original));
         memcpy(destination, replacement, sizeof(replacement));
         state->hooks[i] = {reinterpret_cast<uintptr_t>(target),
-                           reinterpret_cast<uintptr_t>(destination),
+                           installed & (1u << i) ? reinterpret_cast<uintptr_t>(destination) : 0,
                            reinterpret_cast<uintptr_t>(pages + 4096 + i * hook_trampoline_bytes)};
     }
     DWORD previous = 0;
     VirtualProtect(pages, 4096, PAGE_EXECUTE_READ, &previous);
-    auto status = install_hooks(api, current_process(), *state, !relay);
-    bool pass = status >= 0;
+    auto status = install_hooks(api, current_process(), *state, installed);
+    bool pass = status >= 0 && installed == (relay ? bit(HookId::create_process) : 0x1ffu);
     VirtualProtect(pages + 4096, 4096, PAGE_EXECUTE_READ, &previous);
     FlushInstructionCache(GetCurrentProcess(), pages, 8192);
     for (size_t i = 0; i < hook_count; ++i) {
-        bool patched = !relay || i == static_cast<size_t>(HookId::create_process);
+        const bool patched = (installed & (1u << i)) != 0;
         pass = pass && reinterpret_cast<Function>(state->hooks[i].target)() == (patched ? 42 : 41);
-        pass = pass && reinterpret_cast<Function>(state->hooks[i].trampoline)() == 41;
+        const auto thunk = state->hooks[i].trampoline;
+        pass = pass && (patched ? reinterpret_cast<Function>(thunk)() == 41
+                                : *reinterpret_cast<const BYTE *>(thunk) == 0x90);
     }
+    auto originals = bind_original_calls(*state, installed);
+    visit_hooks(originals, [&](HookId id, const char *, auto entry) {
+        const auto &slot = state->hooks[static_cast<size_t>(id)];
+        pass = pass && reinterpret_cast<uintptr_t>(entry) ==
+                           (installed & bit(id) ? slot.trampoline : slot.target);
+    });
     MEMORY_BASIC_INFORMATION info{};
     VirtualQuery(pages, &info, sizeof(info));
     pass = pass && info.Protect == PAGE_EXECUTE_READ;

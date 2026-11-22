@@ -4,6 +4,10 @@
 
 ## 未发布
 
+### 兼容模块
+
+- 分离进程传播、堆窗口、EXE 与 DLL 布局、MSYS IPC 和两类 DACL 处理。用可重复的 `--disable-module NAME` 进行组合对照，关闭时跳过相应预检、元数据读取和 hook 安装。`--trace` 显示实际启用的模块。见[兼容模块对照](docs/getting-started.md#兼容模块对照)。
+
 ### MSYS 内存布局
 
 - 为已识别的 MSYS 进程在创建时暂留堆窗口，并在恢复执行前释放。原版 MSYS 自行预留和提交 cygheap 与 userheap，删除 `NtAllocateVirtualMemory` hook。

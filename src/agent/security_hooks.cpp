@@ -8,6 +8,7 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
                                                                TOKEN_INFORMATION_CLASS kind,
                                                                void *information, ULONG bytes) {
     auto &state = g_agent_state;
+    register_unwind();
     if (kind != TokenDefaultDacl || !information || bytes != sizeof(TOKEN_DEFAULT_DACL))
         return state.api.set_token(token, kind, information, bytes);
     HANDLE primary = nullptr;
@@ -36,6 +37,7 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
 extern "C" __declspec(dllexport) NTSTATUS NTAPI
 hook_set_security(HANDLE object, SECURITY_INFORMATION information, PSECURITY_DESCRIPTOR descriptor) {
     auto &state = g_agent_state;
+    register_unwind();
     if (object != current_process() || information != DACL_SECURITY_INFORMATION)
         return state.api.set_security(object, information, descriptor);
 

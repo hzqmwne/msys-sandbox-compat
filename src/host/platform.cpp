@@ -15,7 +15,7 @@ void check_nt(NTSTATUS status, const char *operation) {
         throw std::runtime_error(operation);
     }
 }
-NativeApi resolve_api() {
+NativeApi resolve_api(const AgentState &state) {
     NativeApi api{};
     auto module = GetModuleHandleW(L"ntdll.dll");
 #define RESOLVE(field, name)                                                                       \
@@ -28,32 +28,60 @@ NativeApi resolve_api() {
     RESOLVE(protect, "NtProtectVirtualMemory");
     RESOLVE(query_memory, "NtQueryVirtualMemory");
     RESOLVE(query_process, "NtQueryInformationProcess");
-    RESOLVE(get_context, "NtGetContextThread");
-    RESOLVE(set_context, "NtSetContextThread");
-    RESOLVE(resume, "NtResumeThread");
-    RESOLVE(terminate, "NtTerminateProcess");
-    RESOLVE(create_section, "NtCreateSection");
-    RESOLVE(map_section, "NtMapViewOfSection");
-    RESOLVE(unmap_section, "NtUnmapViewOfSection");
-    RESOLVE(query_section, "NtQuerySection");
-    RESOLVE(query_object, "NtQueryObject");
-    RESOLVE(open_file, "NtOpenFile");
     RESOLVE(write_file, "NtWriteFile");
-    RESOLVE(read_file, "NtReadFile");
     RESOLVE(flush_code, "NtFlushInstructionCache");
     RESOLVE(close, "NtClose");
-    RESOLVE(set_security, "NtSetSecurityObject");
-    RESOLVE(query_security, "NtQuerySecurityObject");
-    RESOLVE(compare_objects, "NtCompareObjects");
-    RESOLVE(query_token, "NtQueryInformationToken");
-    RESOLVE(open_token, "NtOpenProcessToken");
-    RESOLVE(set_token, "NtSetInformationToken");
-    RESOLVE(create_process, "NtCreateUserProcess");
-    RESOLVE(create_directory, "NtCreateDirectoryObject");
-    RESOLVE(create_mutant, "NtCreateMutant");
-    RESOLVE(create_link, "NtCreateSymbolicLinkObject");
-    RESOLVE(create_pipe, "NtCreateNamedPipeFile");
-    RESOLVE(add_function_table, "RtlAddFunctionTable");
+    const auto modules = state.modules();
+    const auto file_images = bit(Module::heap_window) | bit(Module::exe_placement);
+    if (modules & file_images) {
+        RESOLVE(open_file, "NtOpenFile");
+    }
+    if (modules & (file_images | bit(Module::ipc))) {
+        RESOLVE(create_section, "NtCreateSection");
+    }
+    if (modules & (file_images | bit(Module::dll_placement))) {
+        RESOLVE(map_section, "NtMapViewOfSection");
+    }
+    if (state.enabled(Module::heap_window)) {
+        RESOLVE(unmap_section, "NtUnmapViewOfSection");
+    }
+    if (state.enabled(Module::exe_placement)) {
+        RESOLVE(get_context, "NtGetContextThread");
+        RESOLVE(set_context, "NtSetContextThread");
+        RESOLVE(read_file, "NtReadFile");
+    }
+    if (state.enabled(Module::dll_placement)) {
+        RESOLVE(query_section, "NtQuerySection");
+    }
+    if (state.enabled(Module::ipc)) {
+        RESOLVE(query_object, "NtQueryObject");
+        RESOLVE(create_directory, "NtCreateDirectoryObject");
+        RESOLVE(create_mutant, "NtCreateMutant");
+        RESOLVE(create_link, "NtCreateSymbolicLinkObject");
+        RESOLVE(create_pipe, "NtCreateNamedPipeFile");
+    }
+    if (state.enabled(Module::process_dacl)) {
+        RESOLVE(set_security, "NtSetSecurityObject");
+        RESOLVE(query_security, "NtQuerySecurityObject");
+    }
+    if (state.enabled(Module::token_dacl)) {
+        RESOLVE(compare_objects, "NtCompareObjects");
+        RESOLVE(set_token, "NtSetInformationToken");
+    }
+    if ((modules & acl_modules) || state.native_relay) {
+        RESOLVE(query_token, "NtQueryInformationToken");
+    }
+    if (state.enabled(Module::token_dacl) || state.native_relay) {
+        RESOLVE(open_token, "NtOpenProcessToken");
+    }
+    if (state.enabled(Module::propagation)) {
+        RESOLVE(resume, "NtResumeThread");
+        RESOLVE(terminate, "NtTerminateProcess");
+        RESOLVE(create_process, "NtCreateUserProcess");
+    }
+    if (selected_hooks(modules)) {
+        RESOLVE(add_function_table, "RtlAddFunctionTable");
+    }
 #undef RESOLVE
     return api;
 }

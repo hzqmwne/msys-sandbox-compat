@@ -36,6 +36,7 @@ struct ObjectCall {
     }
 
     explicit ObjectCall(POBJECT_ATTRIBUTES original, ObjectKind kind = ObjectKind::object) {
+        register_unwind();
         if (!original)
             return;
         attributes = *original;

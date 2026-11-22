@@ -2,14 +2,14 @@
 #include <securityappcontainer.h>
 
 namespace msys_sandbox_compat {
-std::wstring require_restricted_context() {
+std::wstring require_restricted_context(bool ipc) {
     auto token = GetCurrentProcessToken();
     DWORD appcontainer = 0, bytes = 0;
     check(GetTokenInformation(token, TokenIsAppContainer, &appcontainer, sizeof(appcontainer),
                               &bytes),
           "TokenIsAppContainer");
     check(appcontainer || IsTokenRestricted(token), "restricted execution context required");
-    if (appcontainer)
+    if (appcontainer || !ipc)
         return {};
     // Publish only the launch tag before CreateProcess so later native bridges
     // inherit it. SID selection and namespace creation can wait for classification.
@@ -25,22 +25,33 @@ std::wstring require_restricted_context() {
 }
 
 HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
+    const bool adapt_acl = (state.modules() & acl_modules) != 0;
+    if (!adapt_acl && !state.native_relay)
+        return nullptr;
     // MSYS-created native descendants can deny reopening their primary token.
     // The current-token pseudo handle provides the read-only queries we need.
     HANDLE token = GetCurrentProcessToken();
-    BYTE user[4096], package[4096];
+    alignas(TOKEN_APPCONTAINER_INFORMATION)
+        BYTE package[sizeof(TOKEN_APPCONTAINER_INFORMATION) + SECURITY_MAX_SID_SIZE];
+    PSID package_sid = nullptr;
     DWORD size = 0;
-    check(GetTokenInformation(token, TokenUser, user, sizeof(user), &size), "TokenUser");
-    check(GetTokenInformation(token, TokenAppContainerSid, package, sizeof(package), &size),
-          "TokenAppContainerSid");
-    DWORD default_bytes = 0;
-    GetTokenInformation(token, TokenDefaultDacl, nullptr, 0, &default_bytes);
-    std::vector<BYTE> default_info(default_bytes);
-    check(default_bytes && GetTokenInformation(token, TokenDefaultDacl, default_info.data(),
-                                               default_bytes, &default_bytes),
-          "TokenDefaultDacl");
-    auto acl = reinterpret_cast<TOKEN_DEFAULT_DACL *>(default_info.data())->DefaultDacl;
-    check(!acl || IsValidAcl(acl), "sandbox default DACL");
+    if (adapt_acl) {
+        check(GetTokenInformation(token, TokenAppContainerSid, package, sizeof(package), &size),
+              "TokenAppContainerSid");
+        package_sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
+    }
+    PACL acl = nullptr;
+    std::vector<BYTE> default_info;
+    if (state.native_relay || !package_sid) {
+        DWORD default_bytes = 0;
+        GetTokenInformation(token, TokenDefaultDacl, nullptr, 0, &default_bytes);
+        default_info.resize(default_bytes);
+        check(default_bytes && GetTokenInformation(token, TokenDefaultDacl, default_info.data(),
+                                                    default_bytes, &default_bytes),
+              "TokenDefaultDacl");
+        acl = reinterpret_cast<TOKEN_DEFAULT_DACL *>(default_info.data())->DefaultDacl;
+        check(!acl || IsValidAcl(acl), "sandbox default DACL");
+    }
     if (state.native_relay) {
         check(!acl || acl->AclSize <= sizeof(state.token_default_dacl),
               "relay default DACL capacity");
@@ -50,7 +61,11 @@ HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
         }
         state.object_policy_valid = 1;
     }
-    auto sid = reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
+    if (!adapt_acl)
+        return nullptr;
+    BYTE user[4096];
+    check(GetTokenInformation(token, TokenUser, user, sizeof(user), &size), "TokenUser");
+    auto sid = package_sid;
     auto user_sid = reinterpret_cast<TOKEN_USER *>(user)->User.Sid;
     check(IsValidSid(user_sid) && GetLengthSid(user_sid) <= sizeof(state.user_sid),
           "user SID capacity");
@@ -108,15 +123,10 @@ HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
           "compatibility SID capacity");
     state.compat_sid_bytes = GetLengthSid(sid);
     memcpy(state.compat_sid, sid, state.compat_sid_bytes);
-    SECURITY_DESCRIPTOR namespace_descriptor{};
-    check(InitializeSecurityDescriptor(&namespace_descriptor, SECURITY_DESCRIPTOR_REVISION),
-          "namespace descriptor");
-    check(SetSecurityDescriptorDacl(&namespace_descriptor, TRUE, acl, FALSE),
-          "namespace default ACL");
+    if (!state.enabled(Module::ipc))
+        return nullptr;
     // Keep the AppContainer namespace choice independent of the selected
     // non-AppContainer restricting principal above.
-    auto package_sid =
-        reinterpret_cast<TOKEN_APPCONTAINER_INFORMATION *>(package)->TokenAppContainer;
     // AppContainer namespaces are supplied by Windows. Restricted tokens need
     // a per-launch directory so unrelated MSYS sessions cannot precreate it
     // with a different ACL. Native intermediaries inherit the launch tag.
@@ -133,6 +143,11 @@ HANDLE configure_security(AgentState &state, const std::wstring &session_tag) {
     auto root = L"\\Sessions\\" + std::to_wstring(session) + L"\\" + relative;
     HANDLE directory = nullptr;
     if (!package_sid) {
+        SECURITY_DESCRIPTOR namespace_descriptor{};
+        check(InitializeSecurityDescriptor(&namespace_descriptor, SECURITY_DESCRIPTOR_REVISION),
+              "namespace descriptor");
+        check(SetSecurityDescriptorDacl(&namespace_descriptor, TRUE, acl, FALSE),
+              "namespace default ACL");
         root += L"\\msys-sandbox-compat-" + session_tag;
         check(root.size() < object_root_chars, "namespace capacity");
         UNICODE_STRING name{static_cast<USHORT>(root.size() * sizeof(wchar_t)),

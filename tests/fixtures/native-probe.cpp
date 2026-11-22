@@ -7,6 +7,20 @@
 #include <filesystem>
 
 int wmain(int argc, wchar_t **argv) {
+    if (argc == 4 && std::wstring(argv[1]) == L"--file-access") {
+        auto read = [](PCWSTR path) {
+            HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+                return GetLastError();
+            CloseHandle(file);
+            return static_cast<DWORD>(ERROR_SUCCESS);
+        };
+        const auto allowed = read(argv[2]);
+        const auto denied = read(argv[3]);
+        printf("allowed-read-error=%lu denied-read-error=%lu\n", allowed, denied);
+        return allowed == ERROR_SUCCESS && denied == ERROR_ACCESS_DENIED ? 37 : 1;
+    }
     FILE *report = stderr;
     bool inspect_parent = argc > 2 && std::wstring(argv[1]) == L"--inspect-parent";
     bool reenter = argc > 3 && std::wstring(argv[1]) == L"--reenter";

@@ -12,7 +12,8 @@ struct Image {
     std::vector<BYTE> bytes = std::vector<BYTE>(0x4000);
 };
 static std::map<std::wstring, std::unique_ptr<Image>> files;
-static size_t maps, allocation_bytes, memory_reads, file_opens;
+static size_t maps, allocation_bytes, memory_reads, file_opens, path_queries;
+alignas(void *) static BYTE mock_peb[0x10 + sizeof(void *)];
 static int failures;
 static const wchar_t *app = L"\\Device\\Review\\app\\";
 static bool fail_allocation, reject_root_reopen;
@@ -93,6 +94,27 @@ static NTSTATUS NTAPI map_section(HANDLE section, HANDLE, PVOID *base, ULONG_PTR
 }
 static NTSTATUS NTAPI unmap_section(HANDLE, PVOID) { return 0; }
 static NTSTATUS NTAPI close_handle(HANDLE) { return 0; }
+static NTSTATUS NTAPI query_process(HANDLE, PROCESSINFOCLASS kind, void *buffer, ULONG bytes,
+                                     PULONG) {
+    if (kind == ProcessBasicInformation && bytes == sizeof(PROCESS_BASIC_INFORMATION)) {
+        auto &info = *static_cast<PROCESS_BASIC_INFORMATION *>(buffer);
+        info.PebBaseAddress = reinterpret_cast<PPEB>(mock_peb);
+        return status_success;
+    }
+    if (static_cast<ULONG>(kind) == 27) {
+        ++path_queries;
+        constexpr wchar_t path[] = L"\\Device\\Review\\app\\root.exe";
+        if (bytes < sizeof(UNICODE_STRING) + sizeof(path))
+            return status_unsuccessful;
+        auto &name = *static_cast<UNICODE_STRING *>(buffer);
+        name.Buffer = reinterpret_cast<wchar_t *>(&name + 1);
+        name.Length = sizeof(path) - sizeof(wchar_t);
+        name.MaximumLength = sizeof(path);
+        memcpy(name.Buffer, path, sizeof(path));
+        return status_success;
+    }
+    return status_unsuccessful;
+}
 static NTSTATUS NTAPI read_file(HANDLE file, HANDLE, void *, void *, PIO_STATUS_BLOCK io, void *out,
                                 ULONG bytes, PLARGE_INTEGER offset, PULONG) {
     auto object = reinterpret_cast<Image *>(file);
@@ -109,6 +131,7 @@ int main() {
     api.allocate = allocate;
     api.free = free_memory;
     api.read = read_memory;
+    api.query_process = query_process;
     api.open_file = open_file;
     api.create_section = create_section;
     api.map_section = map_section;
@@ -120,10 +143,8 @@ int main() {
         auto &root = image(L"root.exe", names, false, pe_offset);
         maps = allocation_bytes = memory_reads = file_opens = 0;
         ImageRecord record{};
-        std::wstring path = std::wstring(app) + L"root.exe";
         bool related = false;
-        auto status = identify_executable(api, current_process(), root.bytes.data(), path.c_str(),
-                                          path.size(), record, related);
+        auto status = identify_executable(api, current_process(), root.bytes.data(), record, related);
         printf("%s status=%08lx related=%d maps=%zu temporary_bytes=%zu\n", label,
                static_cast<ULONG>(status), related, maps, allocation_bytes);
         return std::make_pair(status, related);
@@ -144,10 +165,18 @@ int main() {
     auto long_header = inspect("pe_header_outside_prefix", {"msys-2.0.dll"}, 0x800);
     expect(long_header.first >= 0 && long_header.second && memory_reads == 4,
            "a later NT header is read separately");
+    inspect("process_layout_controls", {"msys-2.0.dll"});
+    auto *loaded_root = files.at(std::wstring(app) + L"root.exe")->bytes.data();
+    memcpy(mock_peb + 0x10, &loaded_root, sizeof(loaded_root));
+    ProcessImage process_image{};
+    path_queries = file_opens = allocation_bytes = 0;
     reject_root_reopen = true;
-    auto reopen = inspect("root_reopen_fails", {"msys-2.0.dll"});
-    expect(reopen.first < 0 && reopen.second,
-           "preparation failure preserves positive classification");
+    auto status = identify_process(api, current_process(), process_image, false);
+    expect(status >= 0 && process_image.related && !path_queries && !file_opens && !allocation_bytes,
+           "disabled EXE placement skips process path lookup and file reopening");
+    status = identify_process(api, current_process(), process_image, true);
+    expect(status < 0 && process_image.related && path_queries == 1 && file_opens == 1,
+           "enabled EXE placement reads metadata and preserves positive classification on failure");
     reject_root_reopen = false;
     fail_allocation = true;
     direct = inspect("direct_import_without_allocation", {"msys-2.0.dll"});
@@ -155,8 +184,8 @@ int main() {
     fail_allocation = false;
 
     auto direct_last = inspect("direct_import_after_other", {"target.dll", "msys-2.0.dll"});
-    expect(direct_last.first >= 0 && direct_last.second && !maps && file_opens == 1,
-           "direct imports never open dependencies");
+    expect(direct_last.first >= 0 && direct_last.second && !maps && !file_opens,
+           "classifying a direct import never opens the EXE or its dependencies");
     std::wstring exe_path = std::wstring(app) + L"preflight.exe";
     image(L"preflight.exe", {"target.dll"}, false);
     file_opens = maps = 0;

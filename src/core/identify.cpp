@@ -151,6 +151,13 @@ struct ImageFile {
     }
 };
 
+NTSTATUS read_preferred_base(const NativeApi &api, const wchar_t *path, size_t chars,
+                             ImageRecord &image) {
+    ImageFile file{api};
+    const auto status = file.open(path, chars);
+    return status < 0 ? status : file.preferred_base(image.preferred_base);
+}
+
 } // namespace
 
 bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars) {
@@ -159,31 +166,37 @@ bool imports_msys(const NativeApi &api, const wchar_t *path, size_t chars) {
         return false;
     ImageRecord image{};
     bool related = false;
-    ImageReader reader{api, current_process(), reinterpret_cast<uintptr_t>(file.view)};
-    return reader.inspect(image, related) >= 0 && related;
+    return identify_executable(api, current_process(), file.view, image, related) >= 0 && related;
 }
 
 NTSTATUS identify_executable(const NativeApi &api, HANDLE process, const void *base,
-                             const wchar_t *path, size_t chars, ImageRecord &image,
-                             bool &related) {
+                             ImageRecord &image, bool &related) {
     related = false;
     ImageReader reader{api, process, reinterpret_cast<uintptr_t>(base)};
-    auto status = reader.inspect(image, related);
-    if (status < 0 || !related)
-        return status;
-    // Read the on-disk EXE base even if the mapped header was relocated.
-    ImageFile file{api};
-    status = file.open(path, chars);
-    return status < 0 ? status : file.preferred_base(image.preferred_base);
+    return reader.inspect(image, related);
 }
 
-NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &image) {
+NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &image,
+                           bool read_exe_layout) {
     image.related = false;
+    PROCESS_BASIC_INFORMATION basic{};
+    auto status = api.query_process(process, ProcessBasicInformation, &basic, sizeof(basic), nullptr);
+    if (status < 0)
+        return status;
+    void *base = nullptr;
+    status = api.read(process, reinterpret_cast<BYTE *>(basic.PebBaseAddress) + 0x10, &base,
+                      sizeof(base), nullptr);
+    if (status < 0)
+        return status;
+    status = identify_executable(api, process, base, image.record, image.related);
+    if (status < 0 || !image.related || !read_exe_layout)
+        return status;
+
     NativeBuffer buffer(api, 4096);
     if (!buffer)
         return status_unsuccessful;
-    auto status = api.query_process(process, static_cast<PROCESSINFOCLASS>(27), buffer.as<BYTE>(),
-                                    4096, nullptr);
+    status = api.query_process(process, static_cast<PROCESSINFOCLASS>(27), buffer.as<BYTE>(),
+                               4096, nullptr);
     if (status < 0)
         return status;
     auto name = buffer.as<UNICODE_STRING>();
@@ -192,15 +205,7 @@ NTSTATUS identify_process(const NativeApi &api, HANDLE process, ProcessImage &im
         return status_not_supported;
     memcpy(image.path, name->Buffer, name->Length);
     image.path[chars] = 0;
-    PROCESS_BASIC_INFORMATION basic{};
-    status = api.query_process(process, ProcessBasicInformation, &basic, sizeof(basic), nullptr);
-    if (status < 0)
-        return status;
-    void *base = nullptr;
-    status = api.read(process, reinterpret_cast<BYTE *>(basic.PebBaseAddress) + 0x10, &base,
-                      sizeof(base), nullptr);
-    if (status < 0)
-        return status;
-    return identify_executable(api, process, base, image.path, chars, image.record, image.related);
+    // Read the on-disk EXE base even if the mapped header was relocated.
+    return read_preferred_base(api, image.path, chars, image.record);
 }
 } // namespace msys_sandbox_compat

@@ -8,6 +8,7 @@ using namespace msys_sandbox_compat;
 
 extern "C" {
 __declspec(dllexport) AgentState g_agent_state{};
+extern __declspec(dllexport) const uint32_t g_agent_abi = agent_abi;
 __declspec(dllexport) uintptr_t g_native_chkstk = 0;
 #pragma section(".thunks", read, execute)
 __declspec(allocate(".thunks"))
@@ -17,7 +18,8 @@ __declspec(dllexport) BYTE g_agent_thunks[hook_count][hook_trampoline_bytes] = {
 
 void register_unwind() {
     auto &state = g_agent_state;
-    if (_InterlockedCompareExchange(&state.local.unwind_registered, 1, 0))
+    if (state.local.unwind_registered ||
+        _InterlockedCompareExchange(&state.local.unwind_registered, 1, 0))
         return;
     auto pe = PeView(reinterpret_cast<void *>(state.self_base), state.self_size).headers();
     auto &table = pe->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
@@ -46,20 +48,26 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
     }
     bool owns_reservation = false;
     NTSTATUS status = status_success;
-    {
-        HeapReservation reserve(state.api, attributes);
-        status = state.api.create_process(
+    auto create = [&](void *creation_attributes) {
+        return state.api.create_process(
             process, thread, process_access, thread_access, process_attributes, thread_attributes,
             process_flags, thread_flags | thread_create_suspended, parameters, create_info,
-            reserve.attributes());
+            creation_attributes);
+    };
+    if (state.enabled(Module::heap_window)) {
+        agent_log(state, "child heap preflight");
+        HeapReservation reserve(state.api, attributes);
+        status = create(reserve.attributes());
         owns_reservation = reserve.attributes() != attributes;
-    }
+    } else
+        status = create(attributes);
     if (status < 0)
         return status;
     NativeBuffer storage(state.api, sizeof(ProcessImage));
     auto image = storage.as<ProcessImage>();
-    auto prepared =
-        image ? identify_process(state.api, *process, *image) : status_unsuccessful;
+    auto prepared = image ? identify_process(state.api, *process, *image,
+                                             state.enabled(Module::exe_placement))
+                          : status_unsuccessful;
     if (owns_reservation && prepared >= 0 && !image->related)
         prepared = status_invalid_image;
     if (prepared < 0) {
@@ -68,6 +76,7 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
         agent_log(state, "child classification unavailable; left uninstrumented",
                   static_cast<ULONG>(prepared));
     } else if (image->related || state.native_relay) {
+        agent_log(state, "child modules", state.effective_modules(image->related));
         prepared = clone_agent(*process, *thread, *image, state, owns_reservation);
         if (prepared < 0)
             goto failed;
