@@ -69,11 +69,12 @@ CreateUserProcess *root_create_slot() {
 } // namespace
 
 BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool conpty,
+                 bool inherit_handles,
                  const AgentState *state, PROCESS_INFORMATION &child, bool &reserved) {
     // Keep Win32 in charge of console attachment, handle inheritance and the
     // other creation attributes. The inherited relay already handles this call.
     const auto create = [&] {
-        return CreateProcessW(executable, command, nullptr, nullptr, !conpty,
+        return CreateProcessW(executable, command, nullptr, nullptr, inherit_handles,
                               CREATE_SUSPENDED | (conpty ? EXTENDED_STARTUPINFO_PRESENT : 0),
                               nullptr, nullptr, &startup.StartupInfo, &child);
     };

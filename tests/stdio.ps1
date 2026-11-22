@@ -134,37 +134,52 @@ Write-Output 'CONPTY-SCRIPT-PASS: target consumes finite input and returns its e
 
 $outer = Join-Path $fixtures 'conpty-resize-probe.exe'
 $cmd = Join-Path $env:SystemRoot 'System32/cmd.exe'
-$entry = Join-Path $state 'mixed-stdin.cmd'
-$command = (@($launcher,$policy,$compat,$probe,'--mixed-stdin').ForEach({ '"' + $_.Replace('%','%%') + '"' }) -join ' ')
-Set-Content -LiteralPath $entry -Encoding oem -Value @('@echo off', 'setlocal DisableDelayedExpansion',
-    ('{0} <"{1}"' -f $command,$inputScript.Replace('%','%%')), 'exit /b %errorlevel%')
-$info = New-TestProcessInfo $outer @('--drive-stdio',$cmd,'/d','/c',$entry) $state
-$result = Invoke-TestProcess $info 30000
-Save-TestOutput $result $report 'mixed-stdin'
-if ($result.ExitCode -ne 37 -or !$result.Output.Contains('STDIO-CONSOLE')) {
-    throw "Auto mode did not preserve redirected stdin and its EOF (exit $($result.ExitCode))`n$($result.Output)"
-}
-Write-Output 'STDIO-MIXED-PASS: stdin file reached EOF, stdout and stderr stayed attached to the console'
-
 $expected = [Text.Encoding]::Latin1.GetString([byte[]](83,84,68,73,79,0,255,13,10))
-foreach ($stream in 'stdout', 'stderr') {
-    $entry = Join-Path $state "mixed-$stream.cmd"
-    $destination = Join-Path $state "mixed-$stream.data.bin"
-    $fd = if ($stream -eq 'stdout') { 1 } else { 2 }
-    $command = (@($launcher,$policy,$compat,$probe,"--mixed-$stream").ForEach({ '"' + $_.Replace('%','%%') + '"' }) -join ' ')
-    Set-Content -LiteralPath $entry -Encoding oem -Value @('@echo off', 'setlocal DisableDelayedExpansion',
-        ('{0} {1}>"{2}"' -f $command,$fd,$destination.Replace('%','%%')), 'exit /b %errorlevel%')
+foreach ($case in '111','011','101','110','100','010','001','000','111-direct','100-merged','110-nul','101-pipe') {
+    $mask = $case.Split('-')[0]
+    $tag = "mixed-$case"
+    $entry = Join-Path $state "$tag.cmd"
+    $stdout = Join-Path $state "$tag.stdout.bin"
+    $stderr = Join-Path $state "$tag.stderr.bin"
+    $expectBridge = $mask -ne '000' -and $case -ne '111-direct'
+    $arguments = @($launcher,$policy,$compat)
+    if ($case -eq '111-direct') { $arguments += '--no-conpty' }
+    $arguments += @($probe, $(if ($expectBridge) { '--mixed-console' } else { '--mixed-direct' }), $mask)
+    $command = ($arguments.ForEach({ '"' + $_.Replace('%','%%') + '"' }) -join ' ')
+    if ($mask[0] -eq '0') { $command += ' <"' + $inputScript.Replace('%','%%') + '"' }
+    if ($case -eq '101-pipe') { $command += ' | "' + $probe.Replace('%','%%') + '" --check-mixed-pipe' }
+    elseif ($mask[1] -eq '0') { $command += ' >"' + $stdout.Replace('%','%%') + '"' }
+    if ($case -eq '100-merged') { $command += ' 2>&1' }
+    elseif ($case -eq '110-nul') { $command += ' 2>NUL' }
+    elseif ($mask[2] -eq '0') { $command += ' 2>"' + $stderr.Replace('%','%%') + '"' }
+    Set-Content -LiteralPath $entry -Encoding oem -Value @('@echo off','setlocal DisableDelayedExpansion',
+        $command, 'set "code=%errorlevel%"', 'echo STDIO-CONSOLE', 'exit /b %code%')
     $info = New-TestProcessInfo $outer @('--drive-stdio',$cmd,'/d','/c',$entry) $state
     $result = Invoke-TestProcess $info 30000
-    Save-TestOutput $result $report "mixed-$stream"
-    Copy-Item -LiteralPath $destination -Destination $report
-    $bytes = [Text.Encoding]::Latin1.GetString([IO.File]::ReadAllBytes($destination))
-    if ($result.ExitCode -ne 37 -or !$result.Output.Contains('STDIO-CONSOLE') -or
-        !$bytes.Contains($expected) -or $bytes.Contains('STDIO-CONSOLE') -or
-        ($stream -eq 'stdout' -and $bytes -cne $expected)) {
-        throw "Mixed $stream did not preserve the selected file and the remaining console streams (exit $($result.ExitCode))"
+    Save-TestOutput $result $report $tag
+    if ($result.ExitCode -ne 37 -or $result.Output.Contains('STDIO-TERMINAL') -ne $expectBridge -or
+        $result.Output.Contains('STDIO-OUT') -ne ($mask[1] -eq '1') -or
+        $result.Output.Contains('STDIO-ERR') -ne ($mask[2] -eq '1') -or
+        ($mask[2] -eq '0' -and $result.Output.Contains('[summary]'))) {
+        throw "Mixed $case terminal routing failed (exit $($result.ExitCode))`n$($result.Output)`n$($result.Error)"
     }
-    Write-Output "STDIO-MIXED-PASS: $stream file with binary bytes, other streams kept attached to the console"
+    if ($case -eq '101-pipe') {
+        if (!$result.Output.Contains('STDIO-MIXED-PIPE-EOF')) { throw "Mixed $case lost bytes or EOF" }
+    } elseif ($mask[1] -eq '0') {
+        $bytes = [Text.Encoding]::Latin1.GetString([IO.File]::ReadAllBytes($stdout))
+        Copy-Item -LiteralPath $stdout -Destination $report
+        if ($case -eq '100-merged') {
+            if (!$bytes.Contains("${expected}1${expected}2")) { throw "Mixed $case lost merged bytes" }
+        } elseif ($bytes -cne "${expected}1") { throw "Mixed $case changed stdout bytes" }
+    }
+    if ($mask[2] -eq '0' -and $case -notin '100-merged','110-nul') {
+        $bytes = [Text.Encoding]::Latin1.GetString([IO.File]::ReadAllBytes($stderr))
+        Copy-Item -LiteralPath $stderr -Destination $report
+        if (!$bytes.Contains("${expected}2") -or $bytes.Contains('STDIO-TERMINAL')) {
+            throw "Mixed $case changed stderr bytes"
+        }
+    }
+    Write-Output "STDIO-MIXED-PASS: $case preserved standard handles, terminal access and byte routing"
 }
 
 $info = New-TestProcessInfo $launcher @($policy, $compat, '--conpty', $probe, '--descendant') $state

@@ -1,4 +1,5 @@
 #include "host.h"
+#include "console_stdio.h"
 #include "msys_sandbox_compat/agent.h"
 #include <bitset>
 #include <cstdio>
@@ -29,13 +30,6 @@ uint32_t module_option(const std::wstring &name) {
 
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 
-static bool has_console_stdio() {
-    DWORD mode = 0;
-    return GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) &&
-           GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) &&
-           GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode);
-}
-
 int wmain(int argc, wchar_t **argv) try {
     bool trace = false;
     bool force_conpty = false;
@@ -46,7 +40,20 @@ int wmain(int argc, wchar_t **argv) try {
     uint32_t disabled_modules = 0;
     std::wstring input_script;
     COORD terminal_size{100, 30};
+    StandardHandles stdio{GetStdHandle(STD_INPUT_HANDLE), GetStdHandle(STD_OUTPUT_HANDLE),
+                          GetStdHandle(STD_ERROR_HANDLE)};
+    SessionStdio session_stdio;
+    const bool session_owner = argc > 1 && std::wstring_view(argv[1]) == session_stdio_option;
     int first = 1;
+    if (session_owner) {
+        if (argc < 7 || std::wstring_view(argv[5]) != L"--no-conpty")
+            throw std::runtime_error("invalid console session arguments");
+        const HANDLE initial_error = stdio[2];
+        session_stdio.receive(argv + 2, stdio);
+        if (valid_handle(stdio[2]) && stdio[2] != initial_error)
+            redirect_host_stderr(stdio[2]);
+        first = 5;
+    }
     while (first < argc) {
         std::wstring option = argv[first];
         if (option == L"--trace") {
@@ -89,7 +96,7 @@ int wmain(int argc, wchar_t **argv) try {
             break;
     }
     if (first == argc) {
-        fprintf(stderr, "Usage: msys-sandbox-compat [--trace] "
+        fprintf(host_stderr(), "Usage: msys-sandbox-compat [--trace] "
                         "[--native-relay | --no-native-relay] [--disable-module NAME] [--runtime DLL] PROGRAM "
                         "[arguments...]\n"
                         "Terminal options (before PROGRAM): "
@@ -105,7 +112,14 @@ int wmain(int argc, wchar_t **argv) try {
     if (enable_native_relay && propagation_disabled)
         throw std::runtime_error("--native-relay requires the propagation module");
     bool native_relay = !disable_native_relay && !propagation_disabled;
-    const bool conpty = force_conpty || (!disable_conpty && has_console_stdio());
+    ConsoleStreams console{};
+    ConsoleEndpoints endpoints;
+    bool auto_conpty = false;
+    if (!force_conpty && !disable_conpty) {
+        std::transform(stdio.begin(), stdio.end(), console.begin(), console_handle);
+        auto_conpty = endpoints.open(stdio, console);
+    }
+    const bool conpty = force_conpty || auto_conpty;
     check(SetConsoleCtrlHandler(wait_control, TRUE), "register waiting-host Ctrl+C handler");
     auto executable = fs::absolute(argv[first]);
     std::unique_ptr<AgentState> state;
@@ -144,8 +158,13 @@ int wmain(int argc, wchar_t **argv) try {
           "associate job completion");
     Pseudoconsole pty;
     std::vector<BYTE> attribute_buffer;
+    std::unique_ptr<std::remove_pointer_t<LPPROC_THREAD_ATTRIBUTE_LIST>,
+                    decltype(&DeleteProcThreadAttributeList)>
+        attribute_list(nullptr, DeleteProcThreadAttributeList);
     if (conpty)
-        pty.create(completion.get(), input_script, terminal_size, !fixed_terminal_size);
+        pty.create(completion.get(), auto_conpty ? endpoints.input : stdio[0],
+                   auto_conpty ? endpoints.output : stdio[1], input_script, terminal_size,
+                   !fixed_terminal_size);
     auto check_conpty_output = [&] {
         if (const auto error = pty.output_error()) {
             SetLastError(error);
@@ -164,7 +183,10 @@ int wmain(int argc, wchar_t **argv) try {
         check(GetModuleFileNameW(nullptr, own_path, _countof(own_path)) != 0,
               "locate console session host");
         executable = own_path;
-        auto session_command = quote(executable.wstring()) + L" --no-conpty";
+        auto session_command = quote(executable.wstring());
+        if (auto_conpty)
+            session_command += session_stdio.prepare(stdio, console);
+        session_command += L" --no-conpty";
         session_command += native_relay ? L" --native-relay" : L" --no-native-relay";
         if (trace)
             session_command += L" --trace";
@@ -175,43 +197,47 @@ int wmain(int argc, wchar_t **argv) try {
     }
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = conpty ? sizeof(startup) : sizeof(STARTUPINFOW);
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
     if (conpty) {
         // Explicit null std handles suppress Windows' legacy duplication of
         // the redirected parent's stdio. Console initialization then creates
         // handles for the requested pseudoconsole.
-        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        const DWORD count = session_stdio.has_handles() ? 2 : 1;
         SIZE_T bytes = 0;
-        InitializeProcThreadAttributeList(nullptr, 1, 0, &bytes);
+        InitializeProcThreadAttributeList(nullptr, count, 0, &bytes);
         attribute_buffer.resize(bytes);
         startup.lpAttributeList =
             reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attribute_buffer.data());
-        check(InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &bytes),
+        check(InitializeProcThreadAttributeList(startup.lpAttributeList, count, 0, &bytes),
               "ConPTY attribute list");
+        attribute_list.reset(startup.lpAttributeList);
         check(UpdateProcThreadAttribute(startup.lpAttributeList, 0,
                                         PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, pty.handle,
                                         sizeof(HPCON), nullptr, nullptr),
               "ConPTY attribute");
+        if (session_stdio.has_handles())
+            session_stdio.set_inheritance_list(startup.lpAttributeList);
     } else {
-        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        startup.StartupInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-        startup.StartupInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-        startup.StartupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+        startup.StartupInfo.hStdInput = stdio[0];
+        startup.StartupInfo.hStdOutput = stdio[1];
+        startup.StartupInfo.hStdError = stdio[2];
     }
     PROCESS_INFORMATION child{};
     bool reserved = false;
-    check(create_root(executable.c_str(), command.data(), startup, conpty, state.get(), child,
-                      reserved),
+    check(create_root(executable.c_str(), command.data(), startup, conpty,
+                      !conpty || session_stdio.has_handles(), state.get(), child, reserved),
           "create suspended root");
-    if (conpty) {
-        DeleteProcThreadAttributeList(startup.lpAttributeList);
+    attribute_list.reset();
+    session_stdio.close();
+    if (conpty)
         pty.connected();
-    }
     try {
         check(AssignProcessToJobObject(job.get(), child.hProcess), "assign tree job");
         if (inherited) {
-            fprintf(stderr, "[launcher] pid=%lu prepared-by=inherited-relay\n", child.dwProcessId);
+            fprintf(host_stderr(), "[launcher] pid=%lu prepared-by=inherited-relay\n",
+                    child.dwProcessId);
         } else if (!state->modules()) {
-            fprintf(stderr, "[launcher] pid=%lu classification=skipped hooks=0 debugger=none\n",
+            fprintf(host_stderr(), "[launcher] pid=%lu classification=skipped hooks=0 debugger=none\n",
                     child.dwProcessId);
         } else {
             bool related = false, wow64 = false;
@@ -254,16 +280,16 @@ int wmain(int argc, wchar_t **argv) try {
                 check_nt(release_heap_reservation(state->api, child.hProcess, *state),
                          "release MSYS heap window");
             fprintf(
-                stderr,
+                host_stderr(),
                 "[launcher] pid=%lu classification=live-imports root=%s hooks=%zu debugger=none\n",
                 child.dwProcessId, wow64 ? "wow64" : related ? "msys" : "native",
                 std::bitset<hook_count>(installed).count());
             if (trace) {
-                fprintf(stderr, "[launcher] modules=%02lx", static_cast<ULONG>(modules));
+                fprintf(host_stderr(), "[launcher] modules=%02lx", static_cast<ULONG>(modules));
                 for (const auto &option : module_options)
                     if (modules & bit(option.module))
-                        fprintf(stderr, " %ls", option.name);
-                fputc('\n', stderr);
+                        fprintf(host_stderr(), " %ls", option.name);
+                fputc('\n', host_stderr());
             }
         }
         check(::ResumeThread(child.hThread) != static_cast<DWORD>(-1), "resume root");
@@ -283,7 +309,7 @@ int wmain(int argc, wchar_t **argv) try {
         check(GetExitCodeProcess(child.hProcess, &result), "root exit code");
         pty.close();
         check_conpty_output();
-        fprintf(stderr, "[summary] exit=%lu\n", result);
+        fprintf(host_stderr(), "[summary] exit=%lu\n", result);
         CloseHandle(child.hProcess);
         return static_cast<int>(result);
     } catch (...) {
@@ -295,6 +321,6 @@ int wmain(int argc, wchar_t **argv) try {
         throw;
     }
 } catch (const std::exception &error) {
-    fprintf(stderr, "[fatal] %s\n", error.what());
+    fprintf(host_stderr(), "[fatal] %s\n", error.what());
     return 1;
 }

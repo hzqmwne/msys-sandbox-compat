@@ -42,7 +42,7 @@
 | `conpty.ps1` | TTY、120×40 尺寸、UTF-8 往返、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
 | `conpty-resize.ps1` | 外层 ConPTY 调整窗口后，PSEC 内原生探针在没有键盘输入的情况下观察到尺寸变化。验证自动启用、显式启用的固定尺寸和显式直连 |
 | `terminal-session.ps1` | 非 UTF-8 初始控制台中的嵌套会话，读回实际 Unicode 屏幕和光标移动，验证正常/启动失败后的状态恢复。通过 `run.ps1` 验证 Bash 中文方向键编辑、PATH、尺寸与 Ctrl+C，以及 Windows PowerShell 5.1 中文输入输出和真实 PSReadLine 交互命令的历史保存 |
-| `stdio.ps1` | PSEC 下 1 MiB 二进制 stdio 往返、stdin EOF 与管道读端提前关闭。在控制台中分别重定向 stdout、stderr 到文件，并检验原始字节和未重定向流。检查 ConPTY 根进程退出后的后代输出和根退出码 |
+| `stdio.ps1` | PSEC 下 1 MiB 二进制 stdio 往返、stdin EOF 与管道读端提前关闭。覆盖控制台标准流八种组合、`2>&1`、`NUL`、混合管道、显式直连、内层读屏和写输入。检查 ConPTY 根进程退出后的后代输出和根退出码 |
 | `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 Perl 断言（含线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
 | `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |

@@ -46,10 +46,10 @@ class Pseudoconsole {
     bool owns_input = false;
     DWORD output_error() const { return output_error_code.load(); }
 
-    void create(HANDLE completion, const std::wstring &script, COORD dimensions = {100, 30},
+    void create(HANDLE completion, HANDLE input, HANDLE output, const std::wstring &script,
+                COORD dimensions = {100, 30},
                 bool follow_viewport = false) {
-        input_source = GetStdHandle(STD_INPUT_HANDLE);
-        const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+        input_source = input;
         output_sink = output;
         COORD viewport{};
         if (!script.empty()) {

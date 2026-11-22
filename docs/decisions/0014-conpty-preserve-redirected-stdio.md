@@ -1,6 +1,6 @@
 # ADR-0014：自动 ConPTY 保留逐路重定向
 
-Status: Proposed
+Status: Accepted
 
 Date: 2026-11-23
 
@@ -12,7 +12,7 @@ ConPTY 桥用于兼容 Low IL 客户端连接外层 Medium IL conhost 时受限�
 
 在普通令牌的传统 `conhost.exe` 中，由原生 `cmd.exe` 直接启动 Bash。官方 MSYS2 3.6.12 和 Git for Windows 的 MSYS 3.6.10 在八组对照中结果相同。`dtable::stdio_init()` 分别初始化三个标准描述符。`/dev/tty` 使用控制终端，控制台处理器打开 `CONIN$` 和 `CONOUT$`。 [描述符初始化](https://github.com/msys2/msys2-runtime/blob/master/winsup/cygwin/dtable.cc) · [控制台打开逻辑](https://github.com/msys2/msys2-runtime/blob/master/winsup/cygwin/fhandler_console.cc#L915-L950)
 
-| `cmd` 重定向 | `isatty(0/1/2)` | stdin 读自 | 写到屏幕的标准输出流 | `/dev/tty` 可读写 | 拟定 `auto` |
+| `cmd` 重定向 | `isatty(0/1/2)` | stdin 读自 | 写到屏幕的标准输出流 | `/dev/tty` 可读写 | `auto` |
 |---|---|---|---|---|---|
 | 无 | `111` | 键盘 | stdout、stderr | 是 | ConPTY |
 | `<in` | `011` | 文件 | stdout、stderr | 是 | ConPTY |
@@ -25,7 +25,7 @@ ConPTY 桥用于兼容 Low IL 客户端连接外层 Medium IL conhost 时受限�
 
 `000` 的结果限于从原生 `cmd` 直接启动。已有 MSYS 父进程时，控制终端可以经运行时状态继承。
 
-## 拟定决定
+## 决定
 
 - 外层控制台可用且至少一路标准句柄是控制台时，`auto` 启用内层 ConPTY。三路均非控制台、或外层控制台不可用时，直接继承标准句柄。显式 `--no-conpty` 继续直连，`--conpty` 和 `--conpty-script` 继续支持调用方显式提供的 VT 数据源和输出目标。
 - 启动目标时逐路选句柄。原本指向控制台的标准流使用内层控制台句柄，文件、管道和 `NUL` 保留调用方已打开的句柄及访问权。保留 `2>&1` 的共享输出目标、原字节和 EOF。重定向流不经过 VT 转码或中间转发。
@@ -34,6 +34,6 @@ ConPTY 桥用于兼容 Low IL 客户端连接外层 Medium IL conhost 时受限�
 
 ## 验证范围
 
-独立 Win32 探针在普通令牌和原生 PSEC 1.0 下均通过 `101` 路由。原生会话宿主获得 `111` 内层控制台句柄，实际目标从独立继承列表获得 stdout 管道。目标读屏幕、写控制台输入事件成功，stderr 到达终端，stdout 管道收到原始二进制字节和 EOF。
+通过 launcher 在传统 `cmd` 中启动两套 Bash，八种组合分别通过 `isatty`、标准流读写和 `/dev/tty` 对照。原生 PSEC 1.0 中，两套 Bash 另通过 `110`、`100`、`010`、`001` 的 `NUL` 重定向和实际 `/dev/tty` 键盘、屏幕测试。
 
-正式实现需对照上表检查八种选路，额外覆盖管道、`NUL`、`2>&1`、外层无控制台及显式开关。PSEC 下以原生探针独立验收读屏幕、写输入事件和字节流，再用真实 MSYS 运行时验收 `/dev/tty`。现有的 [PSEC 磁盘标准句柄问题](../compatibility.md#psec-下的磁盘文件重定向) 仍由运行时文件描述符识别路径单独跟踪。
+PSEC 原生探针对照八种选路，覆盖混合管道的二进制数据和 EOF、`NUL`、`2>&1` 与 `--no-conpty`。进入内层的目标可读屏幕和写输入事件，直连外层的低完整性目标仍收到 `ERROR_ACCESS_DENIED`。同组回归通过无外层控制台时的普通管道、显式 ConPTY 和脚本模式。现有的 [PSEC 磁盘标准句柄问题](../compatibility.md#psec-下的磁盘文件重定向) 仍由运行时文件描述符识别路径单独跟踪。

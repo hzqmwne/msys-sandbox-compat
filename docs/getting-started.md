@@ -65,9 +65,9 @@ MSYS 兼容模块默认全部启用。可重复传入 `--disable-module NAME`，
 
 在实际 harness 内可直接执行 `tests/conpty.ps1 -Environment Existing` 验证继承的上下文。它不创建新的隔离环境或配置文件 ACL；初始策略与拒绝边界的验收要求见 [测试说明](testing.md)。
 
-兼容宿主通过 job 等待进程树退出并返回根进程退出码。默认用 `GetConsoleMode` 分别检查 stdin、stdout 和 stderr。三者都是 Windows 控制台句柄时，启动内层 ConPTY。任一方向重定向到文件或管道时，直接继承标准句柄。通过普通管道提供 VT 字节流的调用者可以用 `--conpty` 强制启用，或用 `--no-conpty` 强制直连。演示脚本对应 `-ConPty` 和 `-NoConPty`。桥接方式与目标命令是否以交互模式启动分别由终端选项和目标参数决定。
+兼容宿主通过 job 等待进程树退出并返回根进程退出码。自动模式分别检查 stdin、stdout 和 stderr。外层控制台可用且至少一路是控制台句柄时，启动内层 ConPTY。目标程序的控制台流接到内层，文件、管道和 `NUL` 的原句柄直接继承。三路都重定向或没有可用的外层控制台时，自动模式走直连。`--no-conpty` 强制直连。通过普通管道提供 VT 字节流的调用者可以用 `--conpty` 强制启用原有的会话模式。演示脚本对应 `-ConPty` 和 `-NoConPty`。桥接方式由终端选项决定，目标的交互模式由目标参数决定。见 [八种组合](decisions/0014-conpty-preserve-redirected-stdio.md)。
 
-ConPTY 模式收发 VT 字节流。标准输入是控制台且标准输出可查询窗口尺寸时，按外层窗口尺寸启动并跟随变化。`--conpty-size`（演示脚本中的 `-TerminalSize`）在启用桥时固定整个会话的尺寸。脚本输入和无法查询交互控制台尺寸的会话默认使用 `100x30`。
+ConPTY 模式收发 VT 字节流。自动模式按外层控制台窗口尺寸启动并跟随变化，包括部分标准流重定向的情况。`--conpty-size`（演示脚本中的 `-TerminalSize`）在启用桥时固定整个会话的尺寸。脚本输入和无法查询交互控制台尺寸的会话默认使用 `100x30`。
 
 `--conpty-script` 和重定向的 `--conpty` 标准输入把数据送入 conhost 的 VT 输入管道。目标从自己的控制台句柄读取。外部文件或管道耗尽后，桥保留终端连接，以便目标继续运行。受测 Windows 会在 VT 输入管道断开时向目标发送 `CTRL_CLOSE_EVENT`。运行交互 shell 的脚本可以用 `exit` 结束会话，依赖 stdin EOF 的批处理可以使用默认标准流入口。ConPTY 的下游输出写入失败时，宿主结束该会话并返回 `1`。
 

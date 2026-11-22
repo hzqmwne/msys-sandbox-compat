@@ -1,6 +1,7 @@
 #pragma once
 #include "msys_sandbox_compat/agent.h"
 #include "msys_sandbox_compat/command_line.h"
+#include <cstdio>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -9,10 +10,13 @@
 namespace msys_sandbox_compat {
 void check(bool success, const char *operation);
 void check_nt(NTSTATUS status, const char *operation);
+FILE *host_stderr();
+void redirect_host_stderr(HANDLE handle);
 NativeApi resolve_api(const AgentState &state);
 AgentState *inherited_agent();
 HANDLE configure_security(AgentState &state);
 BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool conpty,
+                 bool inherit_handles,
                  const AgentState *state, PROCESS_INFORMATION &child, bool &reserved);
 void inject_root(HANDLE process, uint32_t installed, const AgentState &state,
                  const std::filesystem::path &agent);
