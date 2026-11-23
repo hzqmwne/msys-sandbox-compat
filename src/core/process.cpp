@@ -165,6 +165,9 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &s
 NTSTATUS adapt_child_objects(HANDLE process, HANDLE thread, AgentState &state) {
     if (state.plain_context || !state.enabled(Module::process_dacl))
         return status_success;
+    // MSYS fork resumes past the cold-start NtSetSecurityObject call. Signal
+    // delivery still reopens the target with PROCESS_DUP_HANDLE. Disabling
+    // this creation-time adaptation broke signals in PSEC and FullRestricted.
     const auto &api = state.api;
     auto status = adapt_kernel_object(api, process, state);
     return status < 0 ? status : adapt_kernel_object(api, thread, state);
