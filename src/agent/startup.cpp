@@ -1,4 +1,5 @@
 #include "agent_runtime.h"
+#include "msys_sandbox_compat/object_security.h"
 #include <intrin.h>
 #include <string.h>
 
@@ -20,7 +21,16 @@ NTSTATUS initialize_child(AgentState &state, BYTE *peb, CONTEXT &saved) {
         // WoW64 calls the native system entry from its AMD64 thunk.
     }
 
-    const auto modules = state.effective_modules(related);
+    auto modules = state.modules_for_image(related);
+    if (modules & acl_modules) {
+        const ObjectSecurityContext *security = nullptr;
+        status = get_object_security(state, security);
+        if (status < 0)
+            return status;
+        if (!security->compat_sid_bytes)
+            modules &= ~acl_modules;
+    }
+    agent_log(state, "child modules", modules);
     if (modules & bit(Module::exe_placement)) {
         status = prepare_exe_layout(state, peb, saved, base, image);
         if (status < 0)

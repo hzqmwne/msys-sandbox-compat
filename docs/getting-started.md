@@ -59,7 +59,7 @@ MSYS 兼容模块默认全部启用。可重复传入 `--disable-module NAME`，
 | `process-dacl` | 受限上下文中适配创建进程和初始线程时的显式 DACL，以及 MSYS 运行时重设的自身进程 DACL |
 | `token-dacl` | MSYS 主 token 默认 DACL 适配 |
 
-关闭模块可能重现该模块处理的兼容故障。启用 relay 时仍会核对父令牌和子令牌的安全上下文。嵌套启动器复用已有 relay 的配置，尝试关闭该树中已启用的模块会报错。ConPTY 继续由自己的选项控制。`--trace` 显示根进程启用的模块与后代的模块位掩码，位序按表格从最低位开始。
+关闭模块可能重现该模块处理的兼容故障。各进程使用自身主 token 决定 ACL 模块的适用性。嵌套启动器复用已有 relay 的配置，尝试关闭该树中已启用的模块会报错。ConPTY 继续由自己的选项控制。`--trace` 显示启动器配置的模块，子端早期诊断可用时也会输出实际模块位掩码，位序按表格从最低位开始。
 
 接入受限令牌启动器时，将其启动目标设为 `msys-sandbox-compat.exe PROGRAM ...`，保留启动器既有 token、对象和文件策略。兼容 EXE/DLL 应部署在原策略已允许读取/执行的位置；原版 MSYS 安装文件也必须已具备原策略允许的访问。兼容层不修改任何磁盘 ACL、不放宽 restricted token，也不借非受限进程代读被拒绝的文件。缺少访问时记录该配置下的兼容阻碍，不能通过补权把它算作成功。已验收配置见 [兼容范围](compatibility.md)，测试用 `restricted-run.exe` 不作为产品启动器分发。
 
@@ -73,7 +73,7 @@ ConPTY 模式收发 VT 字节流。自动模式按外层控制台窗口尺寸启
 
 连接真实控制台时，终端桥启用原始 VT 输入和 VT 输出，并为相应方向设置 UTF-8 代码页。输出排空后恢复原模式和代码页。原生等待宿主处理自身收到的 Ctrl+C 通知，前台目标继续按其控制台处理规则响应按键。
 
-native relay 默认开启，覆盖 AMD64 和 WoW64 原生首进程及中间进程。两种位数可在同一启动链交替，后续 AMD64 MSYS 自动接入。用 `--no-native-relay` 或 `run.ps1 -NoNativeRelay` 关闭该功能。旧参数 `--native-relay` 和 `-NativeRelay` 仍可显式启用。已继承 relay 的嵌套兼容入口复用原状态，显式关闭会报错。覆盖入口和令牌核对规则见 [兼容范围](compatibility.md)及[当前设计](design.md#原生-relay)。
+native relay 默认开启，覆盖 AMD64 和 WoW64 原生首进程及中间进程。两种位数可在同一启动链交替，后续 AMD64 MSYS 自动接入。用 `--no-native-relay` 或 `run.ps1 -NoNativeRelay` 关闭该功能。旧参数 `--native-relay` 和 `-NativeRelay` 仍可显式启用。已继承 relay 的嵌套兼容入口复用原配置，显式关闭会报错。覆盖入口和 ACL 初始化见 [兼容范围](compatibility.md)及[当前设计](design.md#原生-relay)。
 
 ## 创建环境失败
 

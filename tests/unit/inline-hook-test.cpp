@@ -317,7 +317,7 @@ void installer(bool relay) {
     const BYTE original[] = {0xb8, 41, 0, 0, 0, 0xc3};
     const BYTE replacement[] = {0xb8, 42, 0, 0, 0, 0xc3};
     state->native_relay = relay;
-    const auto installed = selected_hooks(state->effective_modules(!relay));
+    const auto installed = selected_hooks(state->modules_for_image(!relay));
     for (size_t i = 0; i < hook_count; ++i) {
         auto target = pages + i * 32, destination = pages + 1024 + i * 32;
         memcpy(target, original, sizeof(original));

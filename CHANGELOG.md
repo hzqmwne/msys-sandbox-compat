@@ -37,12 +37,13 @@
 
 ### 精简初始化与失败处理
 
+- 删除宿主及 relay 的父子 token 全量核对和根进程 token 预检。每个进程从自身主 token 确定 ACL 适配主体，启动树沿用 IPC 目录名。见 [ADR-0018](docs/decisions/0018-resolve-acl-context-in-each-process.md)。
 - 移除 relay 的默认 DACL 历史基准、写后读回和创建锁，沿用 Windows 的默认 DACL 继承。独立冷启动传入空的父映像数据。见 [ADR-0016](docs/decisions/0016-drop-relay-default-dacl-baseline.md)。
 - 移除生产入口的默认 Git 安装路径。旧命令的 `--runtime DLL` 参数仍可解析，参数值被忽略。
 - 移除 `MSYS_SANDBOX_COMPAT_SESSION`。非 AppContainer 受限进程树的兼容目录按创建宿主 PID 命名，目录路径由 agent 传给支持的后代。
 - 将正式兼容初始化移至子进程首次进入加载器时，保留应用启动上下文和调用方的初始挂起语义。见 [ADR-0015](docs/decisions/0015-initialize-at-child-loader-entry.md)。
 - 安装失败统一终止挂起的新进程，删除跨入口回滚及无消费者的计划字段；ACL 结果复用已预留空间的输入副本。
-- ACL 拒绝用例按未执行和恢复后的正对照验收，Win32 错误码仅记录；设计细节归并到实现说明，测试文档不维护固定数量。
+- ACL 拒绝用例区分创建返回的句柄和按 PID 重新打开的权限，保留恢复默认策略后的正对照。
 - 移除原生 PSEC 的原版 Bash 拒绝诊断断言。PSEC 继续检查真实兼容负载与权限边界，非 AppContainer 受限令牌的进程链保留原版执行记录。
 
 ### ntdll 入口搬迁
@@ -71,13 +72,12 @@
 - 新增进程链端到端回归，验证一层/三层未注入原生桥接、10 次线程中 fork、初始 ACL 保留与读写拒绝边界；成功验收替代该链路原先的预期拒绝。
 
 - 宿主使用当前主 token 的只读伪句柄与直接命名空间查询，MSYS 创建的原生后代可通过兼容入口启动原生目标，无需重开 token 或创建命名事件探针。
-- 冷启动 MSYS 根进程前检查真实 token 查询权限；受限后代 token 不可重开时，在恢复前明确报错并回收目标，避免进入已复现的初始化等待。
-- 作用范围回归补充原生目标无补丁、默认 token DACL 保持一致，以及 MSYS 冷启动预期拒绝的检查。
+- 作用范围回归覆盖关闭 relay 的原生目标、默认 token DACL 继承和 MSYS 冷启动回入。
 
 ### 新增
 
 - `--native-relay` / `run.ps1 -NativeRelay` 可显式选择原生传播，原生根及中间进程只启用创建 hook。
-- relay 传播只读核对安全上下文，支持链内显式兼容入口、ConPTY 和调用者原有挂起状态。
+- relay 支持链内显式兼容入口、ConPTY 和调用者原有挂起状态。
 - PSEC 和两种固定受限令牌各新增自动链路与交互回归，覆盖真实 fork、直接回入、单 hook 原生范围、挂起语义及策略收紧负例。
 - 两种固定非 AppContainer 受限令牌的 ConPTY 交互验收：TTY、尺寸、Perl/线程 fork、原生命令、Ctrl+C、STOP/bg/fg、退出码与会话前后权限拒绝；复用既有生产实现和原测试策略。
 - 交互测试提供 `Existing` 模式，直接验证调用者已有受限上下文，不创建替代环境或配置文件 ACL；实际策略的拒绝边界另行核验。

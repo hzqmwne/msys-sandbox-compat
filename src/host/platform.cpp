@@ -92,10 +92,10 @@ NativeApi resolve_api(const AgentState &state) {
         RESOLVE(compare_objects, "NtCompareObjects");
         RESOLVE(set_token, "NtSetInformationToken");
     }
-    if ((modules & acl_modules) || state.native_relay) {
+    if (modules & acl_modules) {
         RESOLVE(query_token, "NtQueryInformationToken");
     }
-    if (state.enabled(Module::token_dacl) || state.native_relay) {
+    if (state.enabled(Module::token_dacl)) {
         RESOLVE(open_token, "NtOpenProcessToken");
     }
     if (state.enabled(Module::propagation)) {

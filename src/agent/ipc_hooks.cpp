@@ -50,6 +50,8 @@ struct ObjectCall {
         size_t count = input->Length / 2;
         auto value = input->Buffer;
         auto &state = g_agent_state;
+        if (!state.root_chars && kind != ObjectKind::pipe)
+            return;
         constexpr wchar_t global[] = L"\\BaseNamedObjects\\";
         constexpr wchar_t session[] = L"\\Sessions\\BNOLINKS\\";
         constexpr wchar_t marker[] = L"session-";
@@ -77,7 +79,7 @@ struct ObjectCall {
             auto root = static_cast<UNICODE_STRING *>(scratch);
             size_t chars = root->Length / 2;
             matched =
-                chars > state.root_chars + 6 &&
+                state.root_chars && chars > state.root_chars + 6 &&
                 wide_equal(root->Buffer, state.root_chars, state.object_root, state.root_chars) &&
                 root->Buffer[state.root_chars] == L'\\' &&
                 (starts_with(root->Buffer + state.root_chars + 1, chars - state.root_chars - 1,

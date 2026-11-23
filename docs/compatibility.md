@@ -30,7 +30,7 @@ EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原
 
 设置 PE `DYNAMIC_BASE` 的 DLL 由 Windows 选址。使用该标志的 `msys-2.0.dll` 版本需在目标环境单独验证并存、父子映像布局和 fork。当前 DLL 基址调整覆盖 `NtMapViewOfSection` 入口。
 
-relay 覆盖经 AMD64 原生 `NtCreateUserProcess` 入口创建的后代，含经过该入口的 WoW64 调用。它要求父子安全上下文一致。子进程切换凭据、限制、完整性或 package，或必要查询失败时，已创建目标在恢复前回收。默认 DACL 由 Windows 继承，MSYS 设置时按当次输入适配。用 `--no-native-relay` 让自动传播在原生进程处结束。路径细节见 [ADR-0013](decisions/0013-default-relay-with-wow64.md) 及 [ADR-0016](decisions/0016-drop-relay-default-dacl-baseline.md)。
+relay 覆盖经 AMD64 原生 `NtCreateUserProcess` 入口创建的后代，含经过该入口的 WoW64 调用。Windows 决定子进程的 token 和默认 DACL，各进程用自己的主 token 初始化 ACL 适配。IPC 重定向使用启动树提供的目录名，并受该目录的实际权限约束。用 `--no-native-relay` 让自动传播在原生进程处结束。路径细节见 [当前设计](design.md#原生-relay) 和 [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)。
 
 两种受限令牌夹具均使用 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN`、禁用 Administrators，并将当前 logon SID、Everyone、Builtin Users、Authenticated Users 放入 restricting SID 列表；write 模式另加 `WRITE_RESTRICTED`。启动器为对象保留 logon/SYSTEM 授权和 OWNER RIGHTS 限制。测试只在带标记的独立工作目录配置 ACL，将兼容产物和夹具暂存为只读；Git/MSYS 仍从原安装位置加载。完整检查模式的读取也必须通过 restricting SID 检查，生产所需文件读取与执行必须在原策略允许范围内。
 

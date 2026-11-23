@@ -2,6 +2,8 @@
 
 Status: Accepted
 Partially superseded by: ADR-0008 更新默认 DACL 比较基准，[ADR-0013](0013-default-relay-with-wow64.md) 更新默认值并覆盖 WoW64，[ADR-0016](0016-drop-relay-default-dacl-baseline.md) 移除默认 DACL 基准。
+
+Partially superseded by: [ADR-0018](0018-resolve-acl-context-in-each-process.md) 移除父子 token 比较。
 Date: 2026-10-20
 Partially supersedes: ADR-0001 的所有模式均不注入原生进程的约定；默认行为仍保留。
 Related: ADR-0004、ADR-0005

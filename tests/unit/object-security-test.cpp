@@ -35,16 +35,18 @@ static PACL dacl(PSECURITY_DESCRIPTOR sd) {
 int main() {
     auto native = api();
     AgentState state{};
+    ObjectSecurityContext identity{};
+    state.local.object_security = &identity;
     BYTE user[1024]{};
     DWORD returned = 0;
     GetTokenInformation(GetCurrentProcessToken(), TokenUser, user, sizeof(user), &returned);
     auto sid = reinterpret_cast<TOKEN_USER *>(user)->User.Sid;
-    state.user_sid_bytes = GetLengthSid(sid);
-    memcpy(state.user_sid, sid, state.user_sid_bytes);
+    identity.user_sid_bytes = GetLengthSid(sid);
+    memcpy(identity.user_sid, sid, identity.user_sid_bytes);
     PSID compat = nullptr;
     ConvertStringSidToSidW(L"S-1-15-2-11223344-55667788", &compat);
-    state.compat_sid_bytes = GetLengthSid(compat);
-    memcpy(state.compat_sid, compat, state.compat_sid_bytes);
+    identity.compat_sid_bytes = GetLengthSid(compat);
+    memcpy(identity.compat_sid, compat, identity.compat_sid_bytes);
     LPWSTR user_text = nullptr;
     ConvertSidToStringSidW(sid, &user_text);
     std::wstring user_sid(user_text);

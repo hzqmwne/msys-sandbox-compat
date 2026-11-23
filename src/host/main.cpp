@@ -259,21 +259,9 @@ int wmain(int argc, wchar_t **argv) try {
             }
             if (reserved && !related)
                 check_nt(status_invalid_image, "verify preflight MSYS root");
-            if (related || native_relay)
-                object_directory.reset(configure_security(*state));
-            if (native_relay) {
-                check_nt(check_child_context(state->api, child.hProcess, *state),
-                         "root relay security context");
-            } else if (related && !state->plain_context && (state->modules() & acl_modules)) {
-                // A cold MSYS start needs a real primary-token handle. A token
-                // inherited through an MSYS-created native bridge may deny this,
-                // even though our own read-only pseudo-token queries succeeded.
-                HANDLE root_token = nullptr;
-                check(OpenProcessToken(child.hProcess, TOKEN_QUERY, &root_token),
-                      "query MSYS root token before initialization");
-                CloseHandle(root_token);
-            }
-            const auto modules = state->effective_modules(related);
+            if ((related || native_relay) && state->enabled(Module::ipc))
+                object_directory.reset(prepare_ipc_directory(*state));
+            const auto modules = state->modules_for_image(related);
             const auto installed = selected_hooks(modules);
             if (installed || ((modules & bit(Module::exe_placement)) && !image.dynamic_base))
                 inject_root(child.hProcess, installed, *state,

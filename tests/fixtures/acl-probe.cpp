@@ -202,20 +202,25 @@ extern "C" __declspec(dllexport) void dacl_probe(void *, void *) {
             auto command = line;
             STARTUPINFOW startup{sizeof(startup)};
             PROCESS_INFORMATION child{};
-            BOOL created = CreateProcessW(path, command.data(), nullptr, nullptr, FALSE, 0, nullptr,
-                                          nullptr, &startup, &child);
+            BOOL created = CreateProcessW(path, command.data(), nullptr, nullptr, FALSE,
+                                          CREATE_SUSPENDED, nullptr, nullptr, &startup, &child);
             DWORD error = created ? 0 : GetLastError();
             report("OBSERVATION system-only create=" + std::to_string(created) +
                    " error=" + std::to_string(error) + "\n");
             if (created) {
+                HANDLE reopened = OpenProcess(PROCESS_DUP_HANDLE, FALSE, child.dwProcessId);
+                const DWORD reopen_error = reopened ? ERROR_SUCCESS : GetLastError();
+                report("OBSERVATION system-only reopen=" + std::to_string(reopen_error) + "\n");
+                if (reopened)
+                    CloseHandle(reopened);
+                pass = pass && reopen_error == ERROR_ACCESS_DENIED;
                 TerminateProcess(child.hProcess, 95);
                 CloseHandle(child.hThread);
                 CloseHandle(child.hProcess);
             }
-            // Verify denial/no execution, with the same command as a positive
-            // control after restoring the policy. Win32 error mapping is diagnostic.
+            // A creation handle and a fresh open use different access checks.
             pass =
-                pass && !created && GetFileAttributesW(marker.c_str()) == INVALID_FILE_ATTRIBUTES;
+                pass && created && GetFileAttributesW(marker.c_str()) == INVALID_FILE_ATTRIBUTES;
             pass = SetTokenInformation(primary, TokenDefaultDacl, snapshot.data(),
                                        sizeof(TOKEN_DEFAULT_DACL)) &&
                    pass;

@@ -2,6 +2,15 @@
 #include "agent.h"
 
 namespace msys_sandbox_compat {
+struct ObjectSecurityContext {
+    unsigned char user_sid[SECURITY_MAX_SID_SIZE];
+    ULONG user_sid_bytes;
+    unsigned char compat_sid[SECURITY_MAX_SID_SIZE];
+    ULONG compat_sid_bytes;
+};
+
+NTSTATUS get_object_security(AgentState &state, const ObjectSecurityContext *&context);
+
 // Owns only an adapted DACL. Other SD fields still refer to this synchronous
 // call's original input. No CRT heap or loader-dependent security helpers.
 class SecurityAdaptation {
@@ -10,8 +19,8 @@ class SecurityAdaptation {
     ~SecurityAdaptation();
     SecurityAdaptation(const SecurityAdaptation &) = delete;
     SecurityAdaptation &operator=(const SecurityAdaptation &) = delete;
-    NTSTATUS acl(PACL input, const AgentState &state);
-    NTSTATUS descriptor(PSECURITY_DESCRIPTOR input, const AgentState &state);
+    NTSTATUS acl(PACL input, AgentState &state);
+    NTSTATUS descriptor(PSECURITY_DESCRIPTOR input, AgentState &state);
     PACL adapted_acl() const { return static_cast<PACL>(memory_); }
     PSECURITY_DESCRIPTOR adapted_descriptor() { return memory_ ? &descriptor_ : nullptr; }
 

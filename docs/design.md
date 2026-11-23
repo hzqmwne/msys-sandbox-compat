@@ -6,7 +6,7 @@
 
 兼容层不修改任何磁盘文件或目录 ACL，不为兼容而放宽原 restricted token 的限制。文件读取、执行、写入及其他资源访问继续受原隔离策略约束；遇到拒绝时保留失败，不通过更大权限的 token、非受限代理或预开句柄绕过。兼容产物应位于原策略已允许的位置。
 
-下文的对象描述符处理针对 MSYS IPC 与已识别 MSYS 的进程/线程内核对象；显式 ACL 与当前主 token 默认 DACL 均基于当次输入补充受限主体，不改其身份或限制。内核对象处理不构成修改磁盘 ACL 或扩大原资源授权的许可。测试夹具单独建立的文件 ACL 只定义该夹具的初始策略。
+对象描述符处理覆盖 MSYS IPC、创建进程和线程时的显式 DACL，以及 MSYS 运行时设置的进程和主 token 默认 DACL。各进程以自己的主 token 识别适用的受限主体，按当次输入补充对象 DACL。测试夹具设置的文件 ACL 只定义该夹具的初始策略。
 
 ## 适配方向与依赖
 
@@ -79,17 +79,17 @@ MSYS 自身仍负责 fork 的复制、同步和恢复语义。兼容层解决环
 
 关闭 relay 时，自动传播在原生子进程处结束。Job 仍管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
 
-MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时基于当次请求补充受限主体，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。宿主仍在 MSYS 根进程恢复前检查真实 token 查询权限；从未受兼容处理的祖先继承了不兼容 token 时明确拒绝，这个错误检查不是成功验收。
+MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时基于当次请求补充受限主体，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。
 
 ## 原生 relay
 
 relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。原生进程仅启用创建 hook，并与 MSYS 调用者使用同一规则处理创建时的显式 DACL。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与 IPC 适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
 
-原生创建 hook 在恢复前识别并复制相应模式，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用原运行上下文；其创建调用已准备子进程，宿主不重复识别、复制完整状态或再次注入。首次映射在独立的 agent 状态副本中绑定 trampoline，不临时改写宿主 API。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代，省略嵌套启动器选项不会关闭已有 relay 或替换原上下文。
+原生创建 hook 在恢复前传播 agent，子端再识别映像和所需模块，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用模块配置及 IPC 目录名。创建 hook 已负责准备子进程。首次映射在独立的 agent 状态副本中绑定 trampoline。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代。
 
 各进程只为自身实际安装的 hook 读取入口和生成 trampoline。未改写的入口由当前进程直接调用，以便原生 relay 执行后代准备。复制 agent 时根据子进程的 hook 集合重新绑定其原入口调用。启用传播时，agent 同时保存后代可能启用的 handler 位置。宿主通过版本标记核对配套 DLL 和继承的 relay 状态。
 
-relay 创建后比较父子令牌身份与隔离上下文。对于涉及 WoW64 的创建，允许 Windows 设置的每应用 UAC 虚拟化启用位变化，并通过独立的令牌信息类确认该值。上下文不一致或查询失败时回收挂起的目标。默认 DACL 沿用 Windows 继承语义，relay 传播不比较其历史值。MSYS 设置默认 DACL 时按当次输入适配。见 [ADR-0013](decisions/0013-default-relay-with-wow64.md) 及 [ADR-0016](decisions/0016-drop-relay-default-dacl-baseline.md)。
+子端 agent 使用自身主 token 的只读伪句柄取得 ACL 适配所需的主体。MSYS 在启用 ACL 模块时初始化本进程的主体，原生 relay 则在第一次适配显式 DACL 时才查询。SID 保存在进程自己的内存里，新进程从空的本地状态开始。默认 DACL 继承和实际访问检查由 Windows 负责。IPC 目录名是启动树的配置，访问仍由目录 ACL 决定。见 [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)。
 
 ## ConPTY
 

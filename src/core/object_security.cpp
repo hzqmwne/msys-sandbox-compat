@@ -20,15 +20,19 @@ SecurityAdaptation::~SecurityAdaptation() {
     }
 }
 
-NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
-    if (!state.compat_sid_bytes || !state.user_sid_bytes)
+NTSTATUS SecurityAdaptation::acl(PACL input, AgentState &state) {
+    const ObjectSecurityContext *identity = nullptr;
+    const auto initialized = get_object_security(state, identity);
+    if (initialized < 0)
+        return initialized;
+    if (!identity->compat_sid_bytes)
         return status_success;
     if (!input) {
         // A NULL DACL grants everyone access, but an explicit lowbox trustee is
         // still needed for these shared objects. Keep that unrestricted intent
         // rather than replacing it with a user-only template. Empty != NULL.
         const BYTE world[] = {SID_REVISION, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0};
-        SIZE_T bytes = sizeof(ACL) + 8 + sizeof(world) + 8 + state.compat_sid_bytes;
+        SIZE_T bytes = sizeof(ACL) + 8 + sizeof(world) + 8 + identity->compat_sid_bytes;
         const auto acl_bytes = bytes;
         auto status = api_.allocate(current_process(), &memory_, 0, &bytes,
                                     MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -45,9 +49,9 @@ NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
         auto second = reinterpret_cast<ACCESS_ALLOWED_ACE *>(reinterpret_cast<BYTE *>(first) +
                                                              first->Header.AceSize);
         second->Header = {ACCESS_ALLOWED_ACE_TYPE, 0,
-                          static_cast<WORD>(8 + state.compat_sid_bytes)};
+                          static_cast<WORD>(8 + identity->compat_sid_bytes)};
         second->Mask = GENERIC_ALL;
-        memcpy(&second->SidStart, state.compat_sid, state.compat_sid_bytes);
+        memcpy(&second->SidStart, identity->compat_sid, identity->compat_sid_bytes);
         return status_success;
     }
     ACL header{};
@@ -56,7 +60,7 @@ NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
     if (api_.read(current_process(), input, &header, sizeof(header), nullptr) < 0 ||
         header.AclRevision != ACL_REVISION || header.AclSize < sizeof(ACL) || !header.AceCount)
         return status_success;
-    const size_t extra = 8 + state.compat_sid_bytes;
+    const size_t extra = 8 + identity->compat_sid_bytes;
     if (header.AclSize > 0xffff - extra)
         return status_success;
     NativeBuffer copy(api_, header.AclSize + extra);
@@ -73,7 +77,7 @@ NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
     if (!context)
         return status_unsuccessful;
     ULONG returned = 0;
-    auto queried = api_.query_token(reinterpret_cast<HANDLE>(-4), TokenGroups, context.as<BYTE>(),
+    auto queried = api_.query_token(current_process_token(), TokenGroups, context.as<BYTE>(),
                                     8192, &returned);
     if (queried < 0)
         return queried;
@@ -97,7 +101,7 @@ NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
             sid_bytes + 8 != ace->Header.AceSize)
             return status_success;
         bool applies =
-            sid_bytes == state.user_sid_bytes && same_sid(sid, state.user_sid, sid_bytes);
+            sid_bytes == identity->user_sid_bytes && same_sid(sid, identity->user_sid, sid_bytes);
         for (DWORD group = 0; group < groups->GroupCount && !applies; ++group) {
             auto &entry = groups->Groups[group];
             auto member = static_cast<SID *>(entry.Sid);
@@ -109,7 +113,7 @@ NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
         }
         if (applies)
             user_mask |= ace->Mask;
-        if (sid_bytes == state.compat_sid_bytes && same_sid(sid, state.compat_sid, sid_bytes))
+        if (sid_bytes == identity->compat_sid_bytes && same_sid(sid, identity->compat_sid, sid_bytes))
             compat_mask |= ace->Mask;
         used += ace->Header.AceSize;
     }
@@ -124,13 +128,13 @@ NTSTATUS SecurityAdaptation::acl(PACL input, const AgentState &state) {
     auto added = reinterpret_cast<ACCESS_ALLOWED_ACE *>(static_cast<BYTE *>(memory_) + used);
     added->Header = {ACCESS_ALLOWED_ACE_TYPE, 0, static_cast<WORD>(extra)};
     added->Mask = missing;
-    memcpy(&added->SidStart, state.compat_sid, state.compat_sid_bytes);
+    memcpy(&added->SidStart, identity->compat_sid, identity->compat_sid_bytes);
     result->AclSize = static_cast<WORD>(used + extra);
     ++result->AceCount;
     return status_success;
 }
 
-NTSTATUS SecurityAdaptation::descriptor(PSECURITY_DESCRIPTOR input, const AgentState &state) {
+NTSTATUS SecurityAdaptation::descriptor(PSECURITY_DESCRIPTOR input, AgentState &state) {
     if (!input)
         return status_success;
     SECURITY_DESCRIPTOR_RELATIVE relative{};

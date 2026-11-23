@@ -6,11 +6,13 @@
 namespace msys_sandbox_compat {
 
 inline HANDLE current_process() { return reinterpret_cast<HANDLE>(-1); }
+inline HANDLE current_process_token() { return reinterpret_cast<HANDLE>(-4); }
 constexpr NTSTATUS status_success = 0;
 constexpr NTSTATUS status_invalid_image = static_cast<NTSTATUS>(0xc000007b);
 constexpr NTSTATUS status_not_supported = static_cast<NTSTATUS>(0xc00000bb);
 constexpr NTSTATUS status_unsuccessful = static_cast<NTSTATUS>(0xc0000001);
 constexpr NTSTATUS status_access_denied = static_cast<NTSTATUS>(0xc0000022);
+constexpr NTSTATUS status_buffer_too_small = static_cast<NTSTATUS>(0xc0000023);
 constexpr ULONG thread_create_suspended = 1;
 constexpr ULONG section_original_base_information = 3;
 

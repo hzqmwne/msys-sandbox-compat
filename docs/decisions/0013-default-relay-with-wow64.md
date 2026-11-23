@@ -8,6 +8,8 @@ Partially supersedes: [ADR-0006](0006-opt-in-native-relay.md) 的默认值和位
 
 Partially superseded by: [ADR-0016](0016-drop-relay-default-dacl-baseline.md) 移除默认 DACL 比较。
 
+Partially superseded by: [ADR-0018](0018-resolve-acl-context-in-each-process.md) 移除父子 token 比较及 WoW64 特例。
+
 ## 背景
 
 原生首进程或中间进程可能是 AMD64，也可能是 WoW64。默认自动传播需要覆盖两种位数交替的启动链，并保留调用者请求的挂起状态。

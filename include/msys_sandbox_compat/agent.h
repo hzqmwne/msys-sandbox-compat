@@ -9,7 +9,7 @@
 namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
-constexpr uint32_t agent_abi = 5;
+constexpr uint32_t agent_abi = 6;
 
 enum class Module : uint32_t {
     propagation = 1u << 0,
@@ -86,6 +86,7 @@ struct ParentStartData {
 struct ProcessState {
     volatile LONG unwind_registered;
     BYTE loader_entry[hook_patch_bytes];
+    PVOID volatile object_security;
     ParentStartData image;
 };
 
@@ -97,11 +98,6 @@ struct AgentState {
     NativeApi api;
     wchar_t object_root[object_root_chars];
     uint32_t root_chars;
-    unsigned char user_sid[SECURITY_MAX_SID_SIZE];
-    uint32_t user_sid_bytes;
-    unsigned char compat_sid[SECURITY_MAX_SID_SIZE];
-    uint32_t compat_sid_bytes;
-    uint32_t plain_context;
     HookSlot hooks[hook_count];
     // Process-local fields are reset when cloning into a new suspended child.
     ProcessState local;
@@ -110,9 +106,8 @@ struct AgentState {
 
     uint32_t modules() const { return msys_modules & ~disabled_modules; }
     bool enabled(Module module) const { return (modules() & bit(module)) != 0; }
-    uint32_t effective_modules(bool msys) const {
-        return msys ? (plain_context ? modules() & ~acl_modules : modules())
-                    : native_relay ? bit(Module::propagation) : 0;
+    uint32_t modules_for_image(bool msys) const {
+        return msys ? modules() : native_relay ? bit(Module::propagation) : 0;
     }
 };
 
@@ -130,7 +125,6 @@ NTSTATUS install_hooks(const NativeApi &api, HANDLE process, const AgentState &s
 NTSTATUS replace_entry(const NativeApi &api, HANDLE process, void *entry, const BYTE *code);
 NTSTATUS stage_startup(const NativeApi &api, HANDLE process, const AgentState &state,
                         AgentState *remote, const ParentStartData &parent);
-NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state);
 void capture_parent_image(const NativeApi &api, uintptr_t base, ParentStartData &image);
 NTSTATUS prepare_exe_layout(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
                             const ImageRecord &image);

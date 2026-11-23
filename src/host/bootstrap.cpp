@@ -161,7 +161,7 @@ void inject_root(HANDLE process, uint32_t installed, const AgentState &host_stat
     auto payload = std::make_unique<AgentState>(host_state);
     auto &state = *payload;
     const auto possible = state.enabled(Module::propagation)
-                              ? selected_hooks(state.effective_modules(true))
+                              ? selected_hooks(state.modules())
                               : installed;
     auto image = load_agent_image(agent, possible);
     auto &mapped = image.mapped;

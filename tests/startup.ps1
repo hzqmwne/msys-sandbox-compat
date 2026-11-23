@@ -40,3 +40,16 @@ if (Test-Path -LiteralPath $wow64) {
         throw "Mixed architecture startup exit=$($result.ExitCode)"
     }
 }
+
+# An ordinary relay process may explicitly create a child with a restricted token.
+$transition = Join-Path $state 'restricted-child'
+$staged = Initialize-RestrictedTestFiles $BinaryDirectory $transition
+$runner = Join-Path (Get-TestFixtureDirectory $BinaryDirectory) 'restricted-run.exe'
+$target = Join-Path $staged 'restricted-run.exe'
+$arguments = @('--no-conpty','--trace',$runner,'full',$transition,$target,'probe',$transition)
+$result = Invoke-TestProcess (New-TestProcessInfo $compat $arguments $state)
+Save-TestOutput $result $evidence 'restricted-child-relay'
+if ($result.ExitCode -ne 0 -or !$result.Output.Contains('RESTRICTED-TOKEN-AND-ACL-PASS') -or
+    !$result.Error.Contains('injected native relay')) {
+    throw "Restricted child relay exit=$($result.ExitCode): $($result.Error)"
+}

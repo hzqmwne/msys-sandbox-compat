@@ -2,6 +2,8 @@
 
 Status: Accepted
 Partially superseded by: ADR-0004，原生桥接后的 MSYS 冷启动已有成功兼容处理；ADR-0006 增加显式原生 relay。只读上下文查询和恢复前检查继续保留。
+
+Partially superseded by: [ADR-0018](0018-resolve-acl-context-in-each-process.md) 移除根进程恢复前的 token 预检。
 Date: 2026-10-20
 Related: ADR-0001
 

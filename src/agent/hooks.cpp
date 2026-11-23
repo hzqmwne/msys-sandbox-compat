@@ -32,7 +32,7 @@ namespace {
 struct ProcessObjectAttributes {
     explicit ProcessObjectAttributes(const NativeApi &api) : security(api) {}
 
-    NTSTATUS adapt(POBJECT_ATTRIBUTES &input, const AgentState &state) {
+    NTSTATUS adapt(POBJECT_ATTRIBUTES &input, AgentState &state) {
         if (!input || state.api.read(current_process(), input, &copy, sizeof(copy), nullptr) < 0 ||
             copy.Length != sizeof(copy))
             return status_success;
@@ -66,7 +66,7 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
             creation_attributes);
     };
     auto create = [&](void *creation_attributes) {
-        if ((!process_attributes && !thread_attributes) || state.plain_context ||
+        if ((!process_attributes && !thread_attributes) ||
             !state.enabled(Module::process_dacl))
             return create_original(process_attributes, thread_attributes, creation_attributes);
 
@@ -105,12 +105,6 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
         agent_log(state, "child classification unavailable; left uninstrumented",
                   static_cast<ULONG>(prepared));
     } else if (related || state.native_relay) {
-        agent_log(state, "child modules", state.effective_modules(related));
-        if (state.native_relay) {
-            prepared = check_child_context(state.api, *process, state);
-            if (prepared < 0)
-                goto failed;
-        }
         prepared = clone_agent(*process, state);
         if (prepared < 0)
             goto failed;

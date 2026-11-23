@@ -14,7 +14,7 @@ FILE *host_stderr();
 void redirect_host_stderr(HANDLE handle);
 NativeApi resolve_api(const AgentState &state);
 AgentState *inherited_agent();
-HANDLE configure_security(AgentState &state);
+HANDLE prepare_ipc_directory(AgentState &state);
 BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool conpty,
                  bool inherit_handles,
                  const AgentState *state, PROCESS_INFORMATION &child, bool &reserved);

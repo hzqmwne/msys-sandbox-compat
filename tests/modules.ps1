@@ -58,7 +58,7 @@ Invoke-Case 'conpty-config' (@('--conpty','--no-native-relay') + $layoutOff + @(
     @('modules=71','hooks=1df') $absentLayout
 Invoke-Case 'conpty-relay-config' (@('--conpty','--native-relay') + $layoutOff +
     @($bridge,'--relay','1',$client,'1df')) `
-    @('child modules 0000000000000071','relay=1 hooks=1','hooks=1df') $absentLayout
+    @('relay=1 hooks=1','hooks=1df') $absentLayout
 Invoke-Case 'inherited-relay-conflict' (@('--native-relay') + $layoutOff +
     @($bridge,'--relay','0',$compat,'--disable-module','ipc',$client)) `
     @('module options conflict with inherited relay') @('IMPORT-NAME-MATCH') 1
