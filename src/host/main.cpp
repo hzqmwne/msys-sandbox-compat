@@ -10,27 +10,83 @@ using namespace msys_sandbox_compat;
 namespace fs = std::filesystem;
 
 namespace {
+struct UsageError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+#ifdef MSYS_SANDBOX_COMPAT_EMBEDDED
+constexpr bool allow_legacy_cli = false;
+#else
+constexpr bool allow_legacy_cli = true;
+#endif
+
+constexpr char usage[] =
+    "Usage: msys-sandbox-compat-shim [OPTIONS] -- COMMAND [ARGUMENTS...]\n"
+    "       msys-sandbox-compat-shim --help | --version\n";
+
+constexpr char options_help[] =
+    "\n"
+    "  --terminal=auto|inherit|conpty  Select terminal behavior (default: auto).\n"
+    "      auto                       Bridge only console streams when available.\n"
+    "      inherit                    Pass standard handles directly to COMMAND.\n"
+    "      conpty                     Start an inner ConPTY with VT input on stdin.\n"
+    "  --conpty-size=COLSxROWS         Use a fixed inner ConPTY size.\n"
+    "  --native-relay=on|off          Relay through native processes (default: on).\n"
+    "  --disable-modules=NAME[,NAME...]  Disable compatibility modules.\n";
+
 constexpr struct {
     const wchar_t *name;
     Module module;
+    const char *description;
 } module_options[] = {
-    {L"propagation", Module::propagation},        {L"heap-window", Module::heap_window},
-    {L"exe-placement", Module::exe_placement},  {L"dll-placement", Module::dll_placement},
-    {L"ipc", Module::ipc},                       {L"process-dacl", Module::process_dacl},
-    {L"token-dacl", Module::token_dacl},
+    {L"propagation", Module::propagation, "Prepare child processes."},
+    {L"heap-window", Module::heap_window, "Reserve the MSYS address window during creation."},
+    {L"exe-placement", Module::exe_placement, "Keep MSYS executable mappings compatible with fork."},
+    {L"dll-placement", Module::dll_placement, "Prefer compatible MSYS DLL image addresses."},
+    {L"ipc", Module::ipc, "Adapt the MSYS named-object namespace and access."},
+    {L"process-dacl", Module::process_dacl, "Adapt process and thread object access."},
+    {L"token-dacl", Module::token_dacl, "Adapt the default object DACL."},
 };
 
-uint32_t module_option(const std::wstring &name) {
+uint32_t module_option(std::wstring_view name) {
     for (const auto &option : module_options)
         if (name == option.name)
             return bit(option.module);
-    throw std::runtime_error("unknown compatibility module");
+    return 0;
+}
+
+uint32_t module_list(std::wstring_view list) {
+    uint32_t modules = 0;
+    for (;;) {
+        const auto comma = list.find(L',');
+        const auto name = list.substr(0, comma);
+        const auto module = module_option(name);
+        if (!module)
+            throw UsageError(name.empty() ? "empty name in --disable-modules"
+                                          : "unknown compatibility module: " + fs::path(name).u8string());
+        modules |= module;
+        if (comma == std::wstring_view::npos)
+            return modules;
+        list.remove_prefix(comma + 1);
+    }
 }
 } // namespace
 
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 
 int wmain(int argc, wchar_t **argv) try {
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
+        fputs(usage, stdout);
+        fputs(options_help, stdout);
+        fputs("\nModules:\n", stdout);
+        for (const auto &option : module_options)
+            fprintf(stdout, "  %-15ls %s\n", option.name, option.description);
+        return 0;
+    }
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--version") {
+        puts(MSYS_SANDBOX_COMPAT_VERSION);
+        return 0;
+    }
     bool trace = false;
     bool force_conpty = false;
     bool disable_conpty = false;
@@ -44,10 +100,13 @@ int wmain(int argc, wchar_t **argv) try {
                           GetStdHandle(STD_ERROR_HANDLE)};
     SessionStdio session_stdio;
     const bool session_owner = argc > 1 && std::wstring_view(argv[1]) == session_stdio_option;
+    bool explicit_options = session_owner || !allow_legacy_cli;
+    bool separated = false;
     int first = 1;
     if (session_owner) {
-        if (argc < 7 || std::wstring_view(argv[5]) != L"--no-conpty")
-            throw std::runtime_error("invalid console session arguments");
+        if (argc < 7)
+            throw UsageError("invalid console session arguments");
+        disable_conpty = true;
         const HANDLE initial_error = stdio[2];
         session_stdio.receive(argv + 2, stdio);
         if (valid_handle(stdio[2]) && stdio[2] != initial_error)
@@ -55,32 +114,72 @@ int wmain(int argc, wchar_t **argv) try {
         first = 5;
     }
     while (first < argc) {
-        std::wstring option = argv[first];
-        if (option == L"--trace") {
+        const std::wstring_view option = argv[first];
+        const auto equals = option.find(L'=');
+        const auto key = option.substr(0, equals);
+        const auto value = equals == std::wstring_view::npos ? std::wstring_view{}
+                                                             : option.substr(equals + 1);
+        if (option == L"--") {
+            separated = true;
+            ++first;
+            break;
+        } else if (key == L"--terminal" && equals != std::wstring_view::npos) {
+            if (session_owner || (value != L"auto" && value != L"inherit" && value != L"conpty"))
+                throw UsageError("invalid --terminal value");
+            explicit_options = true;
+            disable_conpty = value == L"inherit";
+            force_conpty = value == L"conpty";
+            ++first;
+        } else if (key == L"--native-relay" && equals != std::wstring_view::npos) {
+            if (value != L"on" && value != L"off")
+                throw UsageError("--native-relay expects on or off");
+            explicit_options = true;
+            enable_native_relay |= value == L"on";
+            disable_native_relay |= value == L"off";
+            ++first;
+        } else if (key == L"--disable-modules" && equals != std::wstring_view::npos) {
+            explicit_options = true;
+            disabled_modules |= module_list(value);
+            ++first;
+        } else if (key == L"--conpty-size" && equals != std::wstring_view::npos) {
+            unsigned width = 0, height = 0;
+            wchar_t extra = 0;
+            if (session_owner ||
+                swscanf_s(value.data(), L"%ux%u%c", &width, &height, &extra, 1) != 2 ||
+                !width || width > 32767 || !height || height > 32767)
+                throw UsageError("--conpty-size expects COLSxROWS");
+            explicit_options = true;
+            terminal_size = {static_cast<SHORT>(width), static_cast<SHORT>(height)};
+            fixed_terminal_size = true;
+            ++first;
+        } else if (allow_legacy_cli && option == L"--trace") {
             trace = true;
             ++first;
-        } else if (option == L"--native-relay") {
+        } else if (allow_legacy_cli && option == L"--native-relay") {
             enable_native_relay = true;
             ++first;
-        } else if (option == L"--no-native-relay") {
+        } else if (allow_legacy_cli && option == L"--no-native-relay") {
             disable_native_relay = true;
             ++first;
-        } else if (option == L"--disable-module") {
+        } else if (allow_legacy_cli && option == L"--disable-module") {
             if (first + 1 >= argc)
                 throw std::runtime_error("--disable-module requires a module name");
-            disabled_modules |= module_option(argv[first + 1]);
+            const auto module = module_option(argv[first + 1]);
+            if (!module)
+                throw std::runtime_error("unknown compatibility module");
+            disabled_modules |= module;
             first += 2;
-        } else if (option == L"--conpty") {
+        } else if (allow_legacy_cli && option == L"--conpty") {
             force_conpty = true;
             ++first;
-        } else if (option == L"--no-conpty") {
+        } else if (allow_legacy_cli && option == L"--no-conpty") {
             disable_conpty = true;
             ++first;
-        } else if (option == L"--conpty-script" && first + 1 < argc) {
+        } else if (allow_legacy_cli && option == L"--conpty-script" && first + 1 < argc) {
             force_conpty = true;
             input_script = argv[first + 1];
             first += 2;
-        } else if (option == L"--conpty-size" && first + 1 < argc) {
+        } else if (allow_legacy_cli && option == L"--conpty-size" && first + 1 < argc) {
             unsigned width = 0, height = 0;
             wchar_t extra = 0;
             check(swscanf_s(argv[first + 1], L"%ux%u%c", &width, &height, &extra, 1) == 2 &&
@@ -89,26 +188,30 @@ int wmain(int argc, wchar_t **argv) try {
             terminal_size = {static_cast<SHORT>(width), static_cast<SHORT>(height)};
             fixed_terminal_size = true;
             first += 2;
-        } else if (option == L"--runtime" && first + 1 < argc) {
+        } else if (allow_legacy_cli && option == L"--runtime" && first + 1 < argc) {
             // Retain the old spelling for existing launch commands.
             first += 2;
-        } else
+        } else {
+            if (option.substr(0, 2) == L"--")
+                throw UsageError("unknown option: " + fs::path(option).u8string());
             break;
+        }
     }
-    if (first == argc) {
-        fprintf(host_stderr(), "Usage: msys-sandbox-compat [--trace] "
-                        "[--native-relay | --no-native-relay] [--disable-module NAME] [--runtime DLL] PROGRAM "
-                        "[arguments...]\n"
-                        "Terminal options (before PROGRAM): "
-                        "[--conpty | --no-conpty | --conpty-script FILE] "
-                        "[--conpty-size WIDTHxHEIGHT]\n");
-        return 2;
-    }
+    if (explicit_options && !separated)
+        throw UsageError("expected -- before the command");
+    if (first == argc || !*argv[first])
+        throw UsageError("missing command");
+    if (separated && disable_conpty && fixed_terminal_size)
+        throw UsageError("--conpty-size requires auto or conpty terminal mode");
+    if (separated && enable_native_relay && disable_native_relay)
+        throw UsageError("conflicting --native-relay values");
     if (force_conpty && disable_conpty)
         throw std::runtime_error("--no-conpty conflicts with --conpty or --conpty-script");
     if (enable_native_relay && disable_native_relay)
         throw std::runtime_error("--no-native-relay conflicts with --native-relay");
     const bool propagation_disabled = (disabled_modules & bit(Module::propagation)) != 0;
+    if (separated && enable_native_relay && propagation_disabled)
+        throw UsageError("--native-relay=on requires the propagation module");
     if (enable_native_relay && propagation_disabled)
         throw std::runtime_error("--native-relay requires the propagation module");
     bool native_relay = !disable_native_relay && !propagation_disabled;
@@ -121,7 +224,8 @@ int wmain(int argc, wchar_t **argv) try {
     }
     const bool conpty = force_conpty || auto_conpty;
     check(SetConsoleCtrlHandler(wait_control, TRUE), "register waiting-host Ctrl+C handler");
-    auto executable = fs::absolute(argv[first]);
+    const fs::path target(argv[first]);
+    auto executable = target.has_parent_path() || !separated ? fs::absolute(target) : fs::path{};
     fs::path launcher_path;
     const auto own_path = [&]() -> const fs::path & {
         if (launcher_path.empty()) {
@@ -183,9 +287,14 @@ int wmain(int argc, wchar_t **argv) try {
             check(false, "forward ConPTY output");
         }
     };
-    auto command = quote(executable.wstring());
-    for (int index = first + 1; index < argc; ++index)
-        command += L" " + quote(argv[index]);
+    std::wstring command;
+    if (separated)
+        command = command_tail(GetCommandLineW(), first);
+    else {
+        command = quote(executable.wstring());
+        for (int index = first + 1; index < argc; ++index)
+            command += L" " + quote(argv[index]);
+    }
     if (conpty) {
         // Let a native session host own the console's automatically created
         // handles. It starts the target with explicit inherited stdio, so
@@ -195,14 +304,19 @@ int wmain(int argc, wchar_t **argv) try {
         auto session_command = quote(executable.wstring());
         session_command += session_stdio.prepare(
             stdio, auto_conpty ? console : ConsoleStreams{true, true, true});
-        session_command += L" --no-conpty";
-        session_command += native_relay ? L" --native-relay" : L" --no-native-relay";
-        if (trace)
-            session_command += L" --trace";
+        session_command += native_relay ? L" --native-relay=on" : L" --native-relay=off";
+        std::wstring disabled_names;
         for (const auto &option : module_options)
-            if (disabled_modules & bit(option.module))
-                session_command += std::wstring(L" --disable-module ") + option.name;
-        command = session_command + L" " + command;
+            if (disabled_modules & bit(option.module)) {
+                if (!disabled_names.empty())
+                    disabled_names += L',';
+                disabled_names += option.name;
+            }
+        if (!disabled_names.empty())
+            session_command += L" --disable-modules=" + disabled_names;
+        if (trace && allow_legacy_cli)
+            session_command += L" --trace";
+        command = session_command + L" -- " + command;
     }
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = conpty ? sizeof(startup) : sizeof(STARTUPINFOW);
@@ -233,7 +347,7 @@ int wmain(int argc, wchar_t **argv) try {
     }
     PROCESS_INFORMATION child{};
     bool reserved = false;
-    check(create_root(executable.c_str(), command.data(), startup, conpty,
+    check(create_root(executable.empty() ? nullptr : executable.c_str(), command.data(), startup, conpty,
                       !conpty || session_stdio.has_handles(), state.get(), child, reserved),
           "create suspended root");
     attribute_list.reset();
@@ -311,6 +425,10 @@ int wmain(int argc, wchar_t **argv) try {
         CloseHandle(child.hProcess);
         throw;
     }
+} catch (const UsageError &error) {
+    fprintf(stderr, "msys-sandbox-compat: %s\n", error.what());
+    fputs(usage, stderr);
+    return 2;
 } catch (const std::exception &error) {
     fprintf(host_stderr(), "[fatal] %s\n", error.what());
     return 1;

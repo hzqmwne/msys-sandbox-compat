@@ -10,7 +10,7 @@
 namespace msys_sandbox_compat {
 using StandardHandles = std::array<HANDLE, 3>;
 using ConsoleStreams = std::array<bool, 3>;
-inline constexpr wchar_t session_stdio_option[] = L"--conpty-session-stdio";
+inline constexpr wchar_t session_stdio_option[] = L"--internal-conpty-session";
 
 inline bool console_handle(HANDLE handle) {
     DWORD mode = 0;

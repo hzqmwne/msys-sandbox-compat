@@ -56,6 +56,7 @@ add_executable(msys-sandbox-compat ${compat_core} src/host/main.cpp src/host/pla
 add_compat_hook_backend(msys-sandbox-compat)
 target_include_directories(msys-sandbox-compat PRIVATE include)
 target_compile_options(msys-sandbox-compat PRIVATE /EHsc)
+target_compile_definitions(msys-sandbox-compat PRIVATE MSYS_SANDBOX_COMPAT_VERSION="${PROJECT_VERSION}")
 target_link_libraries(msys-sandbox-compat PRIVATE advapi32 userenv)
 add_dependencies(msys-sandbox-compat check-agent-image)
 option(BUILD_TESTING "Build regression suites and fixtures" OFF)
