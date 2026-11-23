@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -12,7 +13,14 @@ class ConptyInput {
     static constexpr std::string_view key_down = ";1;0;";
     static constexpr std::string_view mouse_prefix =
         "\x1b[0;0;27;1;0;1_\x1b[0;0;91;1;0;1_\x1b[0;0;60;1;0;1_";
+    static constexpr unsigned max_field_digits = 5; // ConPTY coordinates fit in a signed 16-bit COORD.
+    struct MouseReport {
+        char bytes[3 + 3 * max_field_digits + 2 + 1]; // CSI <, three fields, and M/m.
+        size_t size;
+    };
     std::string pending;
+    std::string joined;
+    std::string translated;
 
     // Return zero for a mismatch and no value if the next read may complete it.
     static std::optional<size_t> match(std::string_view input, std::string_view prefix) {
@@ -23,12 +31,13 @@ class ConptyInput {
         return 0;
     }
 
-    static std::optional<size_t> mouse_report(std::string_view input, std::string &output) {
+    static std::optional<size_t> mouse_report(std::string_view input, MouseReport &report) {
         const auto start = match(input, mouse_prefix);
         if (!start || !*start)
             return start;
 
-        std::string report = "\x1b[<";
+        std::copy_n("\x1b[<", 3, report.bytes);
+        report.size = 3;
         size_t offset = *start;
         unsigned field = 0, digits = 0;
         for (;;) {
@@ -63,19 +72,20 @@ class ConptyInput {
                 return 0;
 
             if (code >= '0' && code <= '9') {
-                digits += repeat - '0';
-                if (digits > 5) // ConPTY's mouse coordinates fit in a signed 16-bit COORD.
+                const auto copies = repeat - '0';
+                digits += copies;
+                if (digits > max_field_digits)
                     return 0;
-                report.append(repeat - '0', static_cast<char>(code));
+                std::fill_n(report.bytes + report.size, copies, static_cast<char>(code));
+                report.size += copies;
             } else if (repeat != '1') {
                 return 0;
             } else if (code == ';' && digits && field < 2) {
                 ++field;
                 digits = 0;
-                report += ';';
+                report.bytes[report.size++] = ';';
             } else if ((code == 'M' || code == 'm') && digits && field == 2) {
-                report += static_cast<char>(code);
-                output += report;
+                report.bytes[report.size++] = static_cast<char>(code);
                 return offset;
             } else {
                 return 0;
@@ -84,28 +94,43 @@ class ConptyInput {
     }
 
   public:
-    std::string translate(std::string_view bytes) {
-        pending.append(bytes);
-        std::string_view input = pending;
-        std::string output;
-        output.reserve(input.size());
+    // The returned view borrows the caller's input or this translator's storage.
+    // Consume it before reusing the input buffer or calling translate again.
+    std::string_view translate(std::string_view bytes) {
+        if (!pending.empty()) {
+            joined.swap(pending);
+            pending.clear();
+            joined.append(bytes);
+            bytes = joined;
+        }
+        size_t copied = 0;
+        auto input = bytes;
         while (!input.empty()) {
             const auto escape = input.find('\x1b');
-            output.append(input.substr(0, escape));
-            if (escape == std::string_view::npos) {
-                input = {};
+            if (escape == std::string_view::npos)
+                break;
+            input.remove_prefix(escape);
+            const auto offset = bytes.size() - input.size();
+            MouseReport report;
+            const auto consumed = mouse_report(input, report);
+            if (!consumed) {
+                pending.assign(input);
+                bytes = bytes.substr(0, offset);
                 break;
             }
-            input.remove_prefix(escape);
-            const auto report = mouse_report(input, output);
-            if (!report)
-                break;
-            if (!*report)
-                output += input.front();
-            input.remove_prefix(*report ? *report : 1);
+            if (*consumed) {
+                if (!copied)
+                    translated.clear();
+                translated.append(bytes.substr(copied, offset - copied));
+                translated.append(report.bytes, report.size);
+                copied = offset + *consumed;
+            }
+            input.remove_prefix(*consumed ? *consumed : 1);
         }
-        pending.erase(0, pending.size() - input.size());
-        return output;
+        if (!copied)
+            return bytes;
+        translated.append(bytes.substr(copied));
+        return translated;
     }
 
     std::string_view remainder() const { return pending; }

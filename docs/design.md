@@ -93,7 +93,7 @@ relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。�
 
 ## ConPTY
 
-外层控制台可用且 stdin、stdout、stderr 至少一路是控制台句柄时，自动模式启用 ConPTY。宿主在既有受限上下文内用公开 API 创建 ConPTY，再启动同一 EXE 的原生会话宿主持有 Windows 初始化的三个内层控制台句柄。外层通过显式句柄继承列表只传重定向句柄的副本。会话宿主用内层控制台句柄和直通句柄为真实目标逐路设置 stdio，随后释放直通副本。Windows 初始句柄由会话宿主保留，避免 MSYS 关闭并复用句柄值后，控制台清理关掉其他对象。混合模式下，宿主日志仍跟随外层 stderr。见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md)。
+外层控制台可用且 stdin、stdout、stderr 至少一路是控制台句柄时，自动模式启用 ConPTY。在已有 Windows Terminal 标签页里，外层会话继续由 Terminal 管理，compat 在既有受限上下文内通过系统 `CreatePseudoConsole` 创建内层。宿主再启动同一 EXE 的原生会话宿主持有 Windows 初始化的三个内层控制台句柄。外层通过显式句柄继承列表只传重定向句柄的副本。会话宿主用内层控制台句柄和直通句柄为真实目标逐路设置 stdio，随后释放直通副本。Windows 初始句柄由会话宿主保留，避免 MSYS 关闭并复用句柄值后，控制台清理关掉其他对象。混合模式下，宿主日志仍跟随外层 stderr。见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md)。
 
 外层终端输入和输出使用可用的控制台句柄，必要时由外层宿主打开 `CONIN$` 或 `CONOUT$`。因此，即使目标 stdin 来自文件也可通过 `/dev/tty` 接收键盘输入，stdout 和 stderr 都重定向时仍可显示内层终端的键盘回显。agent 本身不打开控制台设备。
 
@@ -101,11 +101,11 @@ relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。�
 
 在受测 PSEC 配置中，Low IL 客户端连接外部 Medium IL conhost 时，控制台连接策略拒绝 MSYS 所需的读屏和输入事件写回。外部普通 conhost 降至 Low 后，打开客户端进程时又会遇到目标进程 DACL 中的 AppContainer package SID 所触发的访问限制。普通 Untrusted 调用者在同一 PSEC 配置下也无法打开客户端进程。同一 PSEC 内创建的 conhost 已验证可以查询客户端 token，并通过后续控制台策略检查。[微软控制台访问规则](https://learn.microsoft.com/en-us/windows/console/console-buffer-security-and-access-rights#wrong-way-verbs)
 
-桥接从终端句柄或显式 VT 数据源读取输入，脚本只打开一次。双向转发遇到短写会继续写入剩余字节。显式 VT 数据源耗尽后，桥停止转发输入，目标继续持有内层控制台 stdin。在受测 Windows 上，关闭 conhost 的 VT 输入管道会向目标发出 `CTRL_CLOSE_EVENT`。桥因此把该管道保留到会话收尾，以便目标继续处理输入和输出结果。下游写入失败或零进展时，读取线程通过 job 的完成端口通知宿主结束进程树，同时继续读取并丢弃剩余 ConPTY 输出，直到终端退出。正常收尾取消阻塞输入并转发剩余输出。
+输入和输出由独立的阻塞 I/O 线程转发。读到可转发的字节就立即写出，短写时继续写入剩余字节。桥接从终端句柄或显式 VT 数据源读取输入，脚本只打开一次。显式 VT 数据源耗尽后，桥停止转发输入，目标继续持有内层控制台 stdin。在受测 Windows 上，关闭 conhost 的 VT 输入管道会向目标发出 `CTRL_CLOSE_EVENT`。桥因此把该管道保留到会话收尾，以便目标继续处理输入和输出结果。下游写入失败或零进展时，读取线程通过 job 的完成端口通知宿主结束进程树，同时继续读取并丢弃剩余 ConPTY 输出，直到终端退出。正常收尾取消阻塞输入并转发剩余输出。
 
 交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。关闭时唤醒正在等待的尺寸采样线程，待其结束后再释放 ConPTY。显式尺寸、脚本输入和缺少可用窗口的显式会话采用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
 
-外层控制台的鼠标跟踪由内层应用协商。桥接输入时，将旧版 conhost 封装成 Win32 字符键的 SGR 鼠标报告还原为 VT 序列，由内层 ConPTY 按应用的输入模式处理。脚本和重定向输入保持原字节流。
+外层控制台的鼠标跟踪由内层应用协商。普通 UTF-8、Win32 按键报告和原生 VT 可直接从读缓冲区转发。只有可能跨读取的旧式封装鼠标报告需要暂存，确认封装后才重建 SGR 序列，并复用转发缓冲区。内层 ConPTY 按应用的输入模式处理 SGR 序列。脚本和重定向输入保持原字节流。
 
 对真实控制台句柄，桥接前保存各方向的 mode 与代码页，输入设置 raw VT / UTF-8，输出启用 processed / VT / UTF-8。收尾在最后一批输出排空之后恢复，包括目标启动失败的路径。compat 的等待实例和开发工具 psec-run 各自注册 Ctrl+C handler，防止控制台广播先终止等待宿主并触发 job 回收。该 handler 处理当前宿主的通知，子进程沿用自己的处理器。[控制台模式](https://learn.microsoft.com/en-us/windows/console/setconsolemode) · [控制事件处理](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
 

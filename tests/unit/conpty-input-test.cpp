@@ -13,7 +13,7 @@ static std::string wrap(std::string_view bytes) {
 static bool check_splits(std::string_view input, std::string_view expected) {
     for (size_t split = 0; split <= input.size(); ++split) {
         ConptyInput translator;
-        auto output = translator.translate(input.substr(0, split));
+        std::string output(translator.translate(input.substr(0, split)));
         output += translator.translate(input.substr(split));
         output += translator.remainder();
         if (output != expected) {
@@ -51,5 +51,17 @@ int main() {
 
     const auto other_input = wrap("\x1b[<35;1;xM") + wrap("\x1b[<35;123456;1M") +
                              wrap("\x1b[I") + wrap("\x1b[<35;");
-    return check_splits(other_input, other_input) ? 0 : 1;
+    if (!check_splits(other_input, other_input))
+        return 1;
+
+    constexpr std::string_view max_report = "\x1b[<12345;12345;12345M";
+    if (!check_splits(wrap(max_report).append(keys), std::string(max_report).append(keys)))
+        return 1;
+
+    // Plain text, native key reports and raw mouse VT can borrow the read buffer.
+    std::string unchanged(512, 'x');
+    unchanged += keys;
+    unchanged += hover;
+    const auto borrowed = translator.translate(unchanged);
+    return borrowed == unchanged && borrowed.data() == unchanged.data() ? 0 : 1;
 }

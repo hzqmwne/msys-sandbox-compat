@@ -114,11 +114,8 @@ class Pseudoconsole {
             while (!stopping && ReadFile(input_source, buffer, sizeof(buffer), &count, nullptr) &&
                    count) {
                 std::string_view bytes(buffer, count);
-                std::string translated;
-                if (restore_input_mode) {
-                    translated = terminal_input.translate(bytes);
-                    bytes = translated;
-                }
+                if (restore_input_mode)
+                    bytes = terminal_input.translate(bytes);
                 if (!msys_sandbox_compat::write_all(input_write, bytes.data(),
                                                      static_cast<DWORD>(bytes.size())))
                     return;
