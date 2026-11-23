@@ -71,13 +71,16 @@ ctest --test-dir build --output-on-failure
 
 ## 发布验证
 
-Windows 发布工作流在 Windows Server 上构建、安装和测试，再从解压后的 ZIP 验证两个可执行文件。版本标签触发 GitHub Release 草稿。公开发布前先验证校验和，再在支持原生 PSEC 的 Windows 11 x64 主机上验证同一份候选包。
+Windows 发布工作流在 `windows-2025` 上构建并安装 Release，运行七项定向 CTest，再用解压后的 ZIP 验证两个可执行文件。手动触发会将候选文件和 `SHA256SUMS.txt` 上传为 Actions 产物。推送版本标签还会创建 GitHub Release 草稿。 [Windows 发布工作流](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
+
+原生 PSEC 验收先用 `SHA256SUMS.txt` 验证候选包，再在支持原生 PSEC 的 Windows 11 x64 主机上运行同一份解压包。v0.1.0 分别用 Git for Windows 和官方 MSYS2 完成了验收。
 
 ```powershell
 .\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec
+.\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec -GitRoot C:\msys64
 ```
 
-该测试用包内的 `psec-run` 在 PSEC 1.0 中启动 shim，检查经 `cmd.exe` 进入 Git for Windows Bash 的传播、管道和 fork、目标退出码及文件读取拒绝。可用 `-GitRoot` 指定其他 Git 安装。
+该测试用包内的 `psec-run` 在 PSEC 1.0 中启动 shim，检查经 `cmd.exe` 进入 Bash 的传播、管道和 fork、目标退出码及文件读取拒绝。MXC 的对照使用 `wxc-exec.exe`，记录同一策略下的原版启动与经 shim 启动的结果。 [MXC ProcessContainer 实测](mxc-compatibility.md#实测命令)
 
 `Existing` 模式需由实际 harness 在其受限执行上下文内显式运行，不注册为普通宿主的 CTest。调用者原策略应已允许兼容产物、MSYS 安装文件、Perl 夹具的读取/执行及测试工作目录写入；缺少权限时保留拒绝。该模式只验收原上下文中的工作负载，原策略的具体拒绝路径和 ACL/token 保留情况还需按实际配置单独验证。
 

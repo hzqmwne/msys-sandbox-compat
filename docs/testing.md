@@ -64,13 +64,16 @@ Integration scripts default to `build/bin` for `-BinaryDirectory` and find `tool
 
 ## Release verification
 
-The Windows release workflow builds, installs, and tests the release on Windows Server, then checks both executables from the extracted ZIP. A version tag creates a GitHub Release draft. Before publishing, verify the checksums and run the same package on a Windows 11 x64 host with native PSEC.
+The Windows release workflow runs on `windows-2025`. It builds and installs Release, runs seven selected CTest cases, then checks both executables from the extracted ZIP. A manual run uploads the candidate files and `SHA256SUMS.txt` as an Actions artifact. A version tag also creates a GitHub Release draft. [Windows release workflow](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
+
+For native PSEC acceptance, verify the candidate against `SHA256SUMS.txt`, then run the same extracted package on a Windows 11 x64 host with native PSEC. The v0.1.0 check used both Git for Windows and official MSYS2.
 
 ```powershell
 .\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec
+.\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec -GitRoot C:\msys64
 ```
 
-This launches the packaged shim through `psec-run` under PSEC 1.0. It checks relay through `cmd.exe` into Git for Windows Bash, a pipe and fork workload, the target's exit code, and a denied file read. Use `-GitRoot` to test a different Git installation.
+This launches the packaged shim through `psec-run` under PSEC 1.0. It checks relay through `cmd.exe` into Bash, a pipe and fork workload, the target's exit code, and a denied file read. The MXC comparison uses `wxc-exec.exe` and records the stock and shimmed runs under the same policy. [MXC ProcessContainer test](mxc-compatibility.md#tested-command)
 
 Choose tests that exercise the change. Process creation, recognition, preparation, and relay changes need fork, scope, and relevant chain tests. Console changes need the interactive suites. Documentation changes need link and example checks. Use the full CTest matrix for cross-cutting changes or release qualification. Run access-denied controls alongside the workloads they protect.
 
