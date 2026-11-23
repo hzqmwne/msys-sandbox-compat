@@ -9,7 +9,7 @@
 namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
-constexpr uint32_t agent_abi = 6;
+constexpr uint32_t agent_abi = 7;
 
 enum class Module : uint32_t {
     propagation = 1u << 0,
@@ -103,6 +103,7 @@ struct AgentState {
     ProcessState local;
     ParentStartData parent;
     uint32_t disabled_modules;
+    HANDLE trace_file;
 
     uint32_t modules() const { return msys_modules & ~disabled_modules; }
     bool enabled(Module module) const { return (modules() & bit(module)) != 0; }

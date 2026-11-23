@@ -1,4 +1,5 @@
 #include "host.h"
+#include <cstdarg>
 #include <cstdio>
 #include <fcntl.h>
 #include <io.h>
@@ -7,9 +8,63 @@
 namespace msys_sandbox_compat {
 namespace {
 std::unique_ptr<FILE, decltype(&fclose)> redirected_error(nullptr, fclose);
-}
+std::unique_ptr<void, decltype(&CloseHandle)> log_file(nullptr, CloseHandle);
+LogLevel log_level = LogLevel::off;
 
 FILE *host_stderr() { return redirected_error ? redirected_error.get() : stderr; }
+}
+
+bool log_enabled(LogLevel level) { return log_level >= level; }
+
+HANDLE host_log_file() { return log_file.get(); }
+
+void configure_host_log(LogLevel level, const std::filesystem::path &path) {
+    log_level = level;
+    if (level == LogLevel::off || path.empty())
+        return;
+    const auto handle = CreateFileW(path.c_str(), FILE_APPEND_DATA | SYNCHRONIZE,
+                                    FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
+    check(handle != INVALID_HANDLE_VALUE, "open log file");
+    log_file.reset(handle);
+}
+
+void host_log(LogLevel level, const char *format, ...) {
+    if (!log_enabled(level))
+        return;
+    va_list args;
+    va_start(args, format);
+    if (log_file) {
+        char line[4096];
+        const int count = vsnprintf(line, sizeof(line), format, args);
+        DWORD written = 0;
+        if (count > 0)
+            ::WriteFile(log_file.get(), line,
+                        static_cast<DWORD>(static_cast<size_t>(count) < sizeof(line)
+                                               ? count : sizeof(line) - 1),
+                        &written, nullptr);
+    } else
+        vfprintf(host_stderr(), format, args);
+    va_end(args);
+}
+
+void configure_agent_log(AgentState &state, bool trace) {
+    state.trace = trace;
+    state.trace_file = trace ? host_log_file() : nullptr;
+    if (!trace)
+        return;
+    const auto ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (!state.api.write_file) {
+        state.api.write_file = reinterpret_cast<decltype(state.api.write_file)>(
+            GetProcAddress(ntdll, "NtWriteFile"));
+        check(state.api.write_file != nullptr, "resolve NtWriteFile");
+    }
+    if (state.trace_file && !state.api.duplicate_object) {
+        state.api.duplicate_object = reinterpret_cast<DuplicateObject>(
+            GetProcAddress(ntdll, "NtDuplicateObject"));
+        check(state.api.duplicate_object != nullptr, "resolve NtDuplicateObject");
+    }
+}
 
 void redirect_host_stderr(HANDLE handle) {
     // Keep the original console handle alive. The CRT stream owns a separate
@@ -36,15 +91,15 @@ void redirect_host_stderr(HANDLE handle) {
 void check(bool success, const char *operation) {
     if (!success) {
         const auto error = GetLastError();
-        fprintf(host_stderr(), "[error] %s: Win32 %lu\n", operation, error);
-        throw std::runtime_error(operation);
+        throw std::runtime_error(std::string(operation) + ": Win32 " +
+                                 std::to_string(error));
     }
 }
 void check_nt(NTSTATUS status, const char *operation) {
     if (status < 0) {
-        fprintf(host_stderr(), "[error] %s: NTSTATUS %08lx\n", operation,
-                static_cast<ULONG>(status));
-        throw std::runtime_error(operation);
+        char detail[32];
+        snprintf(detail, sizeof(detail), ": NTSTATUS %08lx", static_cast<ULONG>(status));
+        throw std::runtime_error(std::string(operation) + detail);
     }
 }
 NativeApi resolve_api(const AgentState &state) {
@@ -60,7 +115,6 @@ NativeApi resolve_api(const AgentState &state) {
     RESOLVE(protect, "NtProtectVirtualMemory");
     RESOLVE(query_memory, "NtQueryVirtualMemory");
     RESOLVE(query_process, "NtQueryInformationProcess");
-    RESOLVE(write_file, "NtWriteFile");
     RESOLVE(flush_code, "NtFlushInstructionCache");
     RESOLVE(close, "NtClose");
     const auto modules = state.modules();

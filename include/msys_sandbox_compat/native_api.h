@@ -36,6 +36,7 @@ using OpenFile = NTSTATUS(NTAPI *)(PHANDLE, ACCESS_MASK, POBJECT_ATTRIBUTES, PIO
                                    ULONG, ULONG);
 using WriteFile = NTSTATUS(NTAPI *)(HANDLE, HANDLE, void *, void *, PIO_STATUS_BLOCK, const void *,
                                     ULONG, PLARGE_INTEGER, PULONG);
+using DuplicateObject = NTSTATUS(NTAPI *)(HANDLE, HANDLE, HANDLE, PHANDLE, ACCESS_MASK, ULONG, ULONG);
 using FlushCode = NTSTATUS(NTAPI *)(HANDLE, const void *, SIZE_T);
 using Close = NTSTATUS(NTAPI *)(HANDLE);
 using SetSecurity = NTSTATUS(NTAPI *)(HANDLE, SECURITY_INFORMATION, PSECURITY_DESCRIPTOR);
@@ -73,6 +74,7 @@ struct NativeApi {
     QueryObject query_object;
     OpenFile open_file;
     WriteFile write_file;
+    DuplicateObject duplicate_object;
     FlushCode flush_code;
     Close close;
     SetSecurity set_security;

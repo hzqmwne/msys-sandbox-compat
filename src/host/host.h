@@ -8,9 +8,14 @@
 #include <vector>
 
 namespace msys_sandbox_compat {
+enum class LogLevel { off, error, warning, info, trace };
+bool log_enabled(LogLevel level);
+void configure_host_log(LogLevel level, const std::filesystem::path &path);
+void host_log(LogLevel level, const char *format, ...);
+HANDLE host_log_file();
+void configure_agent_log(AgentState &state, bool trace);
 void check(bool success, const char *operation);
 void check_nt(NTSTATUS status, const char *operation);
-FILE *host_stderr();
 void redirect_host_stderr(HANDLE handle);
 NativeApi resolve_api(const AgentState &state);
 AgentState *inherited_agent();

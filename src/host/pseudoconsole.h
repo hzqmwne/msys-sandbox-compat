@@ -91,8 +91,10 @@ class Pseudoconsole {
             throw std::runtime_error("ConPTY pipes");
         auto result = CreatePseudoConsole(dimensions, input_read, output_write, 0, &handle);
         if (FAILED(result)) {
-            fprintf(stderr, "CreatePseudoConsole HRESULT=%08lx\n", static_cast<ULONG>(result));
-            throw std::runtime_error("CreatePseudoConsole");
+            char detail[64];
+            snprintf(detail, sizeof(detail), "CreatePseudoConsole: HRESULT %08lx",
+                     static_cast<ULONG>(result));
+            throw std::runtime_error(detail);
         }
         reader = std::thread([this, completion] {
             char buffer[8192];

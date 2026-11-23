@@ -77,11 +77,14 @@ BOOL create_root(PCWSTR executable, PWSTR command, STARTUPINFOEXW &startup, bool
                               CREATE_SUSPENDED | (conpty ? EXTENDED_STARTUPINFO_PRESENT : 0),
                               nullptr, nullptr, &startup.StartupInfo, &child);
     };
-    auto slot = state && !conpty && state->enabled(Module::heap_window) ? root_create_slot()
-                                                                        : nullptr;
-    DWORD protection = 0;
-    if (!slot || !VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &protection))
+    if (!state || conpty || !state->enabled(Module::heap_window))
         return create();
+    auto slot = root_create_slot();
+    DWORD protection = 0;
+    if (!slot || !VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &protection)) {
+        host_log(LogLevel::warning, "[warning] root heap preflight unavailable\n");
+        return create();
+    }
 
     original_root_create = *slot;
     auto entry = reinterpret_cast<PVOID volatile *>(slot);

@@ -32,7 +32,18 @@ constexpr char options_help[] =
     "      conpty                     Start an inner ConPTY with VT input on stdin.\n"
     "  --conpty-size=COLSxROWS         Use a fixed inner ConPTY size.\n"
     "  --native-relay=on|off          Relay through native processes (default: on).\n"
-    "  --disable-modules=NAME[,NAME...]  Disable compatibility modules.\n";
+    "  --disable-modules=NAME[,NAME...]  Disable compatibility modules.\n"
+    "  --log-level=off|error|warning|info|trace  Set diagnostic level (default: off).\n"
+    "  --log-file=FILE               Append UTF-8 diagnostics to FILE instead of stderr.\n";
+
+constexpr const wchar_t *log_names[] = {L"off", L"error", L"warning", L"info", L"trace"};
+
+LogLevel parse_log_level(std::wstring_view value) {
+    for (size_t i = 0; i < std::size(log_names); ++i)
+        if (value == log_names[i])
+            return static_cast<LogLevel>(i);
+    throw UsageError("invalid --log-level value");
+}
 
 constexpr struct {
     const wchar_t *name;
@@ -87,7 +98,10 @@ int wmain(int argc, wchar_t **argv) try {
         puts(MSYS_SANDBOX_COMPAT_VERSION);
         return 0;
     }
-    bool trace = false;
+    if (allow_legacy_cli)
+        configure_host_log(LogLevel::info, {});
+    auto log_level = LogLevel::off;
+    fs::path log_path;
     bool force_conpty = false;
     bool disable_conpty = false;
     bool fixed_terminal_size = false;
@@ -98,6 +112,7 @@ int wmain(int argc, wchar_t **argv) try {
     COORD terminal_size{100, 30};
     StandardHandles stdio{GetStdHandle(STD_INPUT_HANDLE), GetStdHandle(STD_OUTPUT_HANDLE),
                           GetStdHandle(STD_ERROR_HANDLE)};
+    const HANDLE initial_error = stdio[2];
     SessionStdio session_stdio;
     const bool session_owner = argc > 1 && std::wstring_view(argv[1]) == session_stdio_option;
     bool explicit_options = session_owner || !allow_legacy_cli;
@@ -107,10 +122,7 @@ int wmain(int argc, wchar_t **argv) try {
         if (argc < 7)
             throw UsageError("invalid console session arguments");
         disable_conpty = true;
-        const HANDLE initial_error = stdio[2];
         session_stdio.receive(argv + 2, stdio);
-        if (valid_handle(stdio[2]) && stdio[2] != initial_error)
-            redirect_host_stderr(stdio[2]);
         first = 5;
     }
     while (first < argc) {
@@ -152,8 +164,18 @@ int wmain(int argc, wchar_t **argv) try {
             terminal_size = {static_cast<SHORT>(width), static_cast<SHORT>(height)};
             fixed_terminal_size = true;
             ++first;
+        } else if (key == L"--log-level" && equals != std::wstring_view::npos) {
+            explicit_options = true;
+            log_level = parse_log_level(value);
+            ++first;
+        } else if (key == L"--log-file" && equals != std::wstring_view::npos) {
+            if (value.empty())
+                throw UsageError("--log-file requires a path");
+            explicit_options = true;
+            log_path = value;
+            ++first;
         } else if (allow_legacy_cli && option == L"--trace") {
-            trace = true;
+            log_level = LogLevel::trace;
             ++first;
         } else if (allow_legacy_cli && option == L"--native-relay") {
             enable_native_relay = true;
@@ -201,6 +223,13 @@ int wmain(int argc, wchar_t **argv) try {
         throw UsageError("expected -- before the command");
     if (first == argc || !*argv[first])
         throw UsageError("missing command");
+    if (!separated && log_level == LogLevel::off)
+        log_level = LogLevel::info;
+    configure_host_log(log_level, log_path);
+    if (session_owner && log_level != LogLevel::off && log_path.empty() &&
+        valid_handle(stdio[2]) && stdio[2] != initial_error)
+        redirect_host_stderr(stdio[2]);
+    const bool trace = log_level == LogLevel::trace;
     if (separated && disable_conpty && fixed_terminal_size)
         throw UsageError("--conpty-size requires auto or conpty terminal mode");
     if (separated && enable_native_relay && disable_native_relay)
@@ -247,17 +276,18 @@ int wmain(int argc, wchar_t **argv) try {
         if (disabled_modules & ~inherited->disabled_modules)
             throw std::runtime_error("module options conflict with inherited relay");
         disabled_modules = inherited->disabled_modules;
-        if (trace)
-            inherited->trace = 1;
-        trace = inherited->trace != 0;
+        if (inherited->trace_file)
+            CloseHandle(inherited->trace_file);
+        configure_agent_log(*inherited, trace || (!separated && inherited->trace));
         native_relay = true;
     } else {
         state = std::make_unique<AgentState>();
-        state->trace = trace;
         state->native_relay = native_relay;
         state->disabled_modules = disabled_modules;
-        if (state->modules())
+        if (state->modules()) {
             state->api = resolve_api(*state);
+            configure_agent_log(*state, trace);
+        }
     }
     using Handle = std::unique_ptr<void, decltype(&CloseHandle)>;
     Handle job(CreateJobObjectW(nullptr, nullptr), CloseHandle);
@@ -314,8 +344,10 @@ int wmain(int argc, wchar_t **argv) try {
             }
         if (!disabled_names.empty())
             session_command += L" --disable-modules=" + disabled_names;
-        if (trace && allow_legacy_cli)
-            session_command += L" --trace";
+        session_command += std::wstring(L" --log-level=") +
+                           log_names[static_cast<size_t>(log_level)];
+        if (host_log_file())
+            session_command += L" " + quote(L"--log-file=" + log_path.wstring());
         command = session_command + L" -- " + command;
     }
     STARTUPINFOEXW startup{};
@@ -357,11 +389,11 @@ int wmain(int argc, wchar_t **argv) try {
     try {
         check(AssignProcessToJobObject(job.get(), child.hProcess), "assign tree job");
         if (inherited) {
-            fprintf(host_stderr(), "[launcher] pid=%lu prepared-by=inherited-relay\n",
-                    child.dwProcessId);
+            host_log(LogLevel::info, "[launcher] pid=%lu prepared-by=inherited-relay\n",
+                     child.dwProcessId);
         } else if (!state->modules()) {
-            fprintf(host_stderr(), "[launcher] pid=%lu classification=skipped hooks=0 debugger=none\n",
-                    child.dwProcessId);
+            host_log(LogLevel::info, "[launcher] pid=%lu classification=skipped hooks=0 debugger=none\n",
+                     child.dwProcessId);
         } else {
             bool related = false, wow64 = false;
             ImageRecord image{};
@@ -383,17 +415,18 @@ int wmain(int argc, wchar_t **argv) try {
             if (reserved)
                 check_nt(release_heap_reservation(state->api, child.hProcess, *state),
                          "release MSYS heap window");
-            fprintf(
-                host_stderr(),
+            host_log(
+                LogLevel::info,
                 "[launcher] pid=%lu classification=live-imports root=%s hooks=%zu debugger=none\n",
                 child.dwProcessId, wow64 ? "wow64" : related ? "msys" : "native",
                 std::bitset<hook_count>(installed).count());
             if (trace) {
-                fprintf(host_stderr(), "[launcher] modules=%02lx", static_cast<ULONG>(modules));
+                std::string names;
                 for (const auto &option : module_options)
                     if (modules & bit(option.module))
-                        fprintf(host_stderr(), " %ls", option.name);
-                fputc('\n', host_stderr());
+                        names += " " + fs::path(option.name).u8string();
+                host_log(LogLevel::trace, "[launcher] modules=%02lx%s\n",
+                         static_cast<ULONG>(modules), names.c_str());
             }
         }
         check(::ResumeThread(child.hThread) != static_cast<DWORD>(-1), "resume root");
@@ -414,7 +447,7 @@ int wmain(int argc, wchar_t **argv) try {
         pty.close();
         check_conpty_output();
         if (!session_owner)
-            fprintf(host_stderr(), "[summary] exit=%lu\n", result);
+            host_log(LogLevel::info, "[summary] exit=%lu\n", result);
         CloseHandle(child.hProcess);
         return static_cast<int>(result);
     } catch (...) {
@@ -430,6 +463,6 @@ int wmain(int argc, wchar_t **argv) try {
     fputs(usage, stderr);
     return 2;
 } catch (const std::exception &error) {
-    fprintf(host_stderr(), "[fatal] %s\n", error.what());
+    host_log(LogLevel::error, "[fatal] %s\n", error.what());
     return 1;
 }

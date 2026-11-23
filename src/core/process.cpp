@@ -201,6 +201,21 @@ NTSTATUS stage_startup(const NativeApi &api, HANDLE process, const AgentState &s
     status = api.write(process, &remote->parent, &parent, sizeof(parent), nullptr);
     if (status < 0)
         return status;
+    if (state.trace_file) {
+        HANDLE child_file = nullptr;
+        const auto duplicated = api.duplicate_object(current_process(), state.trace_file, process,
+                                                      &child_file, 0, 0, DUPLICATE_SAME_ACCESS);
+        if (duplicated < 0) {
+            agent_log(state, "child trace file unavailable", static_cast<ULONG>(duplicated));
+            const uint32_t off = 0;
+            status = api.write(process, &remote->trace, &off, sizeof(off), nullptr);
+            if (status < 0)
+                return status;
+        }
+        status = api.write(process, &remote->trace_file, &child_file, sizeof(child_file), nullptr);
+        if (status < 0)
+            return status;
+    }
     const auto child_api = bind_original_calls(state, 0);
     status = api.write(process, &remote->api, &child_api, sizeof(child_api), nullptr);
     if (status < 0)
@@ -243,11 +258,13 @@ void agent_log(const AgentState &state, const char *event, ULONG_PTR number) {
     for (int shift = 60; shift >= 0; shift -= 4)
         line[used++] = digits[(number >> shift) & 15];
     line[used++] = '\n';
-    // The handle comes from the current PEB's process parameters, including
-    // fork's redirected stderr. Do not retain the parent's handle value.
-    auto peb = reinterpret_cast<BYTE *>(__readgsqword(0x60));
-    auto parameters = *reinterpret_cast<BYTE **>(peb + 0x20);
-    HANDLE error = *reinterpret_cast<HANDLE *>(parameters + 0x30);
+    HANDLE error = state.trace_file;
+    if (!error) {
+        // Read stderr from this process so fork and redirection use the live value.
+        auto peb = reinterpret_cast<BYTE *>(__readgsqword(0x60));
+        auto parameters = *reinterpret_cast<BYTE **>(peb + 0x20);
+        error = *reinterpret_cast<HANDLE *>(parameters + 0x30);
+    }
     IO_STATUS_BLOCK io{};
     state.api.write_file(error, nullptr, nullptr, nullptr, &io, line, static_cast<ULONG>(used),
                          nullptr, nullptr);

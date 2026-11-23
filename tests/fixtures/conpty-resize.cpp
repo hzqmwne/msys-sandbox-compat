@@ -372,8 +372,8 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
             send_text("s=$?; test \"$s\" = 130 || exit 83; echo DEMO-CTRL-C-PASS; exit 0\r");
             exit_sent = true;
         }
-        if (powershell && !initialized &&
-            transcript.find("DEMO-PS-READY\r\n") != std::string::npos) {
+        // ConPTY may render the line ending as cursor movement when diagnostics are quiet.
+        if (powershell && !initialized && transcript.find("DEMO-PS-READY") != std::string::npos) {
             send_text("\u4E2D\u6587-\u00E9-\uFF21\r");
             initialized = true;
         }

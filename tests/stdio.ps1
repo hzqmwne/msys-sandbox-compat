@@ -19,7 +19,7 @@ Write-TestJson $policy @{filesystem = @{readonlyPaths = @($env:SystemRoot, $bina
 $launcher = Get-PsecLauncher $binaries
 $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
 $probe = Join-Path $fixtures 'stdio-probe.exe'
-$info = New-TestProcessInfo $launcher @($policy, $compat, $probe, '--echo') $state
+$info = New-TestProcessInfo $launcher @($policy, $compat, '--terminal=inherit', '--', $probe, '--echo') $state
 $info.RedirectStandardInput = $true
 
 # Repeat every byte value, including NUL and Ctrl+Z, beyond pipe capacity.
@@ -51,7 +51,8 @@ try {
     $outputHash = (Get-FileHash -InputStream $output).Hash
     [IO.File]::WriteAllText((Join-Path $report 'binary.stderr.txt'), $errorText)
     [IO.File]::WriteAllText((Join-Path $report 'binary-hashes.txt'), "stdin=$inputHash`nstdout=$outputHash`n")
-    if ($process.ExitCode -ne 37 -or $outputHash -ne $inputHash -or $errorText -notmatch '(?m)^STDIO-EOF\r?$') {
+    if ($process.ExitCode -ne 37 -or $outputHash -ne $inputHash -or
+        $errorText -notmatch '(?m)^STDIO-EOF\r?$' -or $errorText -match '\[(launcher|summary|agent)\]') {
         throw "Binary stdio or EOF mismatch, root exit $($process.ExitCode), stdout length $($output.Length)"
     }
 } finally {
