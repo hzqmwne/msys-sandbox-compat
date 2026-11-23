@@ -97,6 +97,8 @@ relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。�
 
 外层终端输入和输出使用可用的控制台句柄，必要时由外层宿主打开 `CONIN$` 或 `CONOUT$`。因此，即使目标 stdin 来自文件也可通过 `/dev/tty` 接收键盘输入，stdout 和 stderr 都重定向时仍可显示内层终端的键盘回显。agent 本身不打开控制台设备。
 
+提供 VT 管道的前端可以显式调用 `--conpty --conpty-size WxH`，将 UTF-8 按键写入 stdin，从 stdout 读取内层 ConPTY 输出并直接渲染。该路径省去外层控制台对 VT 的再次转换，尺寸由启动参数指定。
+
 在受测 PSEC 配置中，Low IL 客户端连接外部 Medium IL conhost 时，控制台连接策略拒绝 MSYS 所需的读屏和输入事件写回。外部普通 conhost 降至 Low 后，打开客户端进程时又会遇到目标进程 DACL 中的 AppContainer package SID 所触发的访问限制。普通 Untrusted 调用者在同一 PSEC 配置下也无法打开客户端进程。同一 PSEC 内创建的 conhost 已验证可以查询客户端 token，并通过后续控制台策略检查。[微软控制台访问规则](https://learn.microsoft.com/en-us/windows/console/console-buffer-security-and-access-rights#wrong-way-verbs)
 
 桥接从终端句柄或显式 VT 数据源读取输入，脚本只打开一次。双向转发遇到短写会继续写入剩余字节。显式 VT 数据源耗尽后，桥停止转发输入，目标继续持有内层控制台 stdin。在受测 Windows 上，关闭 conhost 的 VT 输入管道会向目标发出 `CTRL_CLOSE_EVENT`。桥因此把该管道保留到会话收尾，以便目标继续处理输入和输出结果。下游写入失败或零进展时，读取线程通过 job 的完成端口通知宿主结束进程树，同时继续读取并丢弃剩余 ConPTY 输出，直到终端退出。正常收尾取消阻塞输入并转发剩余输出。
