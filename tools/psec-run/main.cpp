@@ -22,9 +22,10 @@ static void hrcheck(HRESULT hr, const char *what) {
 using CloseEnvironment = void(WINAPI *)(HANDLE);
 using CheckVersion = HRESULT(WINAPI *)(DWORD, BOOLEAN *, DWORD *);
 static constexpr char usage[] =
+    "Run a command in a native Windows process security environment.\n\n"
     "Usage: psec-run --policy=FILE [--psec-version=auto|1.0|1.1] -- COMMAND [ARGUMENTS...]\n"
     "       psec-run POLICY.json PROGRAM [ARGUMENTS...]\n"
-    "       psec-run --help\n";
+    "       psec-run -h | --help\n";
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 struct Resources {
     HMODULE dll{};
@@ -52,7 +53,8 @@ struct Resources {
     }
 };
 int wmain(int argc, wchar_t **argv) try {
-    if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
+    const std::wstring_view request = argc == 2 ? argv[1] : L"";
+    if (request == L"-h" || request == L"--help") {
         fputs(usage, stdout);
         return 0;
     }

@@ -14,7 +14,7 @@ if (@(Get-ChildItem -LiteralPath $deployment -Force).Count -ne 1) {
     throw 'The test deployment must contain only shim.exe'
 }
 
-foreach ($case in @(@('--help', '--disable-modules'), @('--version', '^\d+\.\d+\.\d+'))) {
+foreach ($case in @(@('-h', '--disable-modules'), @('--help', '--disable-modules'), @('--version', '^\d+\.\d+\.\d+'))) {
     $result = Invoke-TestProcess (New-TestProcessInfo $shim @($case[0]) $state)
     if ($result.ExitCode -ne 0 -or $result.Error -or $result.Output -notmatch $case[1]) {
         throw "Expected $($case[0]) on stdout with exit 0"

@@ -21,8 +21,9 @@ constexpr bool allow_legacy_cli = true;
 #endif
 
 constexpr char usage[] =
+    "Launch Windows commands with MSYS sandbox compatibility.\n\n"
     "Usage: msys-sandbox-compat-shim [OPTIONS] -- COMMAND [ARGUMENTS...]\n"
-    "       msys-sandbox-compat-shim --help | --version\n";
+    "       msys-sandbox-compat-shim -h | --help | --version\n";
 
 constexpr char options_help[] =
     "\n"
@@ -86,7 +87,8 @@ uint32_t module_list(std::wstring_view list) {
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 
 int wmain(int argc, wchar_t **argv) try {
-    if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
+    const std::wstring_view request = argc == 2 ? argv[1] : L"";
+    if (request == L"-h" || request == L"--help") {
         fputs(usage, stdout);
         fputs(options_help, stdout);
         fputs("\nModules:\n", stdout);
@@ -94,7 +96,7 @@ int wmain(int argc, wchar_t **argv) try {
             fprintf(stdout, "  %-15ls %s\n", option.name, option.description);
         return 0;
     }
-    if (argc == 2 && std::wstring_view(argv[1]) == L"--version") {
+    if (request == L"--version") {
         puts(MSYS_SANDBOX_COMPAT_VERSION);
         return 0;
     }
