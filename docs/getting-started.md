@@ -15,7 +15,7 @@ CMake 缓存、中间文件和二进制都在 `build`。构建保留开发 EXE/D
 
 ## 示例入口
 
-先执行 `build.ps1 -Tools`，然后用 Windows PowerShell 5.1 或 PowerShell 7 运行 `run.ps1`。演示每次创建独立的 PSEC 策略文件，将 Windows 与所选 Git 根目录设为只读，项目根目录设为可写，进程工作目录继承调用者，并明确拒绝测试 canary。HOME、临时文件和运行状态位于 `unused/runtime`。
+先执行 `build.ps1 -Tools`，然后用 Windows PowerShell 5.1 或 PowerShell 7 运行 `run.ps1`。演示每次创建独立的 PSEC 策略文件，将 Windows 与所选 Git 根目录设为只读，项目根目录设为可写，进程工作目录继承调用者，并明确拒绝测试 canary。演示使用独立的 HOME 和临时目录。
 
 Windows PowerShell 5.1 和 PowerShell 7.0–7.2 下，演示程序直接继承调用进程的标准句柄。用 PowerShell 脚本管道捕获 `run.ps1` 的输出时，使用 PowerShell 7.3 或更新版本。
 
@@ -32,14 +32,15 @@ Windows PowerShell 5.1 和 PowerShell 7.0–7.2 下，演示程序直接继承�
 
 `run.ps1` 默认用 Bash 执行一次启动、fork 和 `uname` 检查，随后退出。它仍按标准句柄自动选择是否启用 ConPTY。`run.ps1 -ConPty` 显式启用 ConPTY，默认 Bash 入口初始化 `/usr/bin:/bin`、`TERM=xterm-256color` 和 UTF-8 locale，然后进入交互会话。显式传入 `-CommandArguments` 时使用调用者的参数。其他 `-Program` 使用其自身默认参数。其他构建目录可通过 `-BinaryDirectory` 指定该构建的 `bin` 目录。
 
-通过 `-Program` 启动交互式 `powershell.exe` 或 `pwsh.exe`，且参数仅含 `-NoProfile`、`-NoLogo`、`-NoExit` 时，演示入口在首次交互读取前将 PSReadLine 历史配置到 `unused/runtime/powershell-history`，实际保存会话命令。含显式 `-Command`、`-File` 等参数的调用沿用其自定义初始化。默认用户历史文件仍受 PSEC 文件策略约束。
+通过 `-Program` 启动交互式 `powershell.exe` 或 `pwsh.exe`，且参数仅含 `-NoProfile`、`-NoLogo`、`-NoExit` 时，演示在首次交互读取前将 PSReadLine 历史指向演示自己的可写文件。含显式 `-Command`、`-File` 等参数的调用沿用其自定义初始化。默认用户历史文件仍受 PSEC 文件策略约束。
 
 ## 低层入口
 
 ```text
 psec-run.exe --policy=FILE [--psec-version=auto|1.0|1.1] -- COMMAND [ARGUMENTS...]
+psec-run.exe -h | --help
 msys-sandbox-compat-shim.exe [OPTIONS] -- COMMAND [ARGUMENTS...]
-msys-sandbox-compat-shim.exe --help
+msys-sandbox-compat-shim.exe -h | --help
 msys-sandbox-compat-shim.exe --version
 ```
 
@@ -69,11 +70,11 @@ MSYS 兼容模块默认全部启用。用 `--disable-modules=NAME[,NAME...]` 关
 
 兼容宿主通过 job 等待进程树退出并返回根进程退出码。`--terminal=auto` 分别检查 stdin、stdout 和 stderr。外层控制台可用且至少一路是控制台句柄时，启动内层 ConPTY。目标程序的控制台流接到内层，文件、管道和 `NUL` 的原句柄直接继承。三路都重定向或没有可用的外层控制台时，自动模式走直连。`--terminal=inherit` 强制直连，`--terminal=conpty` 强制启用桥。演示脚本对应 `-NoConPty` 和 `-ConPty`。见[八种组合](decisions/0014-conpty-preserve-redirected-stdio.md)。
 
-ConPTY 模式收发 VT 字节流。自动模式按外层控制台窗口尺寸启动并跟随变化，包括部分标准流重定向的情况。`--conpty-size=COLSxROWS`（演示脚本中的 `-TerminalSize`）在启用桥时固定尺寸。无法查询控制台尺寸时默认使用 `100x30`。
+ConPTY 模式收发 VT 字节流。自动模式按外层控制台窗口尺寸启动并跟随变化，包括部分标准流重定向的情况。`--conpty-size=COLSxROWS`（演示脚本中的 `-TerminalSize`）在启用桥时固定尺寸。列数和行数各使用 `1` 至 `32767` 的十进制整数，以小写 `x` 分隔，例如 `120x40`。无法查询控制台尺寸时默认使用 `100x30`。
 
 `--terminal=conpty` 可以从重定向的 stdin 接收 VT 输入，目标从自己的控制台句柄读取。外部文件或管道耗尽后，桥保留终端连接，以便目标继续运行。依赖 stdin EOF 的批处理可以使用 `--terminal=inherit`。ConPTY 的下游输出写入失败时，宿主结束该会话并返回 `1`。
 
-连接真实控制台时，终端桥启用原始 VT 输入和 VT 输出，并为相应方向设置 UTF-8 代码页。输出排空后恢复原模式和代码页。原生等待宿主处理自身收到的 Ctrl+C 通知，前台目标继续按其控制台处理规则响应按键。
+连接真实控制台时，终端桥启用原始 VT 输入和 VT 输出，并为相应方向设置 UTF-8 代码页。当前光标能用内层尺寸表示时，内层继承光标并保留外层已显示的内容。应用发出的清屏指令照常转发。输出排空后恢复原模式和代码页。原生等待宿主处理自身收到的 Ctrl+C 通知，前台目标继续按其控制台处理规则响应按键。
 
 native relay 默认开启，覆盖 AMD64 和 WoW64 原生首进程及中间进程。两种位数可在同一启动链交替，后续 AMD64 MSYS 自动接入。用 `--native-relay=off` 或 `run.ps1 -NoNativeRelay` 关闭该功能。已继承 relay 的嵌套兼容入口复用原配置，显式关闭会报错。见[兼容范围](compatibility.md)和[当前设计](design.md#原生-relay)。
 

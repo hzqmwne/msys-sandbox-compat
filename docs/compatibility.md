@@ -7,15 +7,15 @@
 | 原版 EXE 与 `msys-2.0.dll` | 使用原安装文件，不修改分发包 |
 | fork、exec、管道、信号及线程中 fork | 受测组合通过回归与压力测试 |
 | MSYS 连续子进程链 | 通过创建 hook 传播 |
-| 进程链中的原生子进程 | 默认 relay 只启用创建 hook。用 `--no-native-relay` 关闭原生传播 |
+| 进程链中的原生子进程 | 默认 relay 只启用创建 hook。用 `--native-relay=off` 关闭原生传播 |
 | 原生根显式调用兼容入口 | 已由公开作用范围测试验证 |
 | MSYS 原生后代调用兼容入口启动原生目标 | 关闭 relay 的作用范围对照通过，原生目标继承既有 token 默认 DACL |
 | MSYS 创建原生中间程序后显式回入 MSYS | 一层/三层原生桥接后 Bash、Perl、线程中 fork、管道与退出码通过回归 |
 | 原生中间程序直接创建 MSYS | 默认 relay 覆盖 AMD64 和 WoW64 原生首进程及中间进程，支持两种位数交替后返回 AMD64 MSYS。配套宿主与 agent 继续使用 AMD64 产物 |
 | relay 的原生根、显式嵌套入口及挂起创建 | 受测 PSEC 和两种固定令牌均通过；仅创建入口被修改，保留退出码与挂起状态 |
 | 运行中新出现的 EXE/DLL | EXE 按直接导入识别，符合映射条件的 DLL 在首次映射时处理 |
-| ConPTY | 支持从已有 Windows Terminal 标签页正常启动。compat 通过系统 API 创建内层，外层继续由原终端管理。PSEC 和两种固定非 AppContainer 受限令牌通过交互回归。尺寸跟随通过 PSEC 双层 ConPTY 的原生探针验收 |
-| 传统控制台中的 cmd | 存在可用控制台且至少一路是控制台句柄时自动使用内层 ConPTY，其余各路保留原重定向。官方 MSYS2 与 Git for Windows 验证了八种组合的 `isatty`、读写去向及 `/dev/tty` 行为。`--no-conpty` 和三路均重定向时直连。见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md) |
+| ConPTY | 支持从已有 Windows Terminal 标签页正常启动。compat 通过系统 API 创建内层，外层继续由原终端管理。PSEC 和两种固定非 AppContainer 受限令牌通过交互回归。PSEC 双层 ConPTY 探针覆盖尺寸跟随、光标继承及退出后保留外层内容 |
+| 传统控制台中的 cmd | 存在可用控制台且至少一路是控制台句柄时自动使用内层 ConPTY，其余各路保留原重定向。官方 MSYS2 与 Git for Windows 验证了八种组合的 `isatty`、读写去向及 `/dev/tty` 行为。`--terminal=inherit` 和自动模式下三路均重定向时直连。见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md) |
 | Git `pre-commit` | 在已初始化的工作区，原生 Git 通过默认 relay 自动启动 MSYS hook。PSEC 和两种固定受限令牌通过提交成功、hook 拒绝提交及文件边界回归 |
 | 非 AppContainer write-restricted 令牌 | 固定夹具通过 Bash/Perl、fork、原生桥接、管道、文件边界及普通 MSYS 共存回归 |
 | 非 AppContainer 完整 restricting SID 检查令牌 | 同一固定夹具通过上述工作负载与边界回归 |
@@ -32,7 +32,7 @@ EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原
 
 MSYS2 官方 `msys2-runtime` 3.6.12-1 的 `msys-2.0.dll` 启用 `DYNAMIC_BASE`。这是上游有意恢复的链接配置。受测的 DLL、`bash.exe` 和 `uname.exe` 均未设置 `HIGH_ENTROPY_VA`，两个 EXE 也未设置 `DYNAMIC_BASE`。进程实际采用的 ASLR 策略还取决于目标 Windows 和启动环境。[MSYS2 runtime #381](https://github.com/msys2/msys2-runtime/pull/381) · [MSYS2 packages #6820](https://github.com/msys2/MSYS2-packages/pull/6820)
 
-relay 覆盖经 AMD64 原生 `NtCreateUserProcess` 入口创建的后代，含经过该入口的 WoW64 调用。Windows 决定子进程的 token 和默认 DACL，各进程用自己的主 token 初始化 ACL 适配。IPC 重定向使用启动树提供的目录名，并受该目录的实际权限约束。用 `--no-native-relay` 让自动传播在原生进程处结束。路径细节见 [当前设计](design.md#原生-relay) 和 [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)。
+relay 覆盖经 AMD64 原生 `NtCreateUserProcess` 入口创建的后代，含经过该入口的 WoW64 调用。Windows 决定子进程的 token 和默认 DACL，各进程用自己的主 token 初始化 ACL 适配。IPC 重定向使用启动树提供的目录名，并受该目录的实际权限约束。用 `--native-relay=off` 让自动传播在原生进程处结束。路径细节见 [当前设计](design.md#原生-relay) 和 [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)。
 
 两种受限令牌夹具均使用 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN`、禁用 Administrators，并将当前 logon SID、Everyone、Builtin Users、Authenticated Users 放入 restricting SID 列表；write 模式另加 `WRITE_RESTRICTED`。启动器为对象保留 logon/SYSTEM 授权和 OWNER RIGHTS 限制。测试只在带标记的独立工作目录配置 ACL，将兼容产物和夹具暂存为只读；Git/MSYS 仍从原安装位置加载。完整检查模式的读取也必须通过 restricting SID 检查，生产所需文件读取与执行必须在原策略允许范围内。
 

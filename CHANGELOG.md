@@ -6,13 +6,14 @@
 
 ### 兼容模块
 
-- 默认启用原生 relay，支持 WoW64 原生首进程及 AMD64/WoW64 混合启动链。可通过 `--no-native-relay` 关闭。
-- 分离进程传播、堆窗口、EXE 与 DLL 布局、MSYS IPC 和两类 DACL 处理。用可重复的 `--disable-module NAME` 进行组合对照，关闭时跳过相应预检、元数据读取和 hook 安装。`--trace` 显示实际启用的模块。见[兼容模块对照](docs/getting-started.md#兼容模块对照)。
+- 默认启用原生 relay，支持 WoW64 原生首进程及 AMD64/WoW64 混合启动链。可通过 `--native-relay=off` 关闭。
+- 分离进程传播、堆窗口、EXE 与 DLL 布局、MSYS IPC 和两类 DACL 处理。用 `--disable-modules=NAME[,NAME...]` 进行组合对照，关闭时跳过相应预检、元数据读取和 hook 安装。`--log-level=trace` 显示实际启用的模块。见[兼容模块对照](docs/getting-started.md#兼容模块对照)。
 
 ### 构建
 
 - 发布产物为内嵌 agent DLL 的 `msys-sandbox-compat-shim.exe`。开发构建同时保留 EXE/DLL。
 - Shim 使用显式 `--` 分隔原生命令，支持透明标准流、模块列表及可选诊断文件。日志默认关闭。
+- shim 和 `psec-run.exe` 支持 `-h` 与 `--help`；shim 另提供 `--version`。
 - 独立 `psec-run.exe` 支持原生 PSEC 1.0 和 1.1，以及 MXC 形状的文件、枚举和直接网络策略字段。
 
 - 仓库的构建、演示和测试脚本支持 Windows PowerShell 5.1 和 PowerShell 7。CTest 优先使用 pwsh，也可使用 Windows PowerShell。
@@ -35,6 +36,7 @@
 - 交互 PowerShell 演示入口使用项目内可写的 PSReadLine 历史文件，并验收实际交互命令的持久化。
 - ConPTY 双向转发遇到短写时继续写入剩余字节，并在写入失败或零进展时结束该方向的转发。
 - 交互式 ConPTY 默认跟随外层控制台窗口的初始尺寸和后续变化，显式 `--conpty-size` 固定会话尺寸。
+- 两种尺寸参数写法共用十进制解析，Release 单文件移除了通用扫描器依赖。
 - 关闭自动尺寸会话时立即唤醒尺寸采样线程，缩短最后一批输出后的等待。
 - 回归覆盖 ConPTY UTF-8 往返、继承标准流时的混合重定向和下游提前关闭。
 

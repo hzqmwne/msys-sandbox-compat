@@ -44,7 +44,7 @@
 
 在受测 AMD64 路径上，非零 `ZeroBits` 的数量编码以低 32 位为基准，例如 `1` 要求映像落在 2 GiB 以下。位图编码按最高置位确定上限。整个首选映像区间都必须落在上限内，原始 `ZeroBits` 继续传给内核。
 
-不满足条件或查询失败时直接使用原请求。首选址映射失败时将 `*BaseAddress` 恢复为零，再用原请求重试一次。如果无法写回原基址则返回恢复错误。`--trace` 记录请求的首选址、该次映射状态和成功时的实址。首选址失败并恢复入参时会另记重试事件。当前决策及范围见 [ADR-0012](decisions/0012-prefer-dll-image-base-at-map.md)。
+不满足条件或查询失败时直接使用原请求。首选址映射失败时将 `*BaseAddress` 恢复为零，再用原请求重试一次。如果无法写回原基址则返回恢复错误。`--log-level=trace` 记录请求的首选址、该次映射状态和成功时的实址。首选址失败并恢复入参时会另记重试事件。当前决策及范围见 [ADR-0012](decisions/0012-prefer-dll-image-base-at-map.md)。
 
 MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启动期间调用 `dll_dllcrt0` 登记的 MSYS DLL 进入 `DLL_LINK`，已登记的原生 `DLL_NATIVE` 也经过重载后的基址核对。PE 导入表用于给已登记的模块排序。动态登记的 `DLL_LOAD` 可以在父进程偏离 PE 首选地址，MSYS 会尝试在子进程重载到父进程实际使用的地址，再复制所需的数据段。即使自动选址让 DLL 加载继续，父子实载基址不同仍可能导致 fork 失败。见 [测试说明](testing.md#映像地址对照)。
 
@@ -83,7 +83,7 @@ MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标
 
 ## 原生 relay
 
-relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。原生进程仅启用创建 hook，并与 MSYS 调用者使用同一规则处理创建时的显式 DACL。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与 IPC 适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
+relay 默认覆盖原生根和后代，可通过 `--native-relay=off` 关闭。原生进程仅启用创建 hook，并与 MSYS 调用者使用同一规则处理创建时的显式 DACL。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与 IPC 适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
 
 原生创建 hook 在恢复前传播 agent，子端再识别映像和所需模块，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用模块配置及 IPC 目录名。创建 hook 已负责准备子进程。首次映射在独立的 agent 状态副本中绑定 trampoline。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代。
 
@@ -97,7 +97,9 @@ relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。�
 
 外层终端输入和输出使用可用的控制台句柄，必要时由外层宿主打开 `CONIN$` 或 `CONOUT$`。因此，即使目标 stdin 来自文件也可通过 `/dev/tty` 接收键盘输入，stdout 和 stderr 都重定向时仍可显示内层终端的键盘回显。agent 本身不打开控制台设备。
 
-提供 VT 管道的前端可以显式调用 `--conpty --conpty-size WxH`，将 UTF-8 按键写入 stdin，从 stdout 读取内层 ConPTY 输出并直接渲染。该路径省去外层控制台对 VT 的再次转换，尺寸由启动参数指定。
+提供 VT 管道的前端可以显式调用 `--terminal=conpty --conpty-size=120x40 -- COMMAND`，将 UTF-8 按键写入 stdin，从 stdout 读取内层 ConPTY 输出并直接渲染。该路径省去外层控制台对 VT 的再次转换，尺寸由启动参数指定。
+
+外层输出是控制台且当前光标能在内层尺寸内表示时，桥通过 `PSEUDOCONSOLE_INHERIT_CURSOR` 启动内层。输出线程从内层 VT 管道接收一次启动查询，用外层视口内的光标行列应答。内层由此从已有光标处输出，应用后续的 VT 序列照常转发。外层输出是管道时采用独立 VT 会话的初始画面。 [ConPTY 光标继承](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
 
 在受测 PSEC 配置中，Low IL 客户端连接外部 Medium IL conhost 时，控制台连接策略拒绝 MSYS 所需的读屏和输入事件写回。外部普通 conhost 降至 Low 后，打开客户端进程时又会遇到目标进程 DACL 中的 AppContainer package SID 所触发的访问限制。普通 Untrusted 调用者在同一 PSEC 配置下也无法打开客户端进程。同一 PSEC 内创建的 conhost 已验证可以查询客户端 token，并通过后续控制台策略检查。[微软控制台访问规则](https://learn.microsoft.com/en-us/windows/console/console-buffer-security-and-access-rights#wrong-way-verbs)
 

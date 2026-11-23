@@ -22,14 +22,14 @@ hook 位于 ntdll 入口，采用 MinHook 的 HDE64 与适配的指令搬迁核�
 构建支持 Windows PowerShell 5 和 PowerShell 7，需要 Visual Studio C++ AMD64 工具和 Windows SDK。第三方源码已包含在仓库内。
 
 ```powershell
-.\build.ps1 -Install
+.\build.ps1 -Configuration Release -Install
 
 # 在已有 PSEC 或受限令牌环境中调用
 .\build\package\bin\msys-sandbox-compat-shim.exe -- `
   'C:\Program Files\Git\usr\bin\bash.exe' --noprofile --norc -c 'echo ready; (echo fork-ok)'
 ```
 
-生产部署只需 `msys-sandbox-compat-shim.exe`，放在原策略允许读取和执行的位置。`--` 分隔 shim 选项与目标命令。日志默认关闭，终端模式默认自动选择，`--terminal=inherit` 强制直接继承三路标准句柄。完整参数可用 `--help` 查看。见[使用说明](docs/getting-started.md)。
+生产部署只需 `msys-sandbox-compat-shim.exe`，放在原策略允许读取和执行的位置。`--` 分隔 shim 选项与目标命令。日志默认关闭，终端模式默认自动选择，`--terminal=inherit` 强制直接继承三路标准句柄。用 `-h` 或 `--help` 查看参数，用 `--version` 查看版本。见[使用说明](docs/getting-started.md)。
 
 本地演示可从允许创建 PSEC 的 Windows PowerShell 5.1 或 PowerShell 7 运行。
 

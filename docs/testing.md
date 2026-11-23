@@ -18,6 +18,7 @@
 .\tests\conpty.ps1 -Environment FullRestricted
 .\tests\conpty-resize.ps1
 .\tests\terminal-session.ps1
+.\tests\shim.ps1
 .\tests\stdio.ps1
 .\tests\late-package.ps1
 .\tests\acl.ps1
@@ -41,7 +42,8 @@
 | `git-hook.ps1` | 三种隔离模式中运行真实 `git init`、`git add`、`git status`，经 `--native-relay` 触发 MSYS `pre-commit`，并检查成功与拒绝提交、暂存内容和文件权限 |
 | `conpty.ps1` | TTY、120×40 尺寸、UTF-8 往返、命令替换、fork、原生子进程、Ctrl+C、STOP/bg/fg、退出码 |
 | `conpty-resize.ps1` | 外层 ConPTY 调整窗口后，PSEC 内原生探针在没有键盘输入的情况下观察到尺寸变化。验证自动启用、显式启用的固定尺寸和显式直连 |
-| `terminal-session.ps1` | 非 UTF-8 初始控制台中的嵌套会话，读回实际 Unicode 屏幕和光标移动，验证正常/启动失败后的状态恢复。覆盖 Bash 中文编辑、PATH、尺寸与 Ctrl+C，Windows PowerShell 5.1 调用 `run.ps1` 时的策略读取、原生参数及退出码，以及 5.1 作为交互目标时的中文输入输出和 PSReadLine 历史保存 |
+| `terminal-session.ps1` | 嵌套会话继承外层的非零光标行列，退出后从外层缓冲区读回启动前的文字。覆盖 Unicode 屏幕、光标移动、正常和失败后的状态恢复、Bash 中文编辑与 Ctrl+C、PowerShell 5.1 参数传递和交互历史 |
+| `shim.ps1` | 单文件独立部署、帮助和版本、尺寸参数错误、原生命令尾段、标准流、PSEC 下的原生 relay、fork、ConPTY 和文件日志 |
 | `stdio.ps1` | PSEC 下 1 MiB 二进制 stdio 往返、stdin EOF 与管道读端提前关闭。覆盖控制台标准流八种组合、`2>&1`、`NUL`、混合管道、显式直连、内层读屏和写输入。检查 ConPTY 根进程退出后的后代输出和根退出码 |
 | `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 Perl 断言（含线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
@@ -50,9 +52,9 @@
 | `late-package.ps1` | 目标到达屏障后才在安装根外放置新 EXE/DLL，验证首次识别、动态模块和 fork。父子进程都检查显式基址、`DYNAMIC_BASE`、`ZeroBits` 两种编码和地址冲突回退 |
 | `integrity.ps1` | 按需比较安装目录路径、长度和 SHA-256；不属于日常回归 |
 
-完整性检查仅在安装/部署写入逻辑变化、怀疑分发文件被修改或发布验收确有需要时执行，不在每轮兼容测试或每次提交后重复运行。若需要首次建立比较基线，使用 `tests/integrity.ps1 -CaptureBaseline`；已有基线时不要先覆盖，应直接比较。基线默认位于 `unused/evidence/git-before.json`，可通过 `-Baseline` 指定单独快照。
+完整性检查用于安装或部署写入逻辑变化、疑似分发文件被修改或发布验收。使用 `tests/integrity.ps1 -CaptureBaseline -Baseline <FILE>` 首次建立快照；后续比较时传入同一个基线文件。
 
-各脚本默认输出到 `unused/evidence/current/<suite>`，也可使用 `-EvidenceDirectory` 保留不同轮次。状态和 HOME 位于 `unused/runtime`。这些文件不进入 Git 或发布包。
+支持 `-EvidenceDirectory` 的测试脚本可为每轮指定独立的日志目录。测试日志和运行状态是本地生成文件。
 
 `git-hook.ps1` 在受测上下文内创建独立工作目录，初始化仓库、暂存文件、检查暂存与干净状态并运行提交。Git 自动拉起的 hook 也在受测上下文运行。完整受限令牌如果无法列出仓库祖先目录，文件型 ref 后端可能拒绝建立 `.git/HEAD`。用例核对该目录访问失败和 Git 诊断，再用宿主初始化夹具，继续在原令牌下检查后续命令。验证同时检查 hook 的计算结果、隔离文件访问和真实仓库状态。
 
