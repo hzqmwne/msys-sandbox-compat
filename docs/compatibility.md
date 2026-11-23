@@ -58,9 +58,15 @@ MSYS 从继承的 Windows 标准句柄重建描述符时，会对磁盘文件调
 
 ## PSEC 下的 Microsoft Store PowerShell
 
-在 Windows 26300.9974 x64、PSEC 1.0 下，Microsoft Store PowerShell 7.7.0 可作为 PSEC 直接启动的首进程。执行别名和包内 `pwsh.exe` 均通过，实际进程保留 `Microsoft.PowerShell` 包身份并处于 AppContainer。由该 PowerShell 再调用 compat 启动 Bash，Bash 通过了 fork 验证。
+在 Windows 26300.9974 x64、PSEC 1.0 下，Microsoft Store PowerShell 7.7.0 可作为 PSEC 直接启动的首进程。执行别名和包内 `pwsh.exe` 均通过，实际进程保留 `Microsoft.PowerShell` 包身份并处于 AppContainer。原生跟踪确认，外层 `psec-run` 的 `CreateProcessW` 携带 PSEC 启动属性，转入 `processmodel!CreateProcessAsUserInsideSecurityEnvironment`。由该 PowerShell 再调用 compat 启动 Bash，Bash 通过了 fork 验证。
 
 同一策略下，PSEC 内无包身份的父进程启动商店版 PowerShell 时遇到 Windows 创建错误。作为 compat 的目标，执行别名报 Win32 1920，包内 EXE 报 Win32 5。先经 compat 启动 Bash，再从 Bash 启动任一入口，均得到 `Permission denied` 和退出码 126。移除 compat 的原生进程创建对照仍复现 Windows 错误。同包的商店版 PowerShell 父进程在同一 PSEC 策略下可以通过任一入口启动 PowerShell 子进程。
+
+文件 ACL 对普通用户授予读取权限，并通过条件 ACE 为 `WIN://SYSAPPID` 含 PowerShell 包族名的令牌授予执行权限。受测无包身份父进程可以读取和建立 `SEC_IMAGE` 文件映射，直接请求 `FILE_EXECUTE` 仍被拒绝。普通 Windows 父进程通过 AppModel 的包激活路径获得包令牌并重试，成功创建的子进程带有该包族属性。[Microsoft 条件 ACE 说明](https://learn.microsoft.com/en-us/windows/win32/secauthz/security-descriptor-definition-language-for-conditional-aces-) · [MSIX 命令行激活](https://devblogs.microsoft.com/insidemsix/activation-via-command-line/)
+
+在 PSEC 内无包身份的父进程中，两条路径都在映像文件打开阶段返回。执行别名的首个 `NtCreateUserProcess` 返回 `STATUS_IO_REPARSE_TAG_NOT_HANDLED`，包内路径则返回 `STATUS_ACCESS_DENIED`。随后 Windows 分别调用 `AicGetPackageActivationTokenForAlias` 和 `AicGetPackageActivationTokenForFilePath`。两条路径都观测到 ALPC 建连返回 `STATUS_ACCESS_DENIED`，随后 AppModel RPC 报 1753（`EPT_S_NOT_REGISTERED`），均未再次调用 `NtCreateUserProcess`。在别名对照中，普通父进程连到 `\RPC Control` 下的端点并成功。PSEC 父进程请求相同端点名，但路径位于本 AppContainer 的命名空间下，建连被拒绝。观测定位到了建连失败，未进一步区分内核的具体授权检查。[Windows 系统错误 1753](https://learn.microsoft.com/en-us/windows/win32/debug/system-error-codes--1700-3999-)
+
+同包的 PSEC 父进程走 Windows 的 `processmodel!BrokerSandboxedCreateProcess`，创建出的商店版子进程仍具有 PowerShell 包身份并留在 AppContainer。
 
 测试中实际进程没有包身份的 PowerShell 7.6.9 通过了 `PSEC → compat → pwsh → Bash` 和 `PSEC → compat → Bash → pwsh` 两条路径。判断这项限制时，应以实际 PowerShell 进程的包身份和启动链为准。
 
