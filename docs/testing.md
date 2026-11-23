@@ -1,6 +1,6 @@
 # 测试说明
 
-生产构建默认不包含开发工具与测试夹具。回归前可用 Windows PowerShell 5 或 PowerShell 7 执行 `build.ps1 -Tests`。集成测试脚本通过 PowerShell 7 执行，运行环境需允许创建 PSEC 和受限令牌。默认 Git 根为 `C:\Program Files\Git`，可通过各脚本的 `-GitRoot` 修改。
+生产构建默认不包含开发工具与测试夹具。可用 Windows PowerShell 5.1 或 PowerShell 7 执行 `build.ps1 -Tests` 和集成测试脚本。运行环境需允许创建 PSEC 和受限令牌。默认 Git 根为 `C:\Program Files\Git`，可通过各脚本的 `-GitRoot` 修改。
 
 ```powershell
 .\build.ps1 -Tests
@@ -58,7 +58,7 @@
 
 `scope` 的七项场景要求实际成功。`process-chain` 从运行 MSYS 前的原生入口记录隔离启动器默认 ACL，并检查后续所有原生桥接保持同一 ACL；目标必须完成 Perl 测试、输出工作负载标记并逐层返回 37。拒绝或超时不能算作成功。
 
-CTest 包含独立单测；找到 pwsh 后注册 PSEC、受限令牌、relay 和 ACL 集成套件，集成测试串行运行以避免共享状态冲突。CTest 使用当前构建目录的产物：
+CTest 包含独立单测以及 PSEC、受限令牌、relay 和 ACL 集成套件。集成套件优先使用 pwsh，未找到时使用 Windows PowerShell。可用 CMake 缓存变量 `MSYS_SANDBOX_COMPAT_POWERSHELL` 显式选择解释器。集成测试串行运行以避免共享状态冲突，并使用当前构建目录的产物。
 
 ```powershell
 # 在 tools/msvc-env.ps1 配置过的工具链环境中

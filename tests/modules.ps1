@@ -6,9 +6,8 @@ $state = Join-Path $root 'unused\runtime\modules'
 $evidence = Join-Path $root 'unused\evidence\current\modules'
 New-Item -ItemType Directory -Force $state,$evidence,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $policy = Join-Path $state 'policy.json'
-@{filesystem=@{readonlyPaths=@($env:SystemRoot,$root);readwritePaths=@($state);
-    deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}} |
-    ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,$root);readwritePaths=@($state);
+    deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}}
 
 $launcher = Get-PsecLauncher $BinaryDirectory
 $compat = Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'

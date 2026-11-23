@@ -1,4 +1,4 @@
-param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
+﻿param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
       [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'),
       [ValidateSet('Psec','WriteRestricted','FullRestricted','Existing')][string]$Environment='Psec',
       [switch]$NativeRelay,
@@ -16,7 +16,7 @@ if($EvidenceDirectory){$report=[IO.Path]::GetFullPath($EvidenceDirectory)}
 New-Item -ItemType Directory -Force $report,$state,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $policy=Join-Path $state 'conpty-policy.json'
 if(!$restricted -and !$existing){
-    @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+    Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}}
 }
 $sourceBinaries=$BinaryDirectory
 $fixtureBinaries=Get-TestFixtureDirectory $sourceBinaries
@@ -27,7 +27,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-public sealed class TerminalTest : IDisposable {
+public sealed class TerminalTest {
     public Process P;
     public readonly StringBuilder Output = new StringBuilder();
     public readonly StringBuilder Error = new StringBuilder();
@@ -40,7 +40,11 @@ public sealed class TerminalTest : IDisposable {
         var buffer=new char[2048]; int count;
         while((count=await stream.ReadAsync(buffer,0,buffer.Length))>0) lock(result) result.Append(buffer,0,count);
     }
-    public void Send(string input) {P.StandardInput.Write(input);P.StandardInput.Flush();}
+    public void Send(string input) {
+        var bytes = Encoding.UTF8.GetBytes(input);
+        P.StandardInput.BaseStream.Write(bytes, 0, bytes.Length);
+        P.StandardInput.BaseStream.Flush();
+    }
     public string Text { get {lock(Output) return Output.ToString();} }
     public void Await(string marker) {
         AwaitFrom(marker, 0);
@@ -58,7 +62,6 @@ public sealed class TerminalTest : IDisposable {
         if(!P.WaitForExit(30000)) throw new Exception("ConPTY exit timeout");
         Task.WaitAll(outputTask,errorTask); return P.ExitCode;
     }
-    public void Dispose() {if(!P.HasExited) P.Kill(true); P.Dispose();}
 }
 "@
 [string[]]$prefix=if($existing){@()}elseif($restricted){@($(if($Environment -eq 'WriteRestricted'){'write'}else{'full'}),$state)}else{@($policy)}
@@ -68,8 +71,6 @@ $arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirec
 $launcher=if($existing){Join-Path $sourceBinaries 'msys-sandbox-compat.exe'}elseif($restricted){Join-Path $fixtureBinaries 'restricted-run.exe'}else{Get-PsecLauncher $sourceBinaries}
 $info=New-TestProcessInfo $launcher $arguments $state
 $info.RedirectStandardInput=$true
-$info.StandardInputEncoding=[Text.UTF8Encoding]::new($false)
-$info.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
 $t=[TerminalTest]::new($info)
 $passed=$false
 $exitCode=$null
@@ -130,8 +131,10 @@ try {
 } finally {
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stdout.txt'),$t.Text)
     [IO.File]::WriteAllText((Join-Path $report 'conpty.stderr.txt'),$t.Error.ToString())
-    @{Environment=$Environment;NativeRelay=[bool]$NativeRelay;ThreadRepetitions=$ThreadRepetitions;Passed=$passed;ExitCode=$exitCode} | ConvertTo-Json |
-        Set-Content -LiteralPath (Join-Path $report 'results.json') -Encoding utf8NoBOM
-    $t.Dispose()
+    Write-TestJson (Join-Path $report 'results.json') @{
+        Environment=$Environment;NativeRelay=[bool]$NativeRelay;ThreadRepetitions=$ThreadRepetitions;Passed=$passed;ExitCode=$exitCode
+    }
+    Stop-TestProcess $t.P
+    $t.P.Dispose()
     if($terminalWritePath){Remove-Item -LiteralPath $terminalWritePath -ErrorAction SilentlyContinue}
 }

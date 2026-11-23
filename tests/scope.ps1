@@ -10,18 +10,15 @@ $fixtureBinaries=Get-TestFixtureDirectory $BinaryDirectory
 $fixtures=Join-Path $fixtureBinaries 'renamed'
 New-Item -ItemType Directory -Force $fixtures,$evidence,$state,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $policy=Join-Path $state 'scope-policy.json'
-@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@((Join-Path $PSScriptRoot 'fixtures\denied.txt'))}}
 $launcher=Get-PsecLauncher $BinaryDirectory
 $compat=Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $probe=Join-Path $fixtureBinaries 'native-probe.exe'
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 Copy-Item -LiteralPath $probe -Destination (Join-Path $fixtures 'bash.exe')
 function Run([string]$Name,[string[]]$Arguments,[string]$Report='') {
-    $info=New-TestProcessInfo $launcher @() $state
-    $info.ArgumentList.Add($policy)
-    $info.ArgumentList.Add($Arguments[0])
-    $info.ArgumentList.Add('--no-native-relay')
-    foreach($argument in ($Arguments | Select-Object -Skip 1)){$info.ArgumentList.Add($argument)}
+    $launchArgs=@($policy,$Arguments[0],'--no-native-relay') + @($Arguments | Select-Object -Skip 1)
+    $info=New-TestProcessInfo $launcher $launchArgs $state
     $result=Invoke-TestProcess $info
     $err=$result.Error
     Save-TestOutput $result $evidence $Name

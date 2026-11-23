@@ -11,7 +11,7 @@
 
 ### 构建
 
-- `build.ps1` 支持 Windows PowerShell 5 和 PowerShell 7。CTest 的 PowerShell 集成测试继续使用 pwsh。
+- 仓库的构建、演示和测试脚本支持 Windows PowerShell 5.1 和 PowerShell 7。CTest 优先使用 pwsh，也可使用 Windows PowerShell。
 - `run.ps1` 支持 Windows PowerShell 5.1 和 PowerShell 7。策略文件统一写为无 BOM 的 UTF-8，旧版原生参数传递保留引号和空参数。
 
 ### MSYS 内存布局

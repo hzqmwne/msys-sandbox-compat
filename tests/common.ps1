@@ -1,3 +1,9 @@
+. (Join-Path $PSScriptRoot '../tools/windows-command-line.ps1')
+
+function Write-TestJson([string]$Path, $Value, [int]$Depth = 4) {
+    [IO.File]::WriteAllText($Path, (ConvertTo-Json -InputObject $Value -Depth $Depth))
+}
+
 # Product, fixture and tool outputs share the same CMake build root.
 function Get-TestFixtureDirectory([string]$BinaryDirectory) {
     return Join-Path (Split-Path $BinaryDirectory -Parent) 'tests\bin'
@@ -14,11 +20,25 @@ function New-TestProcessInfo([string]$Program, [string[]]$Arguments, [string]$Wo
     $info.RedirectStandardOutput = $true
     $info.RedirectStandardError = $true
     $info.WorkingDirectory = $WorkingDirectory
-    $info.Environment['TEMP'] = Join-Path $WorkingDirectory 'tmp'
-    $info.Environment['TMP'] = $info.Environment['TEMP']
-    $info.Environment['HOME'] = Join-Path $WorkingDirectory 'home'
-    foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
+    $info.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $info.StandardErrorEncoding = [Text.Encoding]::UTF8
+    $info.EnvironmentVariables['TEMP'] = Join-Path $WorkingDirectory 'tmp'
+    $info.EnvironmentVariables['TMP'] = $info.EnvironmentVariables['TEMP']
+    $info.EnvironmentVariables['HOME'] = Join-Path $WorkingDirectory 'home'
+    $info.Arguments = ConvertTo-WindowsCommandLine $Arguments
     return $info
+}
+
+function Stop-TestProcess([Diagnostics.Process]$Process) {
+    if ($Process.HasExited) { return }
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        $taskkill = Join-Path $env:SystemRoot 'System32/taskkill.exe'
+        $ErrorActionPreference = 'Continue'
+        & $taskkill /PID $Process.Id /T /F 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0 -and !$Process.HasExited) { $Process.Kill() }
+    } else {
+        $Process.Kill($true)
+    }
 }
 
 function Invoke-TestProcess([Diagnostics.ProcessStartInfo]$Info, [int]$Timeout=60000) {
@@ -33,7 +53,7 @@ function Invoke-TestProcess([Diagnostics.ProcessStartInfo]$Info, [int]$Timeout=6
             Error = $stderr.GetAwaiter().GetResult()
         }
     } finally {
-        if (!$process.HasExited) { $process.Kill($true) }
+        Stop-TestProcess $process
         $process.Dispose()
     }
 }

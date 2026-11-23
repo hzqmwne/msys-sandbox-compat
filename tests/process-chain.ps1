@@ -21,8 +21,7 @@ if ($restricted) {
 $policy = Join-Path $state 'policy.json'
 $canary = if ($restricted) { Join-Path $state 'denied.txt' } else { Join-Path $PSScriptRoot 'fixtures\denied.txt' }
 if (!$restricted) {
-    @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}} |
-        ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $policy -Encoding utf8NoBOM
+    Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}}
 }
 $launcher = if ($restricted) { Join-Path $fixtureBinaries 'restricted-run.exe' }
             else { Get-PsecLauncher $BinaryDirectory }
@@ -59,8 +58,9 @@ try {
             'set -euo pipefail; test "$(printf raw-fork | cat)" = raw-fork; echo RAW-WORKLOAD-PASS')) $state
         $raw = Invoke-TestProcess $rawInfo 30000
         Save-TestOutput $raw $evidence 'raw-baseline'
-        @{ExitCode=$raw.ExitCode;WorkloadCompleted=$raw.Output.Contains('RAW-WORKLOAD-PASS')} |
-            ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'raw-baseline.json') -Encoding utf8NoBOM
+        Write-TestJson (Join-Path $evidence 'raw-baseline.json') @{
+            ExitCode=$raw.ExitCode;WorkloadCompleted=$raw.Output.Contains('RAW-WORKLOAD-PASS')
+        }
         # An ordinary MSYS session holds its global objects throughout both restricted chains.
         $ordinaryInfo = New-TestProcessInfo $bash @('--noprofile','--norc','-c',
             'echo ORDINARY-MSYS-READY; read -r done') $state
@@ -145,14 +145,14 @@ try {
         Write-Output "changed-default-dacl pass=$passed exit=$($result.ExitCode)"
     }
     if ($restricted -and $ordinary.HasExited) { throw 'Ordinary MSYS exited during the restricted workload' }
-    $results | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'results.json') -Encoding utf8NoBOM
+    Write-TestJson (Join-Path $evidence 'results.json') $results
     if (@($results | Where-Object {!$_.Passed}).Count) { throw 'Real MSYS process-chain workload failed' }
     Write-Output 'PROCESS-CHAIN-ALL-PASS'
 } finally {
     if ($null -ne $ordinary) {
         if (!$ordinary.HasExited) {
             $ordinary.StandardInput.Close()
-            if (!$ordinary.WaitForExit(3000)) { $ordinary.Kill($true); $ordinary.WaitForExit() }
+            if (!$ordinary.WaitForExit(3000)) { Stop-TestProcess $ordinary; $ordinary.WaitForExit() }
         }
         [IO.File]::WriteAllText((Join-Path $evidence 'ordinary.stderr.txt'),$ordinaryError.GetAwaiter().GetResult())
         $ordinary.Dispose()

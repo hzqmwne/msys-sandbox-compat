@@ -15,14 +15,15 @@ $aslr=Join-Path $package 'late-aslr-module.dll'
 $conflict=Join-Path $package 'late-conflict-module.dll'
 $low=Join-Path $package 'late-low-module.dll'
 $policy=Join-Path $state 'late-policy.json'
-@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@()}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM $policy
+Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot);readwritePaths=@($root);deniedPaths=@()}}
 $fixtureBinaries=Get-TestFixtureDirectory $BinaryDirectory
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 $moduleTest=(Join-Path $PSScriptRoot 'fixtures\late-module.pl').Replace('\','/')
 $command='export PATH=/usr/bin:/bin; echo WAITING-FOR-PACKAGE; read -r ready; test "$ready" = installed || exit 80; export PATH="'+$package.Replace('\','/')+':/usr/bin:/bin"; "'+$exe.Replace('\','/')+'" "LATE-EXE-PASS\n" || exit 81; /usr/bin/perl "'+$moduleTest+'" "'+$dll.Replace('\','/')+'" "'+$helper.Replace('\','/')+'" || exit $?; echo LATE-PACKAGE-PASS'
-$info=New-TestProcessInfo (Get-PsecLauncher $BinaryDirectory) @() $state
+$launchArgs=@($policy,(Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'),'--trace','--runtime',
+    (Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$bash,'--noprofile','--norc','-c',$command)
+$info=New-TestProcessInfo (Get-PsecLauncher $BinaryDirectory) $launchArgs $state
 $info.RedirectStandardInput=$true
-foreach($a in @($policy,(Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'),'--trace','--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$bash,'--noprofile','--norc','-c',$command)){$info.ArgumentList.Add($a)}
 $p=[Diagnostics.Process]::Start($info)
 $errorText=$p.StandardError.ReadToEndAsync()
 try {
@@ -37,7 +38,9 @@ try {
     Copy-Item -LiteralPath (Join-Path $fixtureBinaries 'late-aslr-module.dll') -Destination $aslr
     Copy-Item -LiteralPath $dll -Destination $conflict
     Copy-Item -LiteralPath (Join-Path $fixtureBinaries 'late-low-module.dll') -Destination $low
-    $p.StandardInput.Write("installed`n");$p.StandardInput.Flush()
+    $readyBytes=[Text.Encoding]::ASCII.GetBytes("installed`n")
+    $p.StandardInput.BaseStream.Write($readyBytes,0,$readyBytes.Length)
+    $p.StandardInput.BaseStream.Flush()
     $output=$p.StandardOutput.ReadToEndAsync()
     if(!$p.WaitForExit(60000)){throw 'Late package timeout'}
     $text=$output.GetAwaiter().GetResult();$err=$errorText.GetAwaiter().GetResult()
@@ -46,6 +49,6 @@ try {
     if($p.ExitCode -ne 0 -or $text -notmatch 'LATE-EXE-PASS' -or $text -notmatch 'LATE-PACKAGE-PASS' -or ([regex]::Matches($text,'LATE-DLL-PASS')).Count -ne 2){throw "Late package failed exit=$($p.ExitCode): $text $err"}
     Write-Output 'LATE-PACKAGE-PASS: EXE and DLL created after target ready; dynamic module and fork both use preferred address'
 } finally {
-    if(!$p.HasExited){$p.Kill($true)}
+    Stop-TestProcess $p
     $p.Dispose()
 }

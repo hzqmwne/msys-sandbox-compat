@@ -51,35 +51,36 @@ endforeach()
 
 # Integration tests create PSEC instances or restricted tokens and must run in
 # a host that permits their creation. They share runtime fixtures, so serialize.
-find_program(MSYS_SANDBOX_COMPAT_POWERSHELL NAMES pwsh)
+find_program(MSYS_SANDBOX_COMPAT_POWERSHELL NAMES pwsh powershell)
 if(MSYS_SANDBOX_COMPAT_POWERSHELL)
-  add_test(NAME ordinary.startup COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+  set(test_powershell "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile -ExecutionPolicy Bypass)
+  add_test(NAME ordinary.startup COMMAND ${test_powershell}
     -File "${CMAKE_CURRENT_SOURCE_DIR}/startup.ps1"
     -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
   set_tests_properties(ordinary.startup PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   foreach(suite verify scope modules conpty conpty-resize terminal-session stdio late-package process-chain git-hook)
-    add_test(NAME psec.${suite} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME psec.${suite} COMMAND ${test_powershell}
       -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(psec.${suite} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   endforeach()
   foreach(mode WriteRestricted FullRestricted)
-    add_test(NAME token.${mode} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME token.${mode} COMMAND ${test_powershell}
       -File "${CMAKE_CURRENT_SOURCE_DIR}/process-chain.ps1" -Environment "${mode}"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(token.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
-    add_test(NAME token.conpty.${mode} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME token.conpty.${mode} COMMAND ${test_powershell}
       -File "${CMAKE_CURRENT_SOURCE_DIR}/conpty.ps1" -Environment "${mode}"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(token.conpty.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
-    add_test(NAME token.git-hook.${mode} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME token.git-hook.${mode} COMMAND ${test_powershell}
       -File "${CMAKE_CURRENT_SOURCE_DIR}/git-hook.ps1" -Environment "${mode}"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(token.git-hook.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
   endforeach()
   foreach(mode Psec WriteRestricted FullRestricted)
     foreach(suite process-chain conpty)
-      add_test(NAME relay.${mode}.${suite} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+      add_test(NAME relay.${mode}.${suite} COMMAND ${test_powershell}
         -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1" -Environment "${mode}" -NativeRelay
         -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
       set_tests_properties(relay.${mode}.${suite} PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
@@ -113,11 +114,11 @@ add_library(acl-probe SHARED fixtures/acl-probe.cpp)
 target_compile_options(acl-probe PRIVATE /EHsc)
 target_link_libraries(acl-probe PRIVATE advapi32)
 if(MSYS_SANDBOX_COMPAT_POWERSHELL)
-  add_test(NAME psec.acl COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+  add_test(NAME psec.acl COMMAND ${test_powershell}
     -File "${CMAKE_CURRENT_SOURCE_DIR}/acl.ps1" -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
   set_tests_properties(psec.acl PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
   foreach(mode WriteRestricted FullRestricted)
-    add_test(NAME token.acl.${mode} COMMAND "${MSYS_SANDBOX_COMPAT_POWERSHELL}" -NoProfile
+    add_test(NAME token.acl.${mode} COMMAND ${test_powershell}
       -File "${CMAKE_CURRENT_SOURCE_DIR}/acl.ps1" -Environment "${mode}"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
     set_tests_properties(token.acl.${mode} PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)

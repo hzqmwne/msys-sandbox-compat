@@ -135,7 +135,7 @@ static int close_target(const wchar_t *executable) {
     return 2;
 }
 
-static int outer_state(int argc, wchar_t **argv, bool failure) {
+static int outer_state(int argc, wchar_t **argv, bool failure, bool check_modes) {
     check(argc >= 3, "outer-state target");
     const auto input = GetStdHandle(STD_INPUT_HANDLE);
     const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -163,10 +163,11 @@ static int outer_state(int argc, wchar_t **argv, bool failure) {
     CloseHandle(child.hProcess);
     check(waited == WAIT_OBJECT_0 && code == (failure ? 1u : 0u), "terminal session exit");
     DWORD in_after = 0, out_after = 0;
-    check(GetConsoleMode(input, &in_after) && GetConsoleMode(output, &out_after) &&
-              in_after == in_mode && out_after == out_mode && GetConsoleCP() == 437 &&
-              GetConsoleOutputCP() == 437,
-          "restore outer modes and code pages");
+    if (check_modes)
+        check(GetConsoleMode(input, &in_after) && GetConsoleMode(output, &out_after) &&
+                  in_after == in_mode && out_after == out_mode && GetConsoleCP() == 437 &&
+                  GetConsoleOutputCP() == 437,
+              "restore outer modes and code pages");
     if (failure) {
         puts("OUTER-STATE-PASS");
         return 0;
@@ -407,8 +408,8 @@ int wmain(int argc, wchar_t **argv) try {
     }
     if (mode == L"--screen-probe")
         return screen_probe();
-    if (mode == L"--outer-state" || mode == L"--outer-failure")
-        return outer_state(argc, argv, mode == L"--outer-failure");
+    if (mode == L"--outer-state" || mode == L"--outer-failure" || mode == L"--outer-screen")
+        return outer_state(argc, argv, mode == L"--outer-failure", mode != L"--outer-screen");
     if (mode == L"--probe" || mode == L"--probe-fixed")
         return probe(mode == L"--probe-fixed");
     check(argc >= 3 &&

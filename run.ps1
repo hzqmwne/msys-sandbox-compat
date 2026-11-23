@@ -70,13 +70,11 @@ try {
     $launcher = Join-Path (Split-Path $BinaryDirectory -Parent) 'tools/psec-run.exe'
     if ($PSVersionTable.PSVersion -lt [version]'7.3') {
         # Pass a Win32 command line without the legacy native binder reinterpreting it.
+        . (Join-Path $PSScriptRoot 'tools/windows-command-line.ps1')
         $startInfo = [Diagnostics.ProcessStartInfo]::new($launcher)
         $startInfo.UseShellExecute = $false
         $startInfo.WorkingDirectory = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
-        $startInfo.Arguments = ($launchArgs | ForEach-Object {
-            $escaped = [string]$_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)\z', '$1$1'
-            '"' + $escaped + '"'
-        }) -join ' '
+        $startInfo.Arguments = ConvertTo-WindowsCommandLine $launchArgs
         $process = [Diagnostics.Process]::Start($startInfo)
         try {
             $process.WaitForExit()

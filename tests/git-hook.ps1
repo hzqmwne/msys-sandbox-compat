@@ -26,9 +26,8 @@ $policyProbe = ''
 if ($Environment -eq 'Psec') {
     $policy = Join-Path $state 'policy.json'
     [IO.File]::WriteAllText($denied, 'protected')
-    @{filesystem = @{readonlyPaths = @($env:SystemRoot, $GitRoot, $binaries);
-        readwritePaths = @($state); deniedPaths = @($denied)}} |
-        ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+    Write-TestJson $policy @{filesystem = @{readonlyPaths = @($env:SystemRoot, $GitRoot, $binaries);
+        readwritePaths = @($state); deniedPaths = @($denied)}}
     $launcher = Get-PsecLauncher $binaries
     $prefix = @($policy)
     $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
@@ -73,8 +72,8 @@ function Invoke-FixtureGit([string]$Label, [string[]]$GitArguments, [switch]$Iso
     } else {
         $info = New-TestProcessInfo $git $GitArguments $repository
         foreach ($item in $configuration.GetEnumerator()) {
-            if ($item.Value) { $info.Environment[$item.Key] = $item.Value }
-            else { $null = $info.Environment.Remove($item.Key) }
+            if ($item.Value) { $info.EnvironmentVariables[$item.Key] = $item.Value }
+            else { $info.EnvironmentVariables.Remove($item.Key) }
         }
     }
     $result = Invoke-TestProcess $info 30000

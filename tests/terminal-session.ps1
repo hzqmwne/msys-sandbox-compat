@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$BinaryDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'build/bin'),
     [string]$EvidenceDirectory = ''
 )
@@ -13,9 +13,8 @@ $report = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory) }
 }
 New-Item -ItemType Directory -Force $state,$report | Out-Null
 $policy = Join-Path $state 'policy.json'
-@{filesystem = @{readonlyPaths = @($env:SystemRoot, $binaries, $fixtures);
-    readwritePaths = @($state)}} | ConvertTo-Json -Depth 4 |
-    Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+Write-TestJson $policy @{filesystem = @{readonlyPaths = @($env:SystemRoot, $binaries, $fixtures);
+    readwritePaths = @($state)}}
 $probe = Join-Path $fixtures 'conpty-resize-probe.exe'
 $launcher = Get-PsecLauncher $binaries
 $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
@@ -48,9 +47,13 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-CLOSE-PASS')) {
 Write-Output 'TERMINAL-CLOSE-PASS: closing the outer ConPTY releases the launcher, target and descendant'
 
 # Exercise the demo entry with its default Bash arguments and the selected build.
-$pwsh = (Get-Command pwsh).Source
-$info = New-TestProcessInfo $probe @('--drive-bash',$probe,'--outer-state',$pwsh,'-NoProfile',
-    '-File',(Join-Path $root 'run.ps1'),'-ConPty','-BinaryDirectory',$binaries) $state
+$shell = (Get-Process -Id $PID).Path
+# Windows PowerShell changes the shared console mode even for an empty command.
+# The native screen/failure tests above check the bridge's mode restoration.
+$outerCheck = if ($PSVersionTable.PSEdition -eq 'Desktop') { '--outer-screen' } else { '--outer-state' }
+$shellArgs = @($shell,'-NoProfile','-ExecutionPolicy','Bypass')
+$info = New-TestProcessInfo $probe (@('--drive-bash',$probe,$outerCheck) + $shellArgs + @(
+    '-File',(Join-Path $root 'run.ps1'),'-ConPty','-BinaryDirectory',$binaries)) $state
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'bash-demo'
 if ($result.Output.Contains('Cannot query console owner') -or
@@ -73,9 +76,9 @@ exit $LASTEXITCODE
 '@
 $encodedDemo = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($legacyDemo))
 $info = New-TestProcessInfo $winPS @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encodedDemo) $state
-$info.Environment['MSC_DEMO_SCRIPT'] = Join-Path $root 'run.ps1'
-$info.Environment['MSC_DEMO_BIN'] = $binaries
-$info.Environment['MSC_DEMO_INPUT'] = $inputScript
+$info.EnvironmentVariables['MSC_DEMO_SCRIPT'] = Join-Path $root 'run.ps1'
+$info.EnvironmentVariables['MSC_DEMO_BIN'] = $binaries
+$info.EnvironmentVariables['MSC_DEMO_INPUT'] = $inputScript
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'powershell51-launch'
 if ($result.ExitCode -ne 37 -or !$result.Output.Contains('PS51-DEMO-PASS')) {
@@ -95,24 +98,23 @@ $entry = Join-Path $state 'powershell-demo.ps1'
 $rootQuoted = $root.Replace("'", "''")
 $programQuoted = $winPS.Replace("'", "''")
 $binaryQuoted = $binaries.Replace("'", "''")
-Set-Content -LiteralPath $entry -Encoding utf8NoBOM -Value @(
+$scriptEncoding = [Text.UTF8Encoding]::new($true)
+[IO.File]::WriteAllLines($entry, [string[]]@(
     '$command = @''', $command, '''@',
-    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-Command',`$command)")
-$info = New-TestProcessInfo $probe @('--drive-powershell',$probe,'--outer-state',$pwsh,'-NoProfile',
-    '-File',$entry) $state
+    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-Command',`$command)"), $scriptEncoding)
+$info = New-TestProcessInfo $probe (@('--drive-powershell',$probe,$outerCheck) + $shellArgs + @('-File',$entry)) $state
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'powershell-demo'
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
     throw "PowerShell demo failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
-Write-Output 'TERMINAL-POWERSHELL-PASS: real console Unicode input/output, rendered screen and state restoration'
+Write-Output 'TERMINAL-POWERSHELL-PASS: real console Unicode input/output and rendered screen'
 
 # Run the same interactive PSReadLine entry used during manual acceptance.
 $entry = Join-Path $state 'readline-demo.ps1'
-Set-Content -LiteralPath $entry -Encoding utf8NoBOM -Value (
-    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-NoLogo')")
-$info = New-TestProcessInfo $probe @('--drive-readline',$probe,'--outer-state',$pwsh,'-NoProfile',
-    '-File',$entry) $state
+[IO.File]::WriteAllText($entry,
+    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-NoLogo')", $scriptEncoding)
+$info = New-TestProcessInfo $probe (@('--drive-readline',$probe,$outerCheck) + $shellArgs + @('-File',$entry)) $state
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'readline-demo'
 $history = Join-Path $root 'unused/runtime/powershell-history/powershell_history.txt'
@@ -123,4 +125,4 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS') -or
     ![IO.File]::ReadAllText($history).Contains($marker)) {
     throw "Interactive PSReadLine history failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
-Write-Output 'TERMINAL-PSREADLINE-PASS: interactive command saved to the demo history, Unicode screen and restored state'
+Write-Output 'TERMINAL-PSREADLINE-PASS: interactive command saved to the demo history and Unicode screen rendered'

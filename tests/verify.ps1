@@ -12,20 +12,16 @@ $allowed=Join-Path $PSScriptRoot 'fixtures\allowed.txt'
 $canaryHash=(Get-FileHash -LiteralPath $canary).Hash
 $allowedHash=(Get-FileHash -LiteralPath $allowed).Hash
 $policy=Join-Path $state 'verify-policy.json'
-@{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}} | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$root);readwritePaths=@($state);deniedPaths=@($canary)}}
 $launcher=Get-PsecLauncher $BinaryDirectory
 $supervisor=Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $results=[System.Collections.Generic.List[object]]::new()
 function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$Expected=0,
                      [string]$Match='',[switch]$CheckHeapHandoff) {
-    $start=New-TestProcessInfo $launcher @() $state
-    $start.ArgumentList.Add($policy)
-    $start.ArgumentList.Add($supervisor)
-    if($CheckHeapHandoff){$start.ArgumentList.Add('--trace')}
-    $start.ArgumentList.Add('--runtime')
-    $start.ArgumentList.Add((Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
-    $start.ArgumentList.Add($Program)
-    foreach($argument in $Arguments){$start.ArgumentList.Add($argument)}
+    $launchArgs=@($policy,$supervisor)
+    if($CheckHeapHandoff){$launchArgs+='--trace'}
+    $launchArgs+=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$Program) + $Arguments
+    $start=New-TestProcessInfo $launcher $launchArgs $state
     $result=Invoke-TestProcess $start
     $out=$result.Output; $err=$result.Error
     Save-TestOutput $result $evidence $Name
@@ -54,6 +50,6 @@ Invoke-Case 'exit-status' $bash @('--noprofile','--norc','-c','exit 37') -Expect
 Invoke-Case 'native-child' $bash @('--noprofile','--norc','-c','/c/Windows/System32/cmd.exe /d /c "echo NATIVE-CHILD"') -Match 'NATIVE-CHILD'
 $unchanged=((Get-FileHash -LiteralPath $canary).Hash -eq $canaryHash -and (Get-FileHash -LiteralPath $allowed).Hash -eq $allowedHash)
 $results.Add([pscustomobject]@{Name='boundary-files-unchanged';Passed=$unchanged})
-$results | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath (Join-Path $evidence 'verification.json')
+Write-TestJson (Join-Path $evidence 'verification.json') $results
 if(@($results | Where-Object {!$_.Passed}).Count){throw 'Verification failures: inspect unused/evidence/current/verify/verification.json and corresponding logs'}
 Write-Output "ALL-PASS cases=$($results.Count)"

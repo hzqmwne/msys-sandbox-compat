@@ -14,8 +14,7 @@ $report = if ($EvidenceDirectory) { [IO.Path]::GetFullPath($EvidenceDirectory) }
 }
 New-Item -ItemType Directory -Force $state,$report,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null
 $policy = Join-Path $state 'policy.json'
-@{filesystem = @{readonlyPaths = @($env:SystemRoot, $binaries, $fixtures); readwritePaths = @($state)}} |
-    ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policy
+Write-TestJson $policy @{filesystem = @{readonlyPaths = @($env:SystemRoot, $binaries, $fixtures); readwritePaths = @($state)}}
 
 $launcher = Get-PsecLauncher $binaries
 $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
