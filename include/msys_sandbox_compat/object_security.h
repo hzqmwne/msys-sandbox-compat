@@ -21,5 +21,4 @@ class SecurityAdaptation {
     SECURITY_DESCRIPTOR descriptor_{};
 };
 
-NTSTATUS adapt_kernel_object(const NativeApi &api, HANDLE object, const AgentState &state);
 } // namespace msys_sandbox_compat

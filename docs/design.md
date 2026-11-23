@@ -58,11 +58,13 @@ MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启
 | `NtCreateSymbolicLinkObject` | MSYS 目录链接与授权 |
 | `NtCreateNamedPipeFile` | MSYS 管道授权 |
 | `NtMapViewOfSection` | 对基址未指定、未设置 `DYNAMIC_BASE` 且符合 `ZeroBits` 的 `SEC_IMAGE` DLL 尝试首选基址，失败时恢复原请求 |
-| `NtCreateUserProcess` | 创建前识别并暂留堆窗口，挂起创建后准备、释放窗口及传播 |
+| `NtCreateUserProcess` | 创建前按需暂留堆窗口并适配显式进程和线程 DACL，挂起创建后传播并释放窗口 |
 | `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体 |
 | `NtSetSecurityObject` | 当前进程伪句柄单独设置 DACL 时，按当次输入补受限主体 |
 
-对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。已识别进程/线程查询实际 DACL 后使用同一转换器。
+对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。
+
+受限上下文启用 `process-dacl` 时，`NtCreateUserProcess` 在调用内核前用同一转换器检查 `process_attributes` 和 `thread_attributes` 的显式描述符。需要调整时只替换临时副本中的 `SecurityDescriptor`，适配无需识别目标映像。MSYS fork 显式提供创建 DACL，恢复时会跳过冷启动的设置调用，之后信号投递仍要按 PID 以 `PROCESS_DUP_HANDLE` 重开目标。显式适配在创建时一次完成。独立启动器传入空的进程和线程安全属性，由 Windows 使用默认 DACL。见 [ADR-0017](decisions/0017-adapt-process-dacl-at-creation.md)。
 
 默认设置同样使用当次 ACL，不恢复启动快照。仅匹配当前主 token 的 TokenDefaultDacl；NtCompareObjects 不要求输入句柄有查询权限，最终由原 NtSetInformationToken 检查设置权限。默认值对后续采用默认 SD 的对象有连带影响，作为已接受的兜底取舍；不修改已有磁盘/注册表 ACL。显式对象仍需创建路径适配。决定见 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
 
@@ -81,7 +83,7 @@ MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标
 
 ## 原生 relay
 
-relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。原生进程仅启用创建 hook。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与对象适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
+relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。原生进程仅启用创建 hook，并与 MSYS 调用者使用同一规则处理创建时的显式 DACL。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与 IPC 适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
 
 原生创建 hook 在恢复前识别并复制相应模式，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用原运行上下文；其创建调用已准备子进程，宿主不重复识别、复制完整状态或再次注入。首次映射在独立的 agent 状态副本中绑定 trampoline，不临时改写宿主 API。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代，省略嵌套启动器选项不会关闭已有 relay 或替换原上下文。
 

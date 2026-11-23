@@ -11,7 +11,7 @@
 | [0005](0005-restricted-token-context.md) | 受限令牌沿用启动器对象 ACL，并按启动建立 MSYS 私有命名空间 | Accepted |
 | [0006](0006-opt-in-native-relay.md) | 显式选择原生创建 relay，同一安全上下文内自动回入 MSYS | Accepted，默认值和位数范围由 0013 更新 |
 | [0007](0007-production-artifacts.md) | 生产兼容 EXE/DLL 与可选隔离验证工具分开交付 | Accepted |
-| [0008](0008-adapt-requested-object-acls.md) | 基于当次输入适配对象 ACL/默认策略，保留 ntdll 接入与早期依赖约束 | Accepted |
+| [0008](0008-adapt-requested-object-acls.md) | 基于当次输入适配对象 ACL/默认策略，保留 ntdll 接入与早期依赖约束 | Accepted，默认 DACL 基准和进程创建适配分别由 0016、0017 更新 |
 | [0009](0009-minhook-relocation-backend.md) | MinHook 核心搬迁 ntdll 入口，隔离后端并保留已有 hook 路径 | Accepted |
 | [0010](0010-reserve-cygheap-at-creation.md) | 在 Windows 创建进程时预留 MSYS cygheap 原址 | Superseded by 0011 |
 | [0011](0011-release-heap-reservations-before-start.md) | 在 MSYS 执行前释放创建时的临时堆预留 | Accepted |
@@ -20,5 +20,6 @@
 | [0014](0014-conpty-preserve-redirected-stdio.md) | 自动 ConPTY 逐路保留重定向，只桥接控制台 | Accepted |
 | [0015](0015-initialize-at-child-loader-entry.md) | 在子进程加载器入口初始化兼容层，保留应用启动上下文 | Accepted |
 | [0016](0016-drop-relay-default-dacl-baseline.md) | relay 沿用 Windows 默认 DACL 继承，撤除历史基准和创建锁 | Accepted |
+| [0017](0017-adapt-process-dacl-at-creation.md) | 创建进程和初始线程时适配调用者显式提供的 DACL | Accepted |
 
 Accepted ADR 的正文不重写。决定变化时新增 ADR，在新旧记录中补充替代关系；小型实现细节由 Git 历史和变更记录表达。研究计划与未验证候选不写成 Accepted 决定。

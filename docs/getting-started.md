@@ -56,7 +56,7 @@ MSYS 兼容模块默认全部启用。可重复传入 `--disable-module NAME`，
 | `exe-placement` | 冷启动和 exec 时尝试未设置 `DYNAMIC_BASE` 的 EXE 首选基址，以及 fork 时按父进程实载地址对齐 |
 | `dll-placement` | DLL 定址 hook 及其中的 section 查询 |
 | `ipc` | MSYS 命名对象路径和显式 ACL 适配，以及相应的命名空间准备 |
-| `process-dacl` | MSYS 进程和线程对象 DACL 适配 |
+| `process-dacl` | 受限上下文中适配创建进程和初始线程时的显式 DACL，以及 MSYS 运行时重设的自身进程 DACL |
 | `token-dacl` | MSYS 主 token 默认 DACL 适配 |
 
 关闭模块可能重现该模块处理的兼容故障。启用 relay 时仍会核对父令牌和子令牌的安全上下文。嵌套启动器复用已有 relay 的配置，尝试关闭该树中已启用的模块会报错。ConPTY 继续由自己的选项控制。`--trace` 显示根进程启用的模块与后代的模块位掩码，位序按表格从最低位开始。

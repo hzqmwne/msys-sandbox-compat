@@ -9,7 +9,7 @@
 namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
-constexpr uint32_t agent_abi = 4;
+constexpr uint32_t agent_abi = 5;
 
 enum class Module : uint32_t {
     propagation = 1u << 0,
@@ -131,7 +131,6 @@ NTSTATUS replace_entry(const NativeApi &api, HANDLE process, void *entry, const 
 NTSTATUS stage_startup(const NativeApi &api, HANDLE process, const AgentState &state,
                         AgentState *remote, const ParentStartData &parent);
 NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state);
-NTSTATUS adapt_child_objects(HANDLE process, HANDLE thread, AgentState &state);
 void capture_parent_image(const NativeApi &api, uintptr_t base, ParentStartData &image);
 NTSTATUS prepare_exe_layout(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,
                             const ImageRecord &image);

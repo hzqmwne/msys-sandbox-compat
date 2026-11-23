@@ -87,7 +87,6 @@ NativeApi resolve_api(const AgentState &state) {
     }
     if (state.enabled(Module::process_dacl)) {
         RESOLVE(set_security, "NtSetSecurityObject");
-        RESOLVE(query_security, "NtQuerySecurityObject");
     }
     if (state.enabled(Module::token_dacl)) {
         RESOLVE(compare_objects, "NtCompareObjects");

@@ -1,5 +1,6 @@
 #include "agent_runtime.h"
 
+#include "msys_sandbox_compat/object_security.h"
 #include "msys_sandbox_compat/pe_view.h"
 #include <intrin.h>
 
@@ -27,6 +28,27 @@ void register_unwind() {
         table.Size / sizeof(RUNTIME_FUNCTION), state.self_base);
 }
 
+namespace {
+struct ProcessObjectAttributes {
+    explicit ProcessObjectAttributes(const NativeApi &api) : security(api) {}
+
+    NTSTATUS adapt(POBJECT_ATTRIBUTES &input, const AgentState &state) {
+        if (!input || state.api.read(current_process(), input, &copy, sizeof(copy), nullptr) < 0 ||
+            copy.Length != sizeof(copy))
+            return status_success;
+        const auto status = security.descriptor(copy.SecurityDescriptor, state);
+        if (auto replacement = security.adapted_descriptor()) {
+            copy.SecurityDescriptor = replacement;
+            input = &copy;
+        }
+        return status;
+    }
+
+    SecurityAdaptation security;
+    OBJECT_ATTRIBUTES copy;
+};
+} // namespace
+
 extern "C" __declspec(dllexport) NTSTATUS NTAPI
 hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS_MASK thread_access,
              POBJECT_ATTRIBUTES process_attributes, POBJECT_ATTRIBUTES thread_attributes,
@@ -36,11 +58,27 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
     register_unwind();
     bool owns_reservation = false;
     NTSTATUS status = status_success;
-    auto create = [&](void *creation_attributes) {
+    auto create_original = [&](POBJECT_ATTRIBUTES process_input, POBJECT_ATTRIBUTES thread_input,
+                               void *creation_attributes) {
         return state.api.create_process(
-            process, thread, process_access, thread_access, process_attributes, thread_attributes,
+            process, thread, process_access, thread_access, process_input, thread_input,
             process_flags, thread_flags | thread_create_suspended, parameters, create_info,
             creation_attributes);
+    };
+    auto create = [&](void *creation_attributes) {
+        if ((!process_attributes && !thread_attributes) || state.plain_context ||
+            !state.enabled(Module::process_dacl))
+            return create_original(process_attributes, thread_attributes, creation_attributes);
+
+        // MSYS fork supplies the DACL at creation and skips the cold-start setter.
+        // Its signal sender must still reopen the target with PROCESS_DUP_HANDLE.
+        auto process_input = process_attributes, thread_input = thread_attributes;
+        ProcessObjectAttributes process_security(state.api), thread_security(state.api);
+        auto adapted = process_security.adapt(process_input, state);
+        if (adapted >= 0)
+            adapted = thread_security.adapt(thread_input, state);
+        return adapted < 0 ? adapted : create_original(process_input, thread_input,
+                                                       creation_attributes);
     };
     if (state.enabled(Module::heap_window)) {
         agent_log(state, "child heap preflight");
@@ -53,8 +91,7 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
         return status;
     bool related = false, wow64 = false;
     auto prepared = status_success;
-    if (!state.native_relay || owns_reservation || state.trace ||
-        (!state.plain_context && state.enabled(Module::process_dacl))) {
+    if (!state.native_relay || owns_reservation || state.trace) {
         prepared = identify_process(state.api, *process, related);
         if (prepared < 0 && state.native_relay &&
             query_wow64_process(state.api, *process, wow64) >= 0 && wow64)
@@ -71,11 +108,6 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
         agent_log(state, "child modules", state.effective_modules(related));
         if (state.native_relay) {
             prepared = check_child_context(state.api, *process, state);
-            if (prepared < 0)
-                goto failed;
-        }
-        if (related) {
-            prepared = adapt_child_objects(*process, *thread, state);
             if (prepared < 0)
                 goto failed;
         }

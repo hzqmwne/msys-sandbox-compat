@@ -53,6 +53,7 @@
 
 ### 对象授权适配
 
+- 在进程创建入口适配进程和初始线程的显式 DACL。同类原生创建请求也适用，省去为 DACL 适配识别映像及创建后读回写入。见 [ADR-0017](docs/decisions/0017-adapt-process-dacl-at-creation.md)。
 - 显式对象 ACL 与 TokenDefaultDacl 均基于当次输入补受限主体，不再用统一 SD/启动快照覆盖；保留 owner/group/SACL/control，按用户及 enabled groups 的原有权限追加，deny/空/复杂输入不补权。NULL DACL 用 Everyone 与受限主体表达开放意图。
 - 支持仅含 TOKEN_ADJUST_DEFAULT 的设置句柄，其他 token 和查询句柄权限保持系统语义。
 - 记录 ntdll 通用接入、分问题适配与早期 agent 无 CRT/导入/TLS 依赖的原则；新增对象 SD/ACL 单测与真实 MSYS 设置回归。

@@ -156,22 +156,4 @@ NTSTATUS SecurityAdaptation::descriptor(PSECURITY_DESCRIPTOR input, const AgentS
     return status;
 }
 
-NTSTATUS adapt_kernel_object(const NativeApi &api, HANDLE object, const AgentState &state) {
-    ULONG bytes = 0;
-    auto status = api.query_security(object, DACL_SECURITY_INFORMATION, nullptr, 0, &bytes);
-    if (!bytes)
-        return status;
-    NativeBuffer input(api, bytes);
-    if (!input)
-        return status_unsuccessful;
-    status = api.query_security(object, DACL_SECURITY_INFORMATION, input.as<BYTE>(), bytes, &bytes);
-    if (status < 0)
-        return status;
-    SecurityAdaptation adapted(api);
-    status = adapted.descriptor(input.as<BYTE>(), state);
-    if (status >= 0 && adapted.adapted_descriptor())
-        status = api.set_security(object, DACL_SECURITY_INFORMATION, adapted.adapted_descriptor());
-    return status;
-}
-
 } // namespace msys_sandbox_compat

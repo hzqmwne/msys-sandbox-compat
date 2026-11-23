@@ -273,9 +273,6 @@ int wmain(int argc, wchar_t **argv) try {
                       "query MSYS root token before initialization");
                 CloseHandle(root_token);
             }
-            if (related)
-                check_nt(adapt_child_objects(child.hProcess, child.hThread, *state),
-                         "adapt MSYS root objects");
             const auto modules = state->effective_modules(related);
             const auto installed = selected_hooks(modules);
             if (installed || ((modules & bit(Module::exe_placement)) && !image.dynamic_base))
