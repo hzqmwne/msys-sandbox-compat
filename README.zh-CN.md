@@ -6,13 +6,15 @@
 
 ## 使用
 
-构建需要 Visual Studio C++ x64 工具和 Windows SDK，可用 Windows PowerShell 5.1 或 PowerShell 7 执行。
+Windows x64 发布包包含单文件 shim 和独立的 `psec-run.exe`。后者用于创建原生 PSEC 环境。 [下载](https://github.com/hzqmwne/msys-sandbox-compat/releases)
+
+也可在本地构建这两个程序。构建需要 Visual Studio C++ x64 工具和 Windows SDK，可用 Windows PowerShell 5.1 或 PowerShell 7 执行。
 
 ```powershell
-.\build.ps1 -Configuration Release -Install
+.\build.ps1 -Configuration Release -Tools -Install
 ```
 
-将 `build\package\bin\msys-sandbox-compat-shim.exe` 放到沙箱已允许读取和执行的位置。在该环境中，从 shim 所在目录执行以下命令。
+将 `msys-sandbox-compat-shim.exe` 放到沙箱已允许读取和执行的位置。本地构建的安装目录是 `build\package\bin`。在沙箱中，从 shim 所在目录执行以下命令。
 
 ```powershell
 .\msys-sandbox-compat-shim.exe -- 'C:\Program Files\Git\usr\bin\bash.exe' --noprofile --norc -c 'echo ready; (echo fork-ok)'

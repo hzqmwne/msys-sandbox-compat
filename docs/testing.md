@@ -62,6 +62,16 @@ ctest --test-dir build --output-on-failure
 
 Integration scripts default to `build/bin` for `-BinaryDirectory` and find `tools/psec-run.exe` and `tests/bin` from the same build root. Supply `-BinaryDirectory` explicitly for another build. CTest does this automatically. Fixtures and source workloads live in `tests/fixtures`, and unit tests in `tests/unit`. The install layout contains only the production deliverables and documentation. Scripts with `-EvidenceDirectory` accept a separate log directory for each run.
 
+## Release verification
+
+The Windows release workflow builds, installs, and tests the release on Windows Server, then checks both executables from the extracted ZIP. A version tag creates a GitHub Release draft. Before publishing, verify the checksums and run the same package on a Windows 11 x64 host with native PSEC.
+
+```powershell
+.\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec
+```
+
+This launches the packaged shim through `psec-run` under PSEC 1.0. It checks relay through `cmd.exe` into Git for Windows Bash, a pipe and fork workload, the target's exit code, and a denied file read. Use `-GitRoot` to test a different Git installation.
+
 Choose tests that exercise the change. Process creation, recognition, preparation, and relay changes need fork, scope, and relevant chain tests. Console changes need the interactive suites. Documentation changes need link and example checks. Use the full CTest matrix for cross-cutting changes or release qualification. Run access-denied controls alongside the workloads they protect.
 
 `verify.ps1` defaults to one round. Use `-Repetitions 10` for repeated shell and fork tests. Chain and ConPTY tests default to one secondary-thread fork repetition. Use `-ThreadRepetitions 10` for stress testing, up to 1000. The Perl fixture can also run through the shim as `tests/fixtures/fork.pl 100`. Judge the result by exit status, TAP, the actual workload, and the heap-window release trace for Perl roots and descendants.

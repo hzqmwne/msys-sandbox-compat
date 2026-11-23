@@ -1,0 +1,75 @@
+name: Windows release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build and install Release
+        run: .\build.ps1 -Configuration Release -Tests -Tools -Install
+      - name: Run unit and Windows integration tests
+        run: |
+          . .\tools\msvc-env.ps1
+          & (Join-Path (Split-Path $cmake) 'ctest.exe') --test-dir build --output-on-failure --no-tests=error -R '^(identify|object-security|inline-hook|stream-write|conpty-input|ordinary\.startup|token\.FullRestricted)$'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Package and smoke-test the release
+        run: |
+          $version = (& .\build\package\bin\msys-sandbox-compat-shim.exe --version).Trim()
+          if ($LASTEXITCODE -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid shim version' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match shim version $version"
+          }
+
+          $output = New-Item -ItemType Directory -Force build/release
+          $zip = Join-Path $output.FullName "msys-sandbox-compat-v$version-windows-x64.zip"
+          Compress-Archive -Path build/package/* -DestinationPath $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath build/release-smoke
+          .\tests\release.ps1 -PackageDirectory build/release-smoke -Version $version
+          Copy-Item -Path build/release-smoke/bin/*.exe -Destination $output.FullName
+          Get-ChildItem -LiteralPath $output.FullName -File | Sort-Object Name | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content -LiteralPath (Join-Path $output.FullName 'SHA256SUMS.txt') -Encoding ascii
+          'Native PSEC acceptance runs on Windows 11 x64 using this release artifact.' >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-release
+          path: build/release/
+          if-no-files-found: error
+
+  draft:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: windows-x64-release
+          path: release
+      - name: Create GitHub Release draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd release && sha256sum --check SHA256SUMS.txt)
+          gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag \
+            --title "$GITHUB_REF_NAME" --notes-file ".github/release-notes/$GITHUB_REF_NAME.md"

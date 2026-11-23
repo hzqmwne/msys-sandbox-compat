@@ -22,8 +22,10 @@ if ($Install) {
     $package = Join-Path $buildDirectory 'package'
     & $cmake --install $buildDirectory --prefix $package
     if ($LASTEXITCODE) { throw 'Package installation failed' }
-    # Retire the development pair left by older installs into this staging directory.
-    foreach ($name in @('msys-sandbox-compat.exe','msys-sandbox-compat.dll')) {
+    # Retire files left by earlier installs into this staging directory.
+    $obsoleteNames = @('msys-sandbox-compat.exe','msys-sandbox-compat.dll')
+    if (!$Tools) { $obsoleteNames += 'psec-run.exe' }
+    foreach ($name in $obsoleteNames) {
         $obsolete = Join-Path (Join-Path $package 'bin') $name
         if (Test-Path -LiteralPath $obsolete -PathType Leaf) {
             Remove-Item -LiteralPath $obsolete

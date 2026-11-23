@@ -11,7 +11,7 @@
 .\build.ps1 -Tests  # 包含开发工具、测试程序和夹具
 ```
 
-CMake 缓存、中间文件和二进制都在 `build`。构建保留开发 EXE/DLL，并把通过校验的 agent DLL 嵌入 `msys-sandbox-compat-shim.exe`。`-Install` 将单文件 shim、公开文档和许可整理到 `build/package`。`-Tools` 构建 `build/tools/psec-run.exe`，`-Tests` 同时构建它和 `build/tests/bin` 下的回归夹具。校验器、开发工具与测试夹具均不安装。手动 CMake 对应 `-DMSYS_SANDBOX_COMPAT_BUILD_TOOLS=ON` 和 `-DBUILD_TESTING=ON`，二者默认关闭。
+CMake 缓存、中间文件和二进制都在 `build`。构建保留开发 EXE/DLL，并把通过校验的 agent DLL 嵌入 `msys-sandbox-compat-shim.exe`。`-Install` 将单文件 shim、公开文档和许可整理到 `build/package`。`-Tools` 构建 `build/tools/psec-run.exe`。同时指定 `-Tools -Install` 时，`build/package/bin` 包含发布 ZIP 中的两个独立程序。`-Tests` 为回归构建启动器和 `build/tests/bin` 下的夹具。手动 CMake 对应 `-DMSYS_SANDBOX_COMPAT_BUILD_TOOLS=ON` 和 `-DBUILD_TESTING=ON`，二者默认关闭。
 
 ## 示例入口
 

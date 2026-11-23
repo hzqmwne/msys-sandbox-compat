@@ -2,9 +2,9 @@
 
 [简体中文](CHANGELOG.zh-CN.md)
 
-The project is in 0.1 development and has no formal release yet. The [compatibility matrix](docs/compatibility.md) records where the changes have been tested. The sections below include earlier development decisions as well as the current behavior.
+The [compatibility matrix](docs/compatibility.md) records where the changes have been tested.
 
-## Unreleased
+## 0.1.0
 
 ### Compatibility modules
 
@@ -16,7 +16,7 @@ The project is in 0.1 development and has no formal release yet. The [compatibil
 - Ship `msys-sandbox-compat-shim.exe` with the agent DLL embedded. Development builds also produce a separate EXE and DLL.
 - The shim uses `--` to delimit the native command, supports transparent stdio, and can write diagnostics to a separate file. Logging defaults to off.
 - The shim and `psec-run.exe` accept `-h` and `--help`. The shim also accepts `--version`.
-- The separate `psec-run.exe` tool supports native PSEC 1.0 and 1.1, including MXC-style filesystem, enumeration, and direct network fields.
+- The release includes the standalone `psec-run.exe` launcher for native PSEC 1.0 and 1.1, including MXC-style filesystem, enumeration, and direct network fields.
 - `psec-run.exe` requires `--policy=FILE -- COMMAND`. The former positional policy syntax has been removed.
 - Build, demo, and test scripts support Windows PowerShell 5.1 and PowerShell 7. CTest prefers PowerShell 7.
 - `run.ps1` writes UTF-8 policy files without a BOM and preserves quotes and empty arguments when calling native programs from older PowerShell versions.

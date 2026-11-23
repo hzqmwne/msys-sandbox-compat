@@ -10,7 +10,7 @@ Related: ADR-0001、ADR-0005、ADR-0006
 
 ## Decision
 
-默认构建输出开发 EXE/DLL 和单文件 `msys-sandbox-compat-shim.exe`。发布版将校验后的 DLL 作为 PE 资源嵌入。安装交付 shim、文档与许可。显式开启开发工具或测试时独立构建 psec-run，测试夹具有独立源码与输出目录。
+默认构建输出开发 EXE/DLL 和单文件 `msys-sandbox-compat-shim.exe`。发布版将校验后的 DLL 作为 PE 资源嵌入。安装交付 shim、文档与许可。显式开启开发工具或测试时独立构建 `psec-run.exe`，测试夹具有独立源码与输出目录。从 v0.1.0 起，发布构建显式启用工具，将 `psec-run.exe` 作为独立程序交付。
 
 core 保存共享识别、进程准备与 token 检查，分别按宿主和无 CRT agent 的约束编译，不新增运行库或公共 SDK。生产仍在原策略允许的位置与权限内运行。
 

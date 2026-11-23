@@ -11,7 +11,7 @@ Production use starts in the restricted environment supplied by an external laun
 
 ## Decision
 
-The default build produces the development EXE and DLL and the standalone `msys-sandbox-compat-shim.exe`. The shim embeds the validated DLL as a PE resource. Installation ships the shim, documentation, and license notices. Building tools or tests explicitly adds `psec-run`, and the test fixtures have separate sources and outputs.
+The default build produces the development EXE and DLL and the standalone `msys-sandbox-compat-shim.exe`. The shim embeds the validated DLL as a PE resource. Installation ships the shim, documentation, and license notices. Building tools or tests explicitly adds `psec-run`, and the test fixtures have separate sources and outputs. Starting with v0.1.0, the release build explicitly enables tools and ships `psec-run.exe` as a separate executable.
 
 Core holds shared recognition, preparation, and token code. The host and CRT-free agent build it under their respective constraints. Production runs at the locations and permissions allowed by the existing policy.
 

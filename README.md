@@ -6,13 +6,15 @@ Run MSYS2 and Git for Windows tools inside an existing Windows sandbox. The x64 
 
 ## Use it
 
-Build with the Visual Studio C++ x64 tools, the Windows SDK, and either Windows PowerShell 5.1 or PowerShell 7.
+Download the Windows x64 release for the standalone shim and `psec-run.exe`, a separate launcher that creates a native PSEC environment. [Downloads](https://github.com/hzqmwne/msys-sandbox-compat/releases)
+
+To build the same two executables, use the Visual Studio C++ x64 tools, the Windows SDK, and either Windows PowerShell 5.1 or PowerShell 7.
 
 ```powershell
-.\build.ps1 -Configuration Release -Install
+.\build.ps1 -Configuration Release -Tools -Install
 ```
 
-Put `build\package\bin\msys-sandbox-compat-shim.exe` where the sandbox already allows reads and execution. From its directory inside that environment, put the shim before the target command.
+Put `msys-sandbox-compat-shim.exe` where the sandbox already allows reads and execution. A local build stages it under `build\package\bin`. From its directory inside the sandbox, put the shim before the target command.
 
 ```powershell
 .\msys-sandbox-compat-shim.exe -- 'C:\Program Files\Git\usr\bin\bash.exe' --noprofile --norc -c 'echo ready; (echo fork-ok)'

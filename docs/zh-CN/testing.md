@@ -69,6 +69,16 @@ ctest --test-dir build --output-on-failure
 
 各集成脚本的 `-BinaryDirectory` 默认指向项目根目录的 `build/bin`，并从同一构建根定位 `tools/psec-run.exe` 和 `tests/bin` 下的夹具。从其他构建目录运行时显式指定该参数，CTest 会自动传入。源负载位于 `tests/fixtures`，独立单测位于 `tests/unit`。生产安装包不包含这些文件。
 
+## 发布验证
+
+Windows 发布工作流在 Windows Server 上构建、安装和测试，再从解压后的 ZIP 验证两个可执行文件。版本标签触发 GitHub Release 草稿。公开发布前先验证校验和，再在支持原生 PSEC 的 Windows 11 x64 主机上验证同一份候选包。
+
+```powershell
+.\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec
+```
+
+该测试用包内的 `psec-run` 在 PSEC 1.0 中启动 shim，检查经 `cmd.exe` 进入 Git for Windows Bash 的传播、管道和 fork、目标退出码及文件读取拒绝。可用 `-GitRoot` 指定其他 Git 安装。
+
 `Existing` 模式需由实际 harness 在其受限执行上下文内显式运行，不注册为普通宿主的 CTest。调用者原策略应已允许兼容产物、MSYS 安装文件、Perl 夹具的读取/执行及测试工作目录写入；缺少权限时保留拒绝。该模式只验收原上下文中的工作负载，原策略的具体拒绝路径和 ACL/token 保留情况还需按实际配置单独验证。
 
 relay 链路要求原生桥接只存在一个创建 hook，其余入口与 MSYS 地址区保持原样。MSYS 当次设置后的后代应继承对应的默认 ACL。直接回入必须完成真实 Perl/fork/管道及退出码。挂起用例要求调用者 `ResumeThread` 看到原挂起计数 1。另用原生夹具追加零权限 ACE 改变默认 DACL，验证后代读到更新后的 ACL、relay 继续进入 Bash、父端恢复初始 ACL。

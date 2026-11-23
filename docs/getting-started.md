@@ -13,7 +13,7 @@ On Windows x64, use Windows PowerShell 5.1 or PowerShell 7 with the Visual Studi
 
 Build output, intermediate files, and the CMake cache go under `build`. The build keeps the development EXE and DLL and embeds a verified copy of the agent in `msys-sandbox-compat-shim.exe`. `-Install` stages the single EXE, public documentation, and license notices under `build/package`.
 
-`-Tools` builds `build/tools/psec-run.exe`. `-Tests` also builds that tool and the regression fixtures under `build/tests/bin`. The validator, development tools, and test fixtures are excluded from installation. The equivalent CMake options are `MSYS_SANDBOX_COMPAT_BUILD_TOOLS` and `BUILD_TESTING`. Both default to off.
+`-Tools` builds `build/tools/psec-run.exe`. Combine `-Tools -Install` to put both standalone executables in `build/package/bin`, as in the release ZIP. `-Tests` builds the launcher for the regression suites and adds the fixtures under `build/tests/bin`. The equivalent CMake options are `MSYS_SANDBOX_COMPAT_BUILD_TOOLS` and `BUILD_TESTING`. Both default to off.
 
 ## Run the PSEC demo
 
