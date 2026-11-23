@@ -1,7 +1,5 @@
 # ADR-0007 — Ship the compatibility shim separately from the PSEC test tool
 
-[简体中文](../zh-CN/decisions/0007-production-artifacts.md)
-
 Status: Accepted
 Date: 2026-10-20
 

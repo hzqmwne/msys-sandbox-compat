@@ -1,7 +1,5 @@
 # ADR-0003 — Read the security context without reopening the token
 
-[简体中文](../zh-CN/decisions/0003-read-only-security-context.md)
-
 Status: Accepted
 Date: 2026-10-20
 

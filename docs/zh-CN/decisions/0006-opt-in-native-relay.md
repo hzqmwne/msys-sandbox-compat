@@ -1,7 +1,5 @@
 # ADR-0006：显式原生创建 relay 覆盖 MSYS 自动回入
 
-[English](../../decisions/0006-opt-in-native-relay.md)
-
 Status: Accepted
 Partially superseded by: ADR-0008 更新默认 DACL 比较基准，[ADR-0013](0013-default-relay-with-wow64.md) 更新默认值并覆盖 WoW64，[ADR-0016](0016-drop-relay-default-dacl-baseline.md) 移除默认 DACL 基准。
 

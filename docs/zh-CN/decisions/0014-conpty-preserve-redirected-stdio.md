@@ -1,7 +1,5 @@
 # ADR-0014：自动 ConPTY 保留逐路重定向
 
-[English](../../decisions/0014-conpty-preserve-redirected-stdio.md)
-
 Status: Accepted
 
 Date: 2026-11-23

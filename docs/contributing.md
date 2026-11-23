@@ -1,7 +1,5 @@
 # Contributing
 
-[简体中文](zh-CN/contributing.md)
-
 The production code is in `src/core`, `src/host`, `src/agent`, and `include/msys_sandbox_compat`. The optional PSEC tool is in `tools/psec-run`. Test scripts are in `tests`, fixtures in `tests/fixtures`, and unit tests in `tests/unit`.
 
 Prefer direct control flow and reuse existing types. The host and agent compile shared code with different options. The early agent has no CRT, normal imports, or `DllMain`, and it runs on MSYS-managed stacks on secondary threads.

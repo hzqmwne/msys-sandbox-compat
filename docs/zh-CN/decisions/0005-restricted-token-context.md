@@ -1,7 +1,5 @@
 # ADR-0005：受限令牌使用启动器对象 ACL 与每次启动的 MSYS 命名空间
 
-[English](../../decisions/0005-restricted-token-context.md)
-
 Status: Accepted
 Partially superseded by: ADR-0008；对象 ACL 改为基于当次输入适配，命名空间和受限令牌路径继续保留。
 Date: 2026-10-20

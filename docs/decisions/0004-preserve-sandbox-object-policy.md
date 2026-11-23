@@ -1,7 +1,5 @@
 # ADR-0004 — Preserve the launcher's default object DACL through MSYS startup
 
-[简体中文](../zh-CN/decisions/0004-preserve-sandbox-object-policy.md)
-
 Status: Superseded by [ADR-0008](0008-adapt-requested-object-acls.md)
 Date: 2026-10-20
 

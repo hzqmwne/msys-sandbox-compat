@@ -1,7 +1,5 @@
 # ADR-0005 — Give restricted-token launches a private MSYS object directory
 
-[简体中文](../zh-CN/decisions/0005-restricted-token-context.md)
-
 Status: Accepted
 Date: 2026-10-20
 

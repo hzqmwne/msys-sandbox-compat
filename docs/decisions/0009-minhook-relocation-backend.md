@@ -1,7 +1,5 @@
 # ADR-0009 — Use MinHook's relocation core for ntdll entry points
 
-[简体中文](../zh-CN/decisions/0009-minhook-relocation-backend.md)
-
 Status: Accepted
 Date: 2026-10-26
 

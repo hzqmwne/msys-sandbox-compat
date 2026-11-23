@@ -1,7 +1,5 @@
 # ADR-0002 — Use public ConPTY APIs inside PSEC and keep a native handle owner
 
-[简体中文](../zh-CN/decisions/0002-native-console-handle-owner.md)
-
 Status: Accepted
 Date: 2026-10-20
 

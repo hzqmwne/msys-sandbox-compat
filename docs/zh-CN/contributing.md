@@ -1,7 +1,5 @@
 # 贡献约定
 
-[English](../contributing.md)
-
 生产代码位于 `src/core`、`src/host`、`src/agent` 和内部头文件目录 `include/msys_sandbox_compat`。可选 PSEC 工具位于 `tools/psec-run`。测试脚本在 `tests`，夹具在 `tests/fixtures`，独立单测在 `tests/unit`。
 
 优先使用直接控制流和已有类型。宿主与 agent 使用不同选项编译共享代码。早期 agent 无 CRT、普通导入或 `DllMain`，二级线程上运行时使用 MSYS 管理的栈。

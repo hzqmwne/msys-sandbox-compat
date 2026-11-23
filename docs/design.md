@@ -1,7 +1,5 @@
 # Design
 
-[简体中文](zh-CN/design.md)
-
 This page describes the current implementation. See the [architecture decisions](decisions/README.md) for its rationale, the [user guide](getting-started.md) for CLI behavior, and the [changelog](../CHANGELOG.md) for changes.
 
 ## Production constraints

@@ -1,7 +1,5 @@
 # ADR-0010 在 Windows 创建进程时预留 MSYS cygheap 原址
 
-[English](../../decisions/0010-reserve-cygheap-at-creation.md)
-
 Status: Superseded by [ADR-0011](0011-release-heap-reservations-before-start.md)
 Date: 2026-11-18
 Related: [ADR-0001](0001-suspended-msys-preparation.md)

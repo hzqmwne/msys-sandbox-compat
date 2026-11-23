@@ -1,7 +1,5 @@
 # ADR-0011 在 MSYS 执行前释放创建时的临时堆预留
 
-[English](../../decisions/0011-release-heap-reservations-before-start.md)
-
 Status: Accepted
 Supersedes: [ADR-0010](0010-reserve-cygheap-at-creation.md)
 Date: 2026-11-18

@@ -1,7 +1,5 @@
 # ADR-0015 — Initialize compatibility at the child's loader entry
 
-[简体中文](../zh-CN/decisions/0015-initialize-at-child-loader-entry.md)
-
 Status: Accepted
 Date: 2026-11-23
 

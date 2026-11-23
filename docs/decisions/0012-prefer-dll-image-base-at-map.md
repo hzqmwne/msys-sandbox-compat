@@ -1,7 +1,5 @@
 # ADR-0012 — Prefer the PE base for eligible DLL mappings
 
-[简体中文](../zh-CN/decisions/0012-prefer-dll-image-base-at-map.md)
-
 Status: Accepted
 Date: 2026-11-19
 

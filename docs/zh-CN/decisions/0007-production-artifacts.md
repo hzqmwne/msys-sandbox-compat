@@ -1,7 +1,5 @@
 # ADR-0007：生产兼容层与隔离验证工具分开交付
 
-[English](../../decisions/0007-production-artifacts.md)
-
 Status: Accepted
 Date: 2026-10-20
 Related: ADR-0001、ADR-0005、ADR-0006

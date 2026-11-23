@@ -1,7 +1,5 @@
 # ADR-0011 — Release temporary reservations before MSYS starts
 
-[简体中文](../zh-CN/decisions/0011-release-heap-reservations-before-start.md)
-
 Status: Accepted
 Date: 2026-11-18
 

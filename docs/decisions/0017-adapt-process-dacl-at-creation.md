@@ -1,7 +1,5 @@
 # ADR-0017 — Adapt explicit process and thread DACLs at creation
 
-[简体中文](../zh-CN/decisions/0017-adapt-process-dacl-at-creation.md)
-
 Status: Accepted
 Date: 2026-11-23
 

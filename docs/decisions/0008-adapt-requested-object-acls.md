@@ -1,7 +1,5 @@
 # ADR-0008 — Adapt the caller's current object ACL
 
-[简体中文](../zh-CN/decisions/0008-adapt-requested-object-acls.md)
-
 Status: Accepted
 Date: 2026-10-26
 

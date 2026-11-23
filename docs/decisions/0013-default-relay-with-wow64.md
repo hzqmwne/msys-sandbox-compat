@@ -1,7 +1,5 @@
 # ADR-0013 — Enable native relay by default and cover WoW64 intermediaries
 
-[简体中文](../zh-CN/decisions/0013-default-relay-with-wow64.md)
-
 Status: Accepted
 Date: 2026-11-23
 

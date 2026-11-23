@@ -1,7 +1,5 @@
 # ADR-0002：PSEC 内公开 ConPTY 与原生标准句柄所有者
 
-[English](../../decisions/0002-native-console-handle-owner.md)
-
 Status: Accepted
 Date: 2026-10-20
 Related: ADR-0001、[ADR-0014](0014-conpty-preserve-redirected-stdio.md)

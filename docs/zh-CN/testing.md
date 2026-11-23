@@ -1,7 +1,5 @@
 # 测试说明
 
-[English](../testing.md)
-
 生产构建默认不包含开发工具与测试夹具。可用 Windows PowerShell 5.1 或 PowerShell 7 执行 `build.ps1 -Tests` 和集成测试脚本。运行环境需允许创建 PSEC 和受限令牌。默认 Git 根为 `C:\Program Files\Git`，可通过各脚本的 `-GitRoot` 修改。
 
 ```powershell

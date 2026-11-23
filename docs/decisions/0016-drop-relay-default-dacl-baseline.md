@@ -1,7 +1,5 @@
 # ADR-0016 — Let Windows inherit the default DACL during relay
 
-[简体中文](../zh-CN/decisions/0016-drop-relay-default-dacl-baseline.md)
-
 Status: Accepted
 Date: 2026-11-23
 

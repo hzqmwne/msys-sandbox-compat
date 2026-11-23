@@ -1,7 +1,5 @@
 # ADR-0004：保留隔离启动器的默认对象策略以恢复真实 MSYS 链路
 
-[English](../../decisions/0004-preserve-sandbox-object-policy.md)
-
 Status: Accepted
 Superseded by: ADR-0008，基于当次输入补充授权，不再整份恢复启动快照。下文保留原决策背景。
 Date: 2026-10-20

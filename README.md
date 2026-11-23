@@ -22,7 +22,17 @@ The shim contains its agent DLL. Use `-h` for options and `--version` for the ve
 
 ## How it works
 
-The shim keeps the address layout that MSYS fork expects and adapts access to the Windows objects that MSYS uses to coordinate processes. It carries those preparations through native child processes, including WoW64 intermediaries. For interactive sessions, it creates an inner ConPTY when needed and preserves file and pipe redirection. The existing sandbox continues to govern file and resource access, and the MSYS installation stays on disk as supplied. See the [design](docs/design.md).
+| Compatibility area | What the shim does |
+| --- | --- |
+| Runtime detection and startup | Recognizes AMD64 executables whose normal import table directly names `msys-2.0.dll`. It prepares the agent while the child is suspended. The agent installs the applicable hooks on the child's first entry to `LdrInitializeThunk`. |
+| Stack and heap placement | Temporarily reserves the MSYS stack and heap address window during process creation so Windows places its initial allocations elsewhere. The parent releases the window before the child runs, and MSYS allocates its own heaps. |
+| EXE and DLL addresses | For fork, the child can remap its main EXE at the parent's actual load address. Cold startup and exec can try the PE preferred address for a non-`DYNAMIC_BASE` MSYS EXE. Eligible DLLs can try their preferred address at section mapping and fall back to the original Windows request. |
+| Named IPC and explicit DACLs | Routes named MSYS IPC to the AppContainer namespace or to a private directory for a non-AppContainer restricted tree. For supported explicit DACLs, it grants the restricted SID only missing rights already granted to the user or enabled groups. This also covers caller-supplied process and thread DACLs at creation. |
+| Default and startup DACLs | Adapts the DACL that MSYS supplies for its primary token's `TokenDefaultDacl` and for the current process object. Each process resolves its own restricted SID. |
+| Native process chains | Relays compatibility through native AMD64 and WoW64 processes by default. A native process installs only the process-creation hook, which lets a later MSYS descendant receive the full set of applicable hooks. |
+| Interactive terminals | Starts an inner ConPTY when needed for low-integrity screen reads and console input writes. It bridges the console streams and passes redirected streams through to the target. The outer terminal keeps its session. |
+
+The hooks are at `ntdll` entry points and use MinHook's HDE64 and adapted instruction relocation code. The sandbox's file and resource policy stays in force, and the shim leaves the MSYS installation on disk as supplied. See the [design](docs/design.md) for hook scope and fallback rules.
 
 ## Compatibility and limits
 
@@ -30,4 +40,4 @@ The shim keeps the address layout that MSYS fork expects and adapts access to th
 - Full compatibility applies to AMD64 executables that directly import `msys-2.0.dll`. Cygwin is outside the current support scope. MSYS2 releases with different ASLR settings need their own fork and coexistence checks.
 - Under tested PSEC settings, inherited disk-file stdout or stderr can crash Bash at startup. Microsoft Store PowerShell also has restrictions when launched from a parent without package identity.
 
-See [tested configurations and known limits](docs/compatibility.md), the [user guide](docs/getting-started.md), and the [changelog](CHANGELOG.md).
+See [tested configurations and known limits](docs/compatibility.md), the [user guide](docs/getting-started.md), the [documentation index](docs/README.md), and the [changelog](CHANGELOG.md).

@@ -1,7 +1,5 @@
 # ADR-0006 — Add an opt-in process creation relay for native intermediaries
 
-[简体中文](../zh-CN/decisions/0006-opt-in-native-relay.md)
-
 Status: Accepted
 Date: 2026-10-20
 

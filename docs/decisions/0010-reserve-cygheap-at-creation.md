@@ -1,7 +1,5 @@
 # ADR-0010 — Reserve cygheap at its original address during creation
 
-[简体中文](../zh-CN/decisions/0010-reserve-cygheap-at-creation.md)
-
 Status: Superseded by [ADR-0011](0011-release-heap-reservations-before-start.md)
 Date: 2026-11-18
 

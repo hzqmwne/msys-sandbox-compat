@@ -1,7 +1,5 @@
 # Testing
 
-[简体中文](zh-CN/testing.md)
-
 Build the development tools and fixtures with Windows PowerShell 5.1 or PowerShell 7. Integration tests need a host that permits creation of the PSEC environment or restricted token they use. Git defaults to `C:\Program Files\Git`. Use `-GitRoot` on the test scripts to select a different installation.
 
 ```powershell

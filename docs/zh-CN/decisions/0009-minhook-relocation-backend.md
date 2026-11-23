@@ -1,7 +1,5 @@
 # ADR-0009：以 MinHook 核心搬迁 ntdll 入口，隔离后端接口
 
-[English](../../decisions/0009-minhook-relocation-backend.md)
-
 状态：Accepted，2026-10-26。接续 [ADR-0008](0008-adapt-requested-object-acls.md) 的早期运行依赖约束。
 
 ## 背景

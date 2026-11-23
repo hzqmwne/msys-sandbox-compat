@@ -1,7 +1,5 @@
 # ADR-0001 — Prepare suspended MSYS processes and identify them by import name
 
-[简体中文](../zh-CN/decisions/0001-suspended-msys-preparation.md)
-
 Status: Accepted
 Date: 2026-10-20
 

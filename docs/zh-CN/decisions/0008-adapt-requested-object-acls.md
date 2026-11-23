@@ -1,7 +1,5 @@
 # ADR-0008：基于当次输入适配对象 ACL 与默认对象策略
 
-[English](../../decisions/0008-adapt-requested-object-acls.md)
-
 Status: Accepted
 Date: 2026-10-26
 Supersedes: ADR-0004 的整份默认 DACL 恢复策略，以及显式对象 SD/已识别进程线程的模板替换。识别、命名空间、地址准备与默认原生边界保持原设计。

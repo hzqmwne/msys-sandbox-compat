@@ -1,7 +1,5 @@
 # Compatibility
 
-[简体中文](zh-CN/compatibility.md)
-
 The standalone shim runs with a normal token or an existing restricted token. `psec-run` is a separate test tool. The main native PSEC regression setup uses Windows x64 build `26300.9974`, PSEC 1.0, and Git for Windows MSYS `3.6.10`, with its Bash, Perl, and GNU tools.
 
 | Area | Coverage |

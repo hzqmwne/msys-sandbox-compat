@@ -1,7 +1,5 @@
 # ADR-0012 在 DLL 映射时按 section 元数据尝试 PE 首选基址
 
-[English](../../decisions/0012-prefer-dll-image-base-at-map.md)
-
 Status: Accepted
 Partially supersedes: [ADR-0001](0001-suspended-msys-preparation.md) 的 EXE 传递依赖识别
 Related: [ADR-0011](0011-release-heap-reservations-before-start.md)

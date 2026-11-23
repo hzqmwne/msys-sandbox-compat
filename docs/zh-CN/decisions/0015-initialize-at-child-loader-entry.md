@@ -1,7 +1,5 @@
 # ADR-0015：在子进程加载器入口初始化兼容层
 
-[English](../../decisions/0015-initialize-at-child-loader-entry.md)
-
 Status: Accepted
 
 Date: 2026-11-23

@@ -1,7 +1,5 @@
 # ADR-0017 创建进程时适配显式 DACL
 
-[English](../../decisions/0017-adapt-process-dacl-at-creation.md)
-
 Status: Accepted
 Date: 2026-11-23
 Partially supersedes: [ADR-0008](0008-adapt-requested-object-acls.md) 的进程和初始线程 DACL 读回适配。

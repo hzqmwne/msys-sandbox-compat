@@ -1,7 +1,5 @@
 # ADR-0013：默认启用原生创建 relay，覆盖混合位数启动链
 
-[English](../../decisions/0013-default-relay-with-wow64.md)
-
 Status: Accepted
 
 Date: 2026-11-23

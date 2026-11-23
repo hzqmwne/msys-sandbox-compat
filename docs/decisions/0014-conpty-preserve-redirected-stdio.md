@@ -1,7 +1,5 @@
 # ADR-0014 — Preserve redirected streams when auto ConPTY is active
 
-[简体中文](../zh-CN/decisions/0014-conpty-preserve-redirected-stdio.md)
-
 Status: Accepted
 Date: 2026-11-23
 

@@ -1,7 +1,5 @@
 # ADR-0018 各进程按自身主 token 初始化 ACL 适配
 
-[English](../../decisions/0018-resolve-acl-context-in-each-process.md)
-
 Status: Accepted
 Date: 2026-11-23
 Partially supersedes: [ADR-0003](0003-read-only-security-context.md) 的根进程 token 预检，以及 [ADR-0006](0006-opt-in-native-relay.md)、[ADR-0013](0013-default-relay-with-wow64.md) 和 [ADR-0016](0016-drop-relay-default-dacl-baseline.md) 的父子 token 核对。

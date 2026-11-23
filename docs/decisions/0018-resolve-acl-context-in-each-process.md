@@ -1,7 +1,5 @@
 # ADR-0018 — Resolve the ACL principal from each process's primary token
 
-[简体中文](../zh-CN/decisions/0018-resolve-acl-context-in-each-process.md)
-
 Status: Accepted
 Date: 2026-11-23
 

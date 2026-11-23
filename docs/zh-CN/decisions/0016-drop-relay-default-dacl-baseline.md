@@ -1,7 +1,5 @@
 # ADR-0016：relay 沿用 Windows 的默认 DACL 继承
 
-[English](../../decisions/0016-drop-relay-default-dacl-baseline.md)
-
 Status: Accepted
 
 Date: 2026-11-23

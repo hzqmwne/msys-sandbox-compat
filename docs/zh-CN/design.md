@@ -1,7 +1,5 @@
 # MSYS Sandbox Compat 当前设计
 
-[English](../design.md)
-
 本文描述当前实现，重要取舍见 [架构决策](decisions/README.md)，使用入口见 [使用说明](getting-started.md)，已落地变更见 [CHANGELOG](../../CHANGELOG.zh-CN.md)。
 
 ## 生产约束
