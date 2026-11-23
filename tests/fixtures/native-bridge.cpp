@@ -2,16 +2,32 @@
 using msys_sandbox_compat::quote;
 #include <windows.h>
 #include <sddl.h>
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <string>
+#include <vector>
+
+static std::wstring default_dacl_text(PACL acl) {
+    SECURITY_DESCRIPTOR descriptor{};
+    LPWSTR text = nullptr;
+    if (!InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION) ||
+        !SetSecurityDescriptorDacl(&descriptor, TRUE, acl, FALSE) ||
+        !ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            &descriptor, 1, DACL_SECURITY_INFORMATION, &text, nullptr))
+        return {};
+    std::wstring result(text);
+    LocalFree(text);
+    return result;
+}
 
 int wmain(int argc, wchar_t **argv) {
     int first = 1;
     bool relay = first < argc && std::wstring(argv[first]) == L"--relay";
     if (relay)
         ++first;
-    bool narrow = first < argc && std::wstring(argv[first]) == L"--narrow-default";
-    if (narrow)
+    bool change_default = first < argc && std::wstring(argv[first]) == L"--change-default";
+    if (change_default)
         ++first;
     bool suspended = first < argc && std::wstring(argv[first]) == L"--suspended";
     if (suspended)
@@ -51,18 +67,13 @@ int wmain(int argc, wchar_t **argv) {
     if (!GetTokenInformation(GetCurrentProcessToken(), TokenDefaultDacl, info, sizeof(info),
                              &bytes))
         return 4;
-    SECURITY_DESCRIPTOR descriptor{};
-    InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION);
-    SetSecurityDescriptorDacl(&descriptor, TRUE,
-                              reinterpret_cast<TOKEN_DEFAULT_DACL *>(info)->DefaultDacl, FALSE);
-    LPWSTR text = nullptr;
-    if (!ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            &descriptor, 1, DACL_SECURITY_INFORMATION, &text, nullptr))
+    const auto original_acl = reinterpret_cast<TOKEN_DEFAULT_DACL *>(info)->DefaultDacl;
+    const auto text = default_dacl_text(original_acl);
+    if (text.empty())
         return 4;
-    fprintf(stderr, "[bridge] clean=1 depth=%lu default=%ls\n", depth, text);
+    fprintf(stderr, "[bridge] clean=1 depth=%lu default=%ls\n", depth, text.c_str());
     if (relay)
         fprintf(stderr, "[bridge-mode] relay=1 hooks=1\n");
-    LocalFree(text);
     wchar_t own_path[32768]{};
     if (depth && !GetModuleFileNameW(nullptr, own_path, _countof(own_path)))
         return 4;
@@ -84,43 +95,51 @@ int wmain(int argc, wchar_t **argv) {
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
     PROCESS_INFORMATION child{};
     HANDLE token = nullptr;
-    PSECURITY_DESCRIPTOR narrowed = nullptr;
-    if (narrow) {
-        if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_DEFAULT, &token) ||
-            !ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:P(A;;GA;;;SY)", 1, &narrowed,
-                                                                  nullptr)) {
-            fprintf(stderr, "[bridge] narrow setup error=%lu\n", GetLastError());
+    if (change_default) {
+        // Change the ACL bytes without changing any effective permissions.
+        BYTE system[SECURITY_MAX_SID_SIZE];
+        DWORD sid_bytes = sizeof(system);
+        if (!original_acl || !CreateWellKnownSid(WinLocalSystemSid, nullptr, system, &sid_bytes))
             return 7;
-        }
-        PACL acl = nullptr;
-        BOOL present = FALSE, inherited = FALSE;
-        GetSecurityDescriptorDacl(narrowed, &present, &acl, &inherited);
+        const auto size = original_acl->AclSize + offsetof(ACCESS_ALLOWED_ACE, SidStart) +
+                          sid_bytes;
+        if (size > MAXWORD)
+            return 7;
+        std::vector<BYTE> data(size);
+        memcpy(data.data(), original_acl, original_acl->AclSize);
+        const auto acl = reinterpret_cast<PACL>(data.data());
+        acl->AclSize = static_cast<WORD>(size);
+        if (!AddAccessAllowedAce(acl, acl->AclRevision, 0, system))
+            return 7;
+        const auto changed = default_dacl_text(acl);
+        if (changed.empty() || changed == text ||
+            !OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_DEFAULT, &token))
+            return 7;
         TOKEN_DEFAULT_DACL replacement{acl};
         if (!SetTokenInformation(token, TokenDefaultDacl, &replacement, sizeof(replacement))) {
-            fprintf(stderr, "[bridge] narrow default error=%lu\n", GetLastError());
+            fprintf(stderr, "[bridge] change default error=%lu\n", GetLastError());
+            CloseHandle(token);
             return 7;
         }
+        fprintf(stderr, "[bridge] changed-default=%ls\n", changed.c_str());
     }
     BOOL created =
         CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
                        suspended ? CREATE_SUSPENDED : 0, nullptr, nullptr, &startup, &child);
     DWORD creation_error = created ? 0 : GetLastError();
-    if (narrow) {
+    if (change_default) {
         BOOL restored = SetTokenInformation(token, TokenDefaultDacl, info, bytes);
-        fprintf(stderr, "[bridge] narrowed created=%d error=%lu restored=%d restore-error=%lu\n",
+        fprintf(stderr, "[bridge] changed created=%d error=%lu restored=%d restore-error=%lu\n",
                 created, creation_error, restored, restored ? 0 : GetLastError());
         CloseHandle(token);
-        LocalFree(narrowed);
-        if (created) {
-            TerminateProcess(child.hProcess, 7);
-            CloseHandle(child.hThread);
-            CloseHandle(child.hProcess);
+        if (!restored) {
+            if (created) {
+                TerminateProcess(child.hProcess, 7);
+                CloseHandle(child.hThread);
+                CloseHandle(child.hProcess);
+            }
+            return 7;
         }
-        if (!created && creation_error == ERROR_ACCESS_DENIED && restored) {
-            puts("RELAY-NARROWED-POLICY-REJECTED");
-            return 0;
-        }
-        return 7;
     }
     if (!created)
         return 5;

@@ -45,7 +45,7 @@
 | `stdio.ps1` | PSEC 下 1 MiB 二进制 stdio 往返、stdin EOF 与管道读端提前关闭。覆盖控制台标准流八种组合、`2>&1`、`NUL`、混合管道、显式直连、内层读屏和写输入。检查 ConPTY 根进程退出后的后代输出和根退出码 |
 | `conpty.ps1 -Environment WriteRestricted/FullRestricted` | 同一交互负载，加终端内 Perl 断言（含线程 fork）、可写文件、交互前后原受限令牌及文件写入/WRITE_DAC/读取拒绝 |
 | `conpty.ps1 -Environment Existing` | 直接使用调用者已有受限上下文，完成交互与 Perl 负载；不创建测试 token/PSEC，不暂存或设置文件 ACL，不自动套用固定夹具的权限结论 |
-| `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及默认对象策略改变时拒绝；支持三种环境参数 |
+| `process-chain.ps1 -NativeRelay` | 原生/MSYS 根 → 一层/三层原生工具 → 直接 MSYS，另测显式嵌套入口、保留挂起状态及原生进程更新默认 DACL 后的继承，支持三种环境参数 |
 | `conpty.ps1 -NativeRelay` | 在同一 relay 模式下复用完整交互验收，可与三种环境或 Existing 组合 |
 | `late-package.ps1` | 目标到达屏障后才在安装根外放置新 EXE/DLL，验证首次识别、动态模块和 fork。父子进程都检查显式基址、`DYNAMIC_BASE`、`ZeroBits` 两种编码和地址冲突回退 |
 | `integrity.ps1` | 按需比较安装目录路径、长度和 SHA-256；不属于日常回归 |
@@ -69,7 +69,7 @@ ctest --test-dir build --output-on-failure
 
 `Existing` 模式需由实际 harness 在其受限执行上下文内显式运行，不注册为普通宿主的 CTest。调用者原策略应已允许兼容产物、MSYS 安装文件、Perl 夹具的读取/执行及测试工作目录写入；缺少权限时保留拒绝。该模式只验收原上下文中的工作负载，原策略的具体拒绝路径和 ACL/token 保留情况还需按实际配置单独验证。
 
-relay 链路要求原生桥接只存在一个创建 hook，其余入口与 MSYS 地址区保持原样。MSYS 当次设置后的后代默认 ACL 保持一致，允许它与首次 native 入口的启动快照不同。直接回入必须完成真实 Perl/fork/管道及退出码。挂起用例要求调用者 `ResumeThread` 看到原挂起计数 1。策略负例由原生夹具临时收紧自身默认对象 DACL，要求创建返回访问拒绝、目标未运行，随后恢复夹具初始策略。
+relay 链路要求原生桥接只存在一个创建 hook，其余入口与 MSYS 地址区保持原样。MSYS 当次设置后的后代应继承对应的默认 ACL。直接回入必须完成真实 Perl/fork/管道及退出码。挂起用例要求调用者 `ResumeThread` 看到原挂起计数 1。另用原生夹具追加零权限 ACE 改变默认 DACL，验证后代读到更新后的 ACL、relay 继续进入 Bash、父端恢复初始 ACL。
 
 日常选择与改动相关的套件：进程创建/识别/注入/传播变化检查 fork、作用范围和相关进程链；控制台变化检查交互；文档变化检查文档即可。完整 CTest 矩阵用于涉及多个运行机制的改动或阶段验收，已有通过结果不因无关改动反复重跑。权限拒绝与策略保留检查继续随相关工作负载执行。完整性脚本独立按需运行，不加入 CTest。
 

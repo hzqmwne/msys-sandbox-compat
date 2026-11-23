@@ -9,7 +9,7 @@
 namespace msys_sandbox_compat {
 
 constexpr size_t object_root_chars = 512;
-constexpr uint32_t agent_abi = 3;
+constexpr uint32_t agent_abi = 4;
 
 enum class Module : uint32_t {
     propagation = 1u << 0,
@@ -85,7 +85,6 @@ struct ParentStartData {
 
 struct ProcessState {
     volatile LONG unwind_registered;
-    volatile LONG policy_lock;
     BYTE loader_entry[hook_patch_bytes];
     ParentStartData image;
 };
@@ -102,10 +101,6 @@ struct AgentState {
     uint32_t user_sid_bytes;
     unsigned char compat_sid[SECURITY_MAX_SID_SIZE];
     uint32_t compat_sid_bytes;
-    // Last successfully observed policy; native relays reject unobserved edits.
-    unsigned char token_default_dacl[8192];
-    uint32_t token_default_dacl_bytes;
-    uint32_t object_policy_valid;
     uint32_t plain_context;
     HookSlot hooks[hook_count];
     // Process-local fields are reset when cloning into a new suspended child.
@@ -136,7 +131,6 @@ NTSTATUS replace_entry(const NativeApi &api, HANDLE process, void *entry, const 
 NTSTATUS stage_startup(const NativeApi &api, HANDLE process, const AgentState &state,
                         AgentState *remote, const ParentStartData &parent);
 NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state);
-NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state);
 NTSTATUS adapt_child_objects(HANDLE process, HANDLE thread, AgentState &state);
 void capture_parent_image(const NativeApi &api, uintptr_t base, ParentStartData &image);
 NTSTATUS prepare_exe_layout(AgentState &state, BYTE *peb, CONTEXT &saved, uintptr_t &base,

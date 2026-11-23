@@ -34,7 +34,7 @@
 
 宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。父端依据实际挂起映像决定传播和创建阶段的对象 DACL 适配。IPC 模块使用当前兼容树的命名空间，三个 ACL 相关模块共享所需的 SID 信息，受限 relay 独立维护策略基准。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
 
-父端准备 agent、模块配置及普通的父端映像数据结构，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。见 [ADR-0015](decisions/0015-initialize-at-child-loader-entry.md)。
+父端准备 agent 和模块配置，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。独立 launcher 冷启动传入空的父映像数据。由 agent 传播时传入其所在进程已记录的映像数据，供 MSYS fork 使用。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。见 [ADR-0015](decisions/0015-initialize-at-child-loader-entry.md)。
 
 冷启动与 exec 时，未设置 `DYNAMIC_BASE` 的 MSYS 主 EXE 可尝试一次 PE 首选基址。首选址已使用时直接继续，尝试失败时沿用 Windows 已选定的基址。设置该标志的映像沿用 Windows 选址。fork 子进程仍在基址不同于父端实载基址时按父端路径对齐。新视图验证成功后才更新 PEB 和应用启动上下文，原视图继续保留。MSYS 启动后自行分配 cygheap 和 userheap。
 
@@ -59,7 +59,7 @@ MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启
 | `NtCreateNamedPipeFile` | MSYS 管道授权 |
 | `NtMapViewOfSection` | 对基址未指定、未设置 `DYNAMIC_BASE` 且符合 `ZeroBits` 的 `SEC_IMAGE` DLL 尝试首选基址，失败时恢复原请求 |
 | `NtCreateUserProcess` | 创建前识别并暂留堆窗口，挂起创建后准备、释放窗口及传播 |
-| `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体并更新传播基准 |
+| `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体 |
 | `NtSetSecurityObject` | 当前进程伪句柄单独设置 DACL 时，按当次输入补受限主体 |
 
 对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。已识别进程/线程查询实际 DACL 后使用同一转换器。
@@ -87,7 +87,7 @@ relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。�
 
 各进程只为自身实际安装的 hook 读取入口和生成 trampoline。未改写的入口由当前进程直接调用，以便原生 relay 执行后代准备。复制 agent 时根据子进程的 hook 集合重新绑定其原入口调用。启用传播时，agent 同时保存后代可能启用的 handler 位置。宿主通过版本标记核对配套 DLL 和继承的 relay 状态。
 
-relay 创建后比较父子令牌身份与隔离上下文，受限环境还核对创建前后的默认 DACL。对于涉及 WoW64 的创建，允许 Windows 设置的每应用 UAC 虚拟化启用位变化，并通过独立的令牌信息类确认该值。其他令牌字段继续参与比较。受限 relay 的默认 DACL 基准容纳 8 KiB，MSYS 设置成功后更新，并与创建串行化。未观察到的默认策略改变、上下文不一致或查询失败时回收挂起的目标。决定见 [ADR-0006](decisions/0006-opt-in-native-relay.md) 及 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
+relay 创建后比较父子令牌身份与隔离上下文。对于涉及 WoW64 的创建，允许 Windows 设置的每应用 UAC 虚拟化启用位变化，并通过独立的令牌信息类确认该值。上下文不一致或查询失败时回收挂起的目标。默认 DACL 沿用 Windows 继承语义，relay 传播不比较其历史值。MSYS 设置默认 DACL 时按当次输入适配。见 [ADR-0013](decisions/0013-default-relay-with-wow64.md) 及 [ADR-0016](decisions/0016-drop-relay-default-dacl-baseline.md)。
 
 ## ConPTY
 

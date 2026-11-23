@@ -37,8 +37,8 @@
 
 ### 精简初始化与失败处理
 
+- 移除 relay 的默认 DACL 历史基准、写后读回和创建锁，沿用 Windows 的默认 DACL 继承。独立冷启动传入空的父映像数据。见 [ADR-0016](docs/decisions/0016-drop-relay-default-dacl-baseline.md)。
 - 移除生产入口的默认 Git 安装路径。旧命令的 `--runtime DLL` 参数仍可解析，参数值被忽略。
-- 默认策略快照与策略锁仅用于 relay，其他 token 的设置在拿锁前透传；普通模式只适配当次 ACL。
 - 移除 `MSYS_SANDBOX_COMPAT_SESSION`。非 AppContainer 受限进程树的兼容目录按创建宿主 PID 命名，目录路径由 agent 传给支持的后代。
 - 将正式兼容初始化移至子进程首次进入加载器时，保留应用启动上下文和调用方的初始挂起语义。见 [ADR-0015](docs/decisions/0015-initialize-at-child-loader-entry.md)。
 - 安装失败统一终止挂起的新进程，删除跨入口回滚及无消费者的计划字段；ACL 结果复用已预留空间的输入副本。
@@ -54,7 +54,7 @@
 ### 对象授权适配
 
 - 显式对象 ACL 与 TokenDefaultDacl 均基于当次输入补受限主体，不再用统一 SD/启动快照覆盖；保留 owner/group/SACL/control，按用户及 enabled groups 的原有权限追加，deny/空/复杂输入不补权。NULL DACL 用 Everyone 与受限主体表达开放意图。
-- 默认策略设置与创建/克隆串行化，成功后更新 relay 比较基准；原生 relay 的未观察策略变化仍拒绝。支持仅含 TOKEN_ADJUST_DEFAULT 的设置句柄，其他 token 和查询句柄权限保持系统语义。
+- 支持仅含 TOKEN_ADJUST_DEFAULT 的设置句柄，其他 token 和查询句柄权限保持系统语义。
 - 记录 ntdll 通用接入、分问题适配与早期 agent 无 CRT/导入/TLS 依赖的原则；新增对象 SD/ACL 单测与真实 MSYS 设置回归。
 
 ### 精简与结构
@@ -76,7 +76,7 @@
 ### 新增
 
 - `--native-relay` / `run.ps1 -NativeRelay` 可显式选择原生传播，原生根及中间进程只启用创建 hook。
-- relay 传播只读核对安全上下文与已观察的默认对象策略，遇到不一致时拒绝，不补授权限；支持链内显式兼容入口、ConPTY 和调用者原有挂起状态。
+- relay 传播只读核对安全上下文，支持链内显式兼容入口、ConPTY 和调用者原有挂起状态。
 - PSEC 和两种固定受限令牌各新增自动链路与交互回归，覆盖真实 fork、直接回入、单 hook 原生范围、挂起语义及策略收紧负例。
 - 两种固定非 AppContainer 受限令牌的 ConPTY 交互验收：TTY、尺寸、Perl/线程 fork、原生命令、Ctrl+C、STOP/bg/fg、退出码与会话前后权限拒绝；复用既有生产实现和原测试策略。
 - 交互测试提供 `Existing` 模式，直接验证调用者已有受限上下文，不创建替代环境或配置文件 ACL；实际策略的拒绝边界另行核验。

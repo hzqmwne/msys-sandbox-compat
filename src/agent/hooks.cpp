@@ -1,7 +1,6 @@
 #include "agent_runtime.h"
 
 #include "msys_sandbox_compat/pe_view.h"
-#include "msys_sandbox_compat/object_security.h"
 #include <intrin.h>
 
 using namespace msys_sandbox_compat;
@@ -35,17 +34,6 @@ hook_process(PHANDLE process, PHANDLE thread, ACCESS_MASK process_access, ACCESS
              void *create_info, void *attributes) {
     auto &state = g_agent_state;
     register_unwind();
-    PolicyGuard guard(state);
-    if (state.native_relay && !state.plain_context) {
-        auto permitted = check_object_policy(state.api, reinterpret_cast<HANDLE>(-4), state);
-        if (permitted < 0) {
-            if (process)
-                *process = nullptr;
-            if (thread)
-                *thread = nullptr;
-            return permitted;
-        }
-    }
     bool owns_reservation = false;
     NTSTATUS status = status_success;
     auto create = [&](void *creation_attributes) {

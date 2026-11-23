@@ -3,6 +3,7 @@
 Status: Accepted
 Date: 2026-10-26
 Supersedes: ADR-0004 的整份默认 DACL 恢复策略，以及显式对象 SD/已识别进程线程的模板替换。识别、命名空间、地址准备与默认原生边界保持原设计。
+Partially superseded by: [ADR-0016](0016-drop-relay-default-dacl-baseline.md) 移除 relay 默认 DACL 基准和对应的创建锁。
 
 ## Context
 

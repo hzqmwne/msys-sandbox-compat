@@ -19,5 +19,6 @@
 | [0013](0013-default-relay-with-wow64.md) | 默认启用原生创建 relay，覆盖混合位数启动链 | Accepted |
 | [0014](0014-conpty-preserve-redirected-stdio.md) | 自动 ConPTY 逐路保留重定向，只桥接控制台 | Accepted |
 | [0015](0015-initialize-at-child-loader-entry.md) | 在子进程加载器入口初始化兼容层，保留应用启动上下文 | Accepted |
+| [0016](0016-drop-relay-default-dacl-baseline.md) | relay 沿用 Windows 默认 DACL 继承，撤除历史基准和创建锁 | Accepted |
 
 Accepted ADR 的正文不重写。决定变化时新增 ADR，在新旧记录中补充替代关系；小型实现细节由 Git 历史和变更记录表达。研究计划与未验证候选不写成 Accepted 决定。

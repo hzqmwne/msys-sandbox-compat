@@ -130,13 +130,19 @@ try {
     }
     if ($NativeRelay) {
         $arguments=$prefix+@($compat,'--trace','--native-relay','--runtime',$runtime,$bridge,'--relay',
-            '--narrow-default',0,$bash,'--noprofile','--norc','-c','echo UNEXPECTED-EXECUTION')
+            '--change-default',1,$bash,'--noprofile','--norc','-c','echo RELAY-DEFAULT-DACL-PASS; exit 37')
         $result=Invoke-TestProcess (New-TestProcessInfo $launcher $arguments $state) 30000
-        Save-TestOutput $result $evidence 'narrowed-policy'
-        $passed=$result.ExitCode -eq 0 -and $result.Output.Contains('RELAY-NARROWED-POLICY-REJECTED') -and
-            !$result.Output.Contains('UNEXPECTED-EXECUTION')
-        $results.Add([pscustomobject]@{Name='narrowed-policy';Passed=$passed;ExitCode=$result.ExitCode;NativeBridges=1})
-        Write-Output "narrowed-policy pass=$passed exit=$($result.ExitCode)"
+        Save-TestOutput $result $evidence 'changed-default-dacl'
+        $original=[regex]::Match($result.Error,'\[bridge\] clean=1 depth=1 default=([^\r\n]+)')
+        $changed=[regex]::Match($result.Error,'\[bridge\] changed-default=([^\r\n]+)')
+        $inherited=[regex]::Match($result.Error,'\[bridge\] clean=1 depth=0 default=([^\r\n]+)')
+        $passed=$result.ExitCode -eq 37 -and $result.Output.Contains('RELAY-DEFAULT-DACL-PASS') -and
+            $original.Success -and $changed.Success -and $inherited.Success -and
+            $original.Groups[1].Value -cne $changed.Groups[1].Value -and
+            $changed.Groups[1].Value -ceq $inherited.Groups[1].Value -and
+            $result.Error.Contains('[bridge] changed created=1 error=0 restored=1')
+        $results.Add([pscustomobject]@{Name='changed-default-dacl';Passed=$passed;ExitCode=$result.ExitCode;NativeBridges=2})
+        Write-Output "changed-default-dacl pass=$passed exit=$($result.ExitCode)"
     }
     if ($restricted -and $ordinary.HasExited) { throw 'Ordinary MSYS exited during the restricted workload' }
     $results | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'results.json') -Encoding utf8NoBOM

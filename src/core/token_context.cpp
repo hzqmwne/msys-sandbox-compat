@@ -29,11 +29,6 @@ bool same_groups(const TOKEN_GROUPS *a, const TOKEN_GROUPS *b) {
             return false;
     return true;
 }
-bool same_default(PACL acl, const AgentState &state) {
-    return acl ? acl->AclSize == state.token_default_dacl_bytes &&
-                     same_bytes(acl, state.token_default_dacl, acl->AclSize)
-               : state.token_default_dacl_bytes == 0;
-}
 bool same_access_flags(const NativeApi &api, HANDLE process, HANDLE child, ULONG left, ULONG right) {
     constexpr ULONG token_virtualize_enabled = 0x0400;
     const auto difference = left ^ right;
@@ -104,27 +99,10 @@ bool same_token_field(const NativeApi &api, HANDLE process, HANDLE child,
 }
 } // namespace
 
-NTSTATUS check_object_policy(const NativeApi &api, HANDLE token, const AgentState &state) {
-    if (!state.object_policy_valid)
-        return status_access_denied;
-    constexpr ULONG capacity = sizeof(state.token_default_dacl) + sizeof(TOKEN_DEFAULT_DACL);
-    NativeBuffer storage(api, capacity);
-    if (!storage)
-        return status_unsuccessful;
-    ULONG returned = 0;
-    auto status = api.query_token(token, TokenDefaultDacl, storage.as<BYTE>(), capacity, &returned);
-    if (status >= 0 && !same_default(storage.as<TOKEN_DEFAULT_DACL>()->DefaultDacl, state)) {
-        agent_log(state, "relay default object policy differs");
-        return status_access_denied;
-    }
-    return status;
-}
-
 NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentState &state) {
     // A relay must not carry the old sandbox's namespace/ACL into a different
-    // token context. This checks the inherited, most recently observed default
-    // policy; unobserved native changes are rejected before creation as well.
-    constexpr ULONG capacity = sizeof(state.token_default_dacl) + sizeof(TOKEN_DEFAULT_DACL);
+    // token context. Keep the existing per-query capacity for token groups.
+    constexpr ULONG capacity = 8200;
     NativeBuffer storage(api, 2 * capacity);
     if (!storage)
         return status_unsuccessful;
@@ -149,17 +127,6 @@ NTSTATUS check_child_context(const NativeApi &api, HANDLE process, const AgentSt
             agent_log(state, "relay token context differs", kind);
             status = status_access_denied;
             break;
-        }
-    }
-    if (status >= 0 && !state.plain_context) {
-        ULONG returned = 0;
-        status = api.query_token(child, TokenDefaultDacl, right, capacity, &returned);
-        if (status >= 0) {
-            auto acl = static_cast<TOKEN_DEFAULT_DACL *>(right)->DefaultDacl;
-            if (!same_default(acl, state)) {
-                agent_log(state, "relay default object policy differs");
-                status = status_access_denied;
-            }
         }
     }
     api.close(child);

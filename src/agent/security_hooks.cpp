@@ -18,7 +18,6 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
     state.api.close(primary);
     if (same != 0)
         return state.api.set_token(token, kind, information, bytes);
-    PolicyGuard guard(state);
     TOKEN_DEFAULT_DACL input{};
     if (state.api.read(current_process(), information, &input, sizeof(input), nullptr) < 0)
         return state.api.set_token(token, kind, information, bytes);
@@ -27,11 +26,8 @@ extern "C" __declspec(dllexport) NTSTATUS NTAPI hook_set_token(HANDLE token,
     if (status < 0)
         return status;
     TOKEN_DEFAULT_DACL replacement{adapted.adapted_acl()};
-    status =
-        state.api.set_token(token, kind, adapted.adapted_acl() ? &replacement : information, bytes);
-    if (status >= 0 && state.native_relay)
-        remember_object_policy(state);
-    return status;
+    return state.api.set_token(token, kind, adapted.adapted_acl() ? &replacement : information,
+                               bytes);
 }
 
 extern "C" __declspec(dllexport) NTSTATUS NTAPI

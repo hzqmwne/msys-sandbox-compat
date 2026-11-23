@@ -174,22 +174,4 @@ NTSTATUS adapt_kernel_object(const NativeApi &api, HANDLE object, const AgentSta
     return status;
 }
 
-void remember_object_policy(AgentState &state) {
-    NativeBuffer storage(state.api, sizeof(state.token_default_dacl) + sizeof(TOKEN_DEFAULT_DACL));
-    state.object_policy_valid = 0;
-    if (!storage)
-        return;
-    ULONG returned = 0;
-    if (state.api.query_token(reinterpret_cast<HANDLE>(-4), TokenDefaultDacl, storage.as<BYTE>(),
-                              sizeof(state.token_default_dacl) + sizeof(TOKEN_DEFAULT_DACL),
-                              &returned) < 0)
-        return;
-    auto acl = storage.as<TOKEN_DEFAULT_DACL>()->DefaultDacl;
-    if (acl && acl->AclSize > sizeof(state.token_default_dacl))
-        return;
-    state.token_default_dacl_bytes = acl ? acl->AclSize : 0;
-    if (acl)
-        memcpy(state.token_default_dacl, acl, acl->AclSize);
-    state.object_policy_valid = 1;
-}
 } // namespace msys_sandbox_compat

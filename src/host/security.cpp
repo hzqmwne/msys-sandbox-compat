@@ -20,7 +20,7 @@ HANDLE configure_security(AgentState &state) {
     adapt_acl = adapt_acl && !state.plain_context;
     PACL acl = nullptr;
     std::vector<BYTE> default_info;
-    if ((state.native_relay && !state.plain_context) || (adapt_acl && !package_sid)) {
+    if (adapt_acl && !package_sid) {
         DWORD default_bytes = 0;
         GetTokenInformation(token, TokenDefaultDacl, nullptr, 0, &default_bytes);
         default_info.resize(default_bytes);
@@ -29,15 +29,6 @@ HANDLE configure_security(AgentState &state) {
               "TokenDefaultDacl");
         acl = reinterpret_cast<TOKEN_DEFAULT_DACL *>(default_info.data())->DefaultDacl;
         check(!acl || IsValidAcl(acl), "sandbox default DACL");
-    }
-    if (state.native_relay && !state.plain_context) {
-        check(!acl || acl->AclSize <= sizeof(state.token_default_dacl),
-              "relay default DACL capacity");
-        if (acl) {
-            memcpy(state.token_default_dacl, acl, acl->AclSize);
-            state.token_default_dacl_bytes = acl->AclSize;
-        }
-        state.object_policy_valid = 1;
     }
     if (!adapt_acl)
         return nullptr;

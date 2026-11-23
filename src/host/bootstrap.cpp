@@ -200,11 +200,10 @@ void inject_root(HANDLE process, uint32_t installed, const AgentState &host_stat
     memcpy(mapped.data() + image.state, &state, sizeof(state));
     check_nt(originals.write(process, remote, mapped.data(), mapped.size(), nullptr),
              "write agent");
-    if (state.enabled(Module::exe_placement))
-        capture_parent_image(originals, reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)),
-                             state.local.image);
     auto remote_state = reinterpret_cast<AgentState *>(state.self_base + image.state);
-    check_nt(stage_startup(originals, process, state, remote_state, state.local.image),
+    // A standalone launcher starts a new image. Only a live MSYS parent can
+    // supply the image data used by a subsequent fork.
+    check_nt(stage_startup(originals, process, state, remote_state, {}),
              "stage root initialization");
     check_nt(protect_agent(originals, process, mapped.data(), state), "agent section protection");
 }

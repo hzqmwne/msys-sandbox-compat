@@ -46,9 +46,9 @@ Invoke-Case 'propagation-off' @('--disable-module','propagation',$client,'1bf') 
     @('hooks=1bf','root=msys hooks=8')
 Invoke-Case 'ipc-and-dacl-off' @('--disable-module','ipc','--disable-module','process-dacl',
     '--disable-module','token-dacl',$client,'060') @('hooks=060','root=msys hooks=2')
-Invoke-Case 'relay-policy-with-token-dacl-off' @('--native-relay','--disable-module','token-dacl',
-    $bridge,'--relay','--narrow-default','0',$client) `
-    @('relay=1 hooks=1','RELAY-NARROWED-POLICY-REJECTED')
+Invoke-Case 'relay-with-token-dacl-off' @('--native-relay','--disable-module','token-dacl',
+    $bridge,'--relay','--change-default','0',$client,'17f') `
+    @('relay=1 hooks=1','changed created=1 error=0 restored=1','hooks=17f')
 
 $layoutOff = @('--disable-module','heap-window','--disable-module','exe-placement',
     '--disable-module','dll-placement')
