@@ -2,6 +2,7 @@
 #include "console_stdio.h"
 #include "msys_sandbox_compat/agent.h"
 #include <bitset>
+#include <climits>
 #include <cstdio>
 #include <stdexcept>
 #include "pseudoconsole.h"
@@ -38,6 +39,24 @@ constexpr char options_help[] =
     "  --log-file=FILE               Append UTF-8 diagnostics to FILE instead of stderr.\n";
 
 constexpr const wchar_t *log_names[] = {L"off", L"error", L"warning", L"info", L"trace"};
+
+bool parse_terminal_size(std::wstring_view value, COORD &size) {
+    const auto read_dimension = [&](SHORT &dimension) {
+        unsigned number = 0;
+        while (!value.empty() && value.front() >= L'0' && value.front() <= L'9') {
+            number = number * 10 + static_cast<unsigned>(value.front() - L'0');
+            if (number > SHRT_MAX)
+                return false;
+            value.remove_prefix(1);
+        }
+        dimension = static_cast<SHORT>(number);
+        return number != 0;
+    };
+    if (!read_dimension(size.X) || value.empty() || value.front() != L'x')
+        return false;
+    value.remove_prefix(1);
+    return read_dimension(size.Y) && value.empty();
+}
 
 LogLevel parse_log_level(std::wstring_view value) {
     for (size_t i = 0; i < std::size(log_names); ++i)
@@ -156,14 +175,9 @@ int wmain(int argc, wchar_t **argv) try {
             disabled_modules |= module_list(value);
             ++first;
         } else if (key == L"--conpty-size" && equals != std::wstring_view::npos) {
-            unsigned width = 0, height = 0;
-            wchar_t extra = 0;
-            if (session_owner ||
-                swscanf_s(value.data(), L"%ux%u%c", &width, &height, &extra, 1) != 2 ||
-                !width || width > 32767 || !height || height > 32767)
+            if (session_owner || !parse_terminal_size(value, terminal_size))
                 throw UsageError("--conpty-size expects COLSxROWS");
             explicit_options = true;
-            terminal_size = {static_cast<SHORT>(width), static_cast<SHORT>(height)};
             fixed_terminal_size = true;
             ++first;
         } else if (key == L"--log-level" && equals != std::wstring_view::npos) {
@@ -204,12 +218,7 @@ int wmain(int argc, wchar_t **argv) try {
             input_script = argv[first + 1];
             first += 2;
         } else if (allow_legacy_cli && option == L"--conpty-size" && first + 1 < argc) {
-            unsigned width = 0, height = 0;
-            wchar_t extra = 0;
-            check(swscanf_s(argv[first + 1], L"%ux%u%c", &width, &height, &extra, 1) == 2 &&
-                      width > 0 && width <= 32767 && height > 0 && height <= 32767,
-                  "terminal size WIDTHxHEIGHT");
-            terminal_size = {static_cast<SHORT>(width), static_cast<SHORT>(height)};
+            check(parse_terminal_size(argv[first + 1], terminal_size), "terminal size WIDTHxHEIGHT");
             fixed_terminal_size = true;
             first += 2;
         } else if (allow_legacy_cli && option == L"--runtime" && first + 1 < argc) {

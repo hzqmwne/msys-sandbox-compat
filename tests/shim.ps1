@@ -24,8 +24,14 @@ $result = Invoke-TestProcess (New-TestProcessInfo $shim @('--terminal=inherit','
 if ($result.ExitCode -ne 2 -or $result.Output -or $result.Error -notmatch 'expected --') {
     throw 'The public launcher must require the command separator'
 }
+foreach ($size in '0x24','80x32768','4294967297x24','80x24extra') {
+    $result = Invoke-TestProcess (New-TestProcessInfo $shim @("--conpty-size=$size",'--','cmd.exe') $state)
+    if ($result.ExitCode -ne 2 -or $result.Output -or $result.Error -notmatch 'expects COLSxROWS') {
+        throw "Expected the launcher to reject ConPTY dimensions $size"
+    }
+}
 $info = New-TestProcessInfo $shim @() $state
-$info.Arguments = '--disable-modules=ipc,heap-window -- cmd /d /c "exit 37"'
+$info.Arguments = '--disable-modules=ipc,heap-window --conpty-size=80x24 -- cmd /d /c "exit 37"'
 $result = Invoke-TestProcess $info
 if ($result.ExitCode -ne 37 -or $result.Error -or $result.Output) {
     throw 'The original cmd tail must be forwarded without shim output'
