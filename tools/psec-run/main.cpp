@@ -1,8 +1,5 @@
+#include "policy.h"
 #include "msys_sandbox_compat/command_line.h"
-using msys_sandbox_compat::quote;
-// Minimal native PSEC 1.0 launcher. No AppContainer/DACL fallback.
-#include "ProcessSecurityEnvironment_generated.h"
-#include <nlohmann/json.hpp>
 #include <windows.h>
 #include <filesystem>
 #include <fstream>
@@ -23,6 +20,11 @@ static void hrcheck(HRESULT hr, const char *what) {
     }
 }
 using CloseEnvironment = void(WINAPI *)(HANDLE);
+using CheckVersion = HRESULT(WINAPI *)(DWORD, BOOLEAN *, DWORD *);
+static constexpr char usage[] =
+    "Usage: psec-run --policy=FILE [--psec-version=auto|1.0|1.1] -- COMMAND [ARGUMENTS...]\n"
+    "       psec-run POLICY.json PROGRAM [ARGUMENTS...]\n"
+    "       psec-run --help\n";
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 struct Resources {
     HMODULE dll{};
@@ -50,30 +52,49 @@ struct Resources {
     }
 };
 int wmain(int argc, wchar_t **argv) try {
-    if (argc < 3) {
-        fprintf(stderr, "Usage: psec-run policy.json program.exe [args...]\n");
+    if (argc == 2 && std::wstring_view(argv[1]) == L"--help") {
+        fputs(usage, stdout);
+        return 0;
+    }
+    std::filesystem::path policy_file;
+    int first = 1;
+    int requested_minor = -1;
+    const bool modern = argc > 1 && std::wstring_view(argv[1]).substr(0, 2) == L"--";
+    if (modern) {
+        for (; first < argc; ++first) {
+            const std::wstring_view arg = argv[first];
+            if (arg == L"--") {
+                ++first;
+                break;
+            }
+            if (arg.substr(0, 9) == L"--policy=")
+                policy_file = arg.substr(9);
+            else if (arg == L"--psec-version=auto")
+                requested_minor = -1;
+            else if (arg == L"--psec-version=1.0")
+                requested_minor = 0;
+            else if (arg == L"--psec-version=1.1")
+                requested_minor = 1;
+            else {
+                fputs(usage, stderr);
+                return 2;
+            }
+        }
+    } else if (argc > 1) {
+        policy_file = argv[1];
+        first = 2;
+    }
+    if (policy_file.empty() || first >= argc || !*argv[first]) {
+        fputs(usage, stderr);
         return 2;
     }
-    std::ifstream stream{std::filesystem::path(argv[1])};
-    if (!stream)
-        throw std::runtime_error("open policy");
-    auto config = nlohmann::json::parse(stream);
-    auto fs = config.at("filesystem");
-    auto paths = [&](const char *key) {
-        auto values = fs.value(key, std::vector<std::string>{});
-        for (auto &p : values)
-            if (p.find('\0') != std::string::npos || !std::filesystem::u8path(p).is_absolute())
-                throw std::runtime_error("absolute policy paths required");
-        return values;
-    };
-    auto rw = paths("readwritePaths"), ro = paths("readonlyPaths"), deny = paths("deniedPaths");
+    const psec_run::Policy policy(policy_file);
+    const unsigned needed = policy.needs_minor_one() ? 1 : 0;
+    const auto minor = requested_minor < 0 ? needed : static_cast<unsigned>(requested_minor);
+    if (minor < needed)
+        throw std::runtime_error("the requested policy needs PSEC 1.1");
     flatbuffers::FlatBufferBuilder buffer;
-    auto rwv = buffer.CreateVectorOfStrings(rw), rov = buffer.CreateVectorOfStrings(ro),
-         dv = buffer.CreateVectorOfStrings(deny);
-    namespace P = ProcessSecurityEnvironmentLayout;
-    P::SchemaVersion version(1, 0);
-    auto root = P::CreateProcessSecurityEnvironment(buffer, &version, 0, false, 0, rwv, rov, dv);
-    P::FinishProcessSecurityEnvironmentBuffer(buffer, root);
+    policy.serialize(buffer, static_cast<uint16_t>(minor));
     std::vector<BYTE> attrs; // Must outlive Resources::attributes.
     Resources r;
     r.dll = LoadLibraryExW(L"processmodel.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -85,13 +106,25 @@ int wmain(int argc, wchar_t **argv) try {
     r.close = (CloseEnvironment)GetProcAddress(r.dll, "CloseProcessSecurityEnvironment");
     if (!create || !support || !r.close)
         throw std::runtime_error("native PSEC exports required");
+    const auto version_support = reinterpret_cast<CheckVersion>(
+        GetProcAddress(r.dll, "IsProcessSecurityEnvironmentVersionSupported"));
+    DWORD supported_minor = 0;
+    BOOLEAN supported = TRUE;
+    if (version_support)
+        hrcheck(version_support(1, &supported, &supported_minor), "query PSEC version");
+    if (!supported || supported_minor < minor)
+        throw std::runtime_error("requested PSEC contract is unavailable");
     UINT64 flags = 0;
     hrcheck(support(&flags), "query PSEC support");
-    if (!deny.empty() && !(flags & 1))
+    if (!policy.deny.empty() && !(flags & psec_run::support_deny))
         throw std::runtime_error("PSEC fs_deny unavailable");
+    if (!policy.enumerate.empty() && !(flags & psec_run::support_enumerate))
+        throw std::runtime_error("PSEC fs_enumerate unavailable");
+    if (policy.needs_ingress() && !(flags & psec_run::support_ingress))
+        throw std::runtime_error("PSEC network ingress unavailable");
     hrcheck(create(buffer.GetBufferPointer(), (DWORD)buffer.GetSize(), 0, &r.environment),
             "CreateProcessSecurityEnvironment");
-    fprintf(stderr, "[PSEC] native contract=1.0 support=%llx; no fallback\n", flags);
+    fprintf(stderr, "[PSEC] native contract=1.%u support=%llx; no fallback\n", minor, flags);
     STARTUPINFOEXW startup{};
     startup.StartupInfo.cb = sizeof(startup);
     startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
@@ -126,10 +159,11 @@ int wmain(int argc, wchar_t **argv) try {
                                     r.stdio.data(), r.stdio.size() * sizeof(HANDLE), nullptr,
                                     nullptr),
           "stdio handle list");
-    auto executable = std::filesystem::absolute(argv[2]).wstring();
-    auto command = quote(executable);
-    for (int i = 3; i < argc; ++i)
-        command += L" " + quote(argv[i]);
+    const std::filesystem::path target(argv[first]);
+    const auto executable = target.has_parent_path() || !modern
+                                ? std::filesystem::absolute(target)
+                                : std::filesystem::path{};
+    auto command = std::wstring(msys_sandbox_compat::command_tail(GetCommandLineW(), first));
     r.job = CreateJobObjectW(nullptr, nullptr);
     check(r.job != nullptr, "CreateJobObject");
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
@@ -137,7 +171,7 @@ int wmain(int argc, wchar_t **argv) try {
     check(
         SetInformationJobObject(r.job, JobObjectExtendedLimitInformation, &limits, sizeof(limits)),
         "kill-on-close job");
-    check(CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
+    check(CreateProcessW(executable.empty() ? nullptr : executable.c_str(), command.data(), nullptr, nullptr, TRUE,
                          EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED, nullptr, nullptr,
                          &startup.StartupInfo, &r.child),
           "CreateProcess PSEC");
