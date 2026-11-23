@@ -15,6 +15,7 @@
 // Readers drain output independently of input and session teardown.
 class Pseudoconsole {
     std::thread resizer;
+    HANDLE resize_stop = nullptr;
     std::atomic<DWORD> output_error_code{ERROR_SUCCESS};
 
     static COORD viewport_size(HANDLE output) {
@@ -131,12 +132,12 @@ class Pseudoconsole {
         });
         if (viewport.X) {
             // Sample independently of VT reads so an idle terminal still resizes.
+            resize_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            if (!resize_stop)
+                throw std::runtime_error("create ConPTY resize stop event");
             resizer = std::thread([this, output, viewport] {
                 auto applied = viewport;
-                while (!stopping) {
-                    Sleep(20);
-                    if (stopping)
-                        break;
+                while (WaitForSingleObject(resize_stop, 20) == WAIT_TIMEOUT && !stopping) {
                     const auto current = viewport_size(output);
                     if (current.X && (current.X != applied.X || current.Y != applied.Y) &&
                         SUCCEEDED(ResizePseudoConsole(handle, current)))
@@ -158,8 +159,12 @@ class Pseudoconsole {
     void close() {
         if (stopping.exchange(true))
             return;
+        if (resize_stop)
+            SetEvent(resize_stop);
         if (resizer.joinable())
             resizer.join();
+        if (resize_stop)
+            CloseHandle(resize_stop);
         if (writer.joinable()) {
             do {
                 CancelSynchronousIo(writer.native_handle());

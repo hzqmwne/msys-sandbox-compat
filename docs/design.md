@@ -32,7 +32,7 @@
 
 宿主按模块和令牌条件准备命名空间和传播策略。普通令牌使用 Windows 自身的对象路径和 ACL。
 
-宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。父端依据实际挂起映像决定传播和创建阶段的对象 DACL 适配。IPC 模块使用当前兼容树的命名空间，三个 ACL 相关模块共享所需的 SID 信息，受限 relay 独立维护策略基准。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
+宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。创建阶段的显式对象 DACL 适配以调用者的主 token 和当前请求为准。IPC 模块使用启动树传入的目录名，各进程自行确定 ACL 适配需要的 SID。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
 
 父端准备 agent 和模块配置，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。独立 launcher 冷启动传入空的父映像数据。由 agent 传播时传入其所在进程已记录的映像数据，供 MSYS fork 使用。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。见 [ADR-0015](decisions/0015-initialize-at-child-loader-entry.md)。
 
@@ -101,7 +101,7 @@ relay 默认覆盖原生根和后代，可通过 `--no-native-relay` 关闭。�
 
 桥接从终端句柄或显式 VT 数据源读取输入，脚本只打开一次。双向转发遇到短写会继续写入剩余字节。显式 VT 数据源耗尽后，桥停止转发输入，目标继续持有内层控制台 stdin。在受测 Windows 上，关闭 conhost 的 VT 输入管道会向目标发出 `CTRL_CLOSE_EVENT`。桥因此把该管道保留到会话收尾，以便目标继续处理输入和输出结果。下游写入失败或零进展时，读取线程通过 job 的完成端口通知宿主结束进程树，同时继续读取并丢弃剩余 ConPTY 输出，直到终端退出。正常收尾取消阻塞输入并转发剩余输出。
 
-交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。关闭时先结束尺寸采样，再释放 ConPTY。显式尺寸、脚本输入和缺少可用窗口的显式会话采用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
+交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。关闭时唤醒正在等待的尺寸采样线程，待其结束后再释放 ConPTY。显式尺寸、脚本输入和缺少可用窗口的显式会话采用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
 
 外层控制台的鼠标跟踪由内层应用协商。桥接输入时，将旧版 conhost 封装成 Win32 字符键的 SGR 鼠标报告还原为 VT 序列，由内层 ConPTY 按应用的输入模式处理。脚本和重定向输入保持原字节流。
 
