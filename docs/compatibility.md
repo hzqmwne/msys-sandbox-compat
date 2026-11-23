@@ -30,6 +30,8 @@ EXE 识别覆盖普通导入表中直接导入 `msys-2.0.dll` 的程序。纯原
 
 设置 PE `DYNAMIC_BASE` 的 DLL 由 Windows 选址。使用该标志的 `msys-2.0.dll` 版本需在目标环境单独验证并存、父子映像布局和 fork。当前 DLL 基址调整覆盖 `NtMapViewOfSection` 入口。
 
+MSYS2 官方 `msys2-runtime` 3.6.12-1 的 `msys-2.0.dll` 启用 `DYNAMIC_BASE`。这是上游有意恢复的链接配置。受测的 DLL、`bash.exe` 和 `uname.exe` 均未设置 `HIGH_ENTROPY_VA`，两个 EXE 也未设置 `DYNAMIC_BASE`。进程实际采用的 ASLR 策略还取决于目标 Windows 和启动环境。[MSYS2 runtime #381](https://github.com/msys2/msys2-runtime/pull/381) · [MSYS2 packages #6820](https://github.com/msys2/MSYS2-packages/pull/6820)
+
 relay 覆盖经 AMD64 原生 `NtCreateUserProcess` 入口创建的后代，含经过该入口的 WoW64 调用。Windows 决定子进程的 token 和默认 DACL，各进程用自己的主 token 初始化 ACL 适配。IPC 重定向使用启动树提供的目录名，并受该目录的实际权限约束。用 `--no-native-relay` 让自动传播在原生进程处结束。路径细节见 [当前设计](design.md#原生-relay) 和 [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)。
 
 两种受限令牌夹具均使用 `DISABLE_MAX_PRIVILEGE | LUA_TOKEN`、禁用 Administrators，并将当前 logon SID、Everyone、Builtin Users、Authenticated Users 放入 restricting SID 列表；write 模式另加 `WRITE_RESTRICTED`。启动器为对象保留 logon/SYSTEM 授权和 OWNER RIGHTS 限制。测试只在带标记的独立工作目录配置 ACL，将兼容产物和夹具暂存为只读；Git/MSYS 仍从原安装位置加载。完整检查模式的读取也必须通过 restricting SID 检查，生产所需文件读取与执行必须在原策略允许范围内。
@@ -53,6 +55,14 @@ relay 覆盖经 AMD64 原生 `NtCreateUserProcess` 入口创建的后代，含�
 MSYS 从继承的 Windows 标准句柄重建描述符时，会对磁盘文件调用 `QueryDosDeviceW(NULL, …)`，把 NT 设备路径映射到盘符。管道和 Windows `NUL` 走专用识别分支，直接启动的 MSYS 子进程沿用父进程的描述符状态，这些路径都跳过这次枚举。
 
 该枚举在受测 PSEC 中返回 `ERROR_ACCESS_DENIED`。Bash 为 stdout 和 stderr 设置行缓冲时会触发 `fstat`，MSYS 随后在 inode 回退中解引用空路径指针。继承的文件 stdin 也会遇到枚举失败，直接读取成功，显式执行 `fstat` 则复现崩溃。
+
+## PSEC 下的 Microsoft Store PowerShell
+
+在 Windows 26300.9974 x64、PSEC 1.0 下，Microsoft Store PowerShell 7.7.0 可作为 PSEC 直接启动的首进程。执行别名和包内 `pwsh.exe` 均通过，实际进程保留 `Microsoft.PowerShell` 包身份并处于 AppContainer。由该 PowerShell 再调用 compat 启动 Bash，Bash 通过了 fork 验证。
+
+同一策略下，PSEC 内无包身份的父进程启动商店版 PowerShell 时遇到 Windows 创建错误。作为 compat 的目标，执行别名报 Win32 1920，包内 EXE 报 Win32 5。先经 compat 启动 Bash，再从 Bash 启动任一入口，均得到 `Permission denied` 和退出码 126。移除 compat 的原生进程创建对照仍复现 Windows 错误。同包的商店版 PowerShell 父进程在同一 PSEC 策略下可以通过任一入口启动 PowerShell 子进程。
+
+测试中实际进程没有包身份的 PowerShell 7.6.9 通过了 `PSEC → compat → pwsh → Bash` 和 `PSEC → compat → Bash → pwsh` 两条路径。判断这项限制时，应以实际 PowerShell 进程的包身份和启动链为准。
 
 ## MSYS 运行时的共享映像节
 
