@@ -21,7 +21,11 @@ AgentImage load_agent_image(const std::filesystem::path &path, uint32_t required
     input.seekg(0);
     require(static_cast<bool>(input.read(reinterpret_cast<char *>(raw.data()), bytes)),
             "read agent DLL");
-    const PeView file(raw.data(), raw.size());
+    return load_agent_image(raw.data(), raw.size(), required_hooks);
+}
+
+AgentImage load_agent_image(const BYTE *raw, size_t raw_size, uint32_t required_hooks) {
+    const PeView file(raw, raw_size);
     const auto pe = file.headers();
     require(pe && (pe->FileHeader.Characteristics & IMAGE_FILE_DLL) &&
                 pe->OptionalHeader.NumberOfRvaAndSizes >= IMAGE_NUMBEROF_DIRECTORY_ENTRIES,
@@ -33,15 +37,15 @@ AgentImage load_agent_image(const std::filesystem::path &path, uint32_t required
                 !directories[IMAGE_DIRECTORY_ENTRY_TLS].Size,
             "agent DLL must have no entry point, imports or TLS");
     require(header.SizeOfImage && header.SizeOfImage <= max_agent_image_size &&
-                header.SizeOfHeaders && header.SizeOfHeaders <= raw.size() &&
+                header.SizeOfHeaders && header.SizeOfHeaders <= raw_size &&
                 header.SizeOfHeaders <= header.SizeOfImage,
             "agent DLL header and image sizes");
-    const auto sections = PeView(raw.data(), header.SizeOfHeaders).sections(*pe);
+    const auto sections = PeView(raw, header.SizeOfHeaders).sections(*pe);
     require(sections && pe->FileHeader.NumberOfSections, "agent DLL section table");
 
     AgentImage result;
     result.mapped.resize(header.SizeOfImage);
-    std::memcpy(result.mapped.data(), raw.data(), header.SizeOfHeaders);
+    std::memcpy(result.mapped.data(), raw, header.SizeOfHeaders);
     for (WORD i = 0; i < pe->FileHeader.NumberOfSections; ++i) {
         const auto &section = sections[i];
         const auto rva = section.VirtualAddress;
@@ -49,11 +53,11 @@ AgentImage load_agent_image(const std::filesystem::path &path, uint32_t required
         const auto size = section.SizeOfRawData;
         require(rva >= header.SizeOfHeaders && rva <= result.mapped.size() &&
                     section.Misc.VirtualSize <= result.mapped.size() - rva &&
-                    size <= result.mapped.size() - rva && offset <= raw.size() &&
-                    size <= raw.size() - offset,
+                    size <= result.mapped.size() - rva && offset <= raw_size &&
+                    size <= raw_size - offset,
                 "agent DLL section range");
         if (size)
-            std::memcpy(result.mapped.data() + rva, raw.data() + offset, size);
+            std::memcpy(result.mapped.data() + rva, raw + offset, size);
     }
 
     const PeView image(result.mapped.data(), result.mapped.size());

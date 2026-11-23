@@ -50,19 +50,29 @@ $previousTemp=$env:TEMP; $previousTmp=$env:TMP; $previousHome=$env:HOME
 try {
     [IO.File]::WriteAllText($policyPath, ($policy | ConvertTo-Json -Depth 4))
     $env:TEMP=Join-Path $state 'tmp'; $env:TMP=$env:TEMP; $env:HOME=Join-Path $state 'home'
-    $launchArgs=@($policyPath)
+    $launchArgs = @("--policy=$policyPath", '--')
     if (!$Raw) {
-        $launchArgs += (Join-Path $BinaryDirectory 'msys-sandbox-compat.exe')
-        if ($NativeRelay) { $launchArgs += '--native-relay' }
-        if ($NoNativeRelay) { $launchArgs += '--no-native-relay' }
-        foreach ($module in $DisableModule) { $launchArgs += @('--disable-module',$module) }
-        $launchArgs += @('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'))
-        if ($Trace) { $launchArgs += '--trace' }
-        if ($ConPtyScript) { $launchArgs += @('--conpty-script',[IO.Path]::GetFullPath($ConPtyScript)) }
-        elseif ($ConPty) { $launchArgs += '--conpty' }
-        elseif ($NoConPty) { $launchArgs += '--no-conpty' }
-        if ($PSBoundParameters.ContainsKey('TerminalSize')) {
-            $launchArgs += @('--conpty-size',$TerminalSize)
+        $developmentExe = Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
+        if ($ConPtyScript) {
+            $launchArgs += $developmentExe
+            if ($NativeRelay) { $launchArgs += '--native-relay' }
+            if ($NoNativeRelay) { $launchArgs += '--no-native-relay' }
+            foreach ($module in $DisableModule) { $launchArgs += @('--disable-module',$module) }
+            if ($Trace) { $launchArgs += '--trace' }
+            $launchArgs += @('--conpty-script',[IO.Path]::GetFullPath($ConPtyScript))
+            if ($TerminalSize) { $launchArgs += @('--conpty-size',$TerminalSize) }
+        } else {
+            $shim = Join-Path $BinaryDirectory 'msys-sandbox-compat-shim.exe'
+            if (!(Test-Path -LiteralPath $shim)) { $shim = $developmentExe }
+            $launchArgs += $shim
+            if ($NativeRelay) { $launchArgs += '--native-relay=on' }
+            if ($NoNativeRelay) { $launchArgs += '--native-relay=off' }
+            if ($DisableModule) { $launchArgs += '--disable-modules=' + ($DisableModule -join ',') }
+            if ($Trace) { $launchArgs += '--log-level=trace' }
+            if ($ConPty) { $launchArgs += '--terminal=conpty' }
+            if ($NoConPty) { $launchArgs += '--terminal=inherit' }
+            if ($TerminalSize) { $launchArgs += "--conpty-size=$TerminalSize" }
+            $launchArgs += '--'
         }
     }
     $launchArgs += $Program

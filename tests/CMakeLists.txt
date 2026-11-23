@@ -58,7 +58,7 @@ if(MSYS_SANDBOX_COMPAT_POWERSHELL)
     -File "${CMAKE_CURRENT_SOURCE_DIR}/startup.ps1"
     -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")
   set_tests_properties(ordinary.startup PROPERTIES RUN_SERIAL TRUE TIMEOUT 180)
-  foreach(suite verify scope modules conpty conpty-resize terminal-session stdio late-package process-chain git-hook)
+  foreach(suite verify scope modules conpty conpty-resize terminal-session stdio late-package process-chain git-hook shim)
     add_test(NAME psec.${suite} COMMAND ${test_powershell}
       -File "${CMAKE_CURRENT_SOURCE_DIR}/${suite}.ps1"
       -BinaryDirectory "$<TARGET_FILE_DIR:msys-sandbox-compat>")

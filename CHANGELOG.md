@@ -11,6 +11,10 @@
 
 ### 构建
 
+- 发布产物为内嵌 agent DLL 的 `msys-sandbox-compat-shim.exe`。开发构建同时保留 EXE/DLL。
+- Shim 使用显式 `--` 分隔原生命令，支持透明标准流、模块列表及可选诊断文件。日志默认关闭。
+- 独立 `psec-run.exe` 支持原生 PSEC 1.0 和 1.1，以及 MXC 形状的文件、枚举和直接网络策略字段。
+
 - 仓库的构建、演示和测试脚本支持 Windows PowerShell 5.1 和 PowerShell 7。CTest 优先使用 pwsh，也可使用 Windows PowerShell。
 - `run.ps1` 支持 Windows PowerShell 5.1 和 PowerShell 7。策略文件统一写为无 BOM 的 UTF-8，旧版原生参数传递保留引号和空参数。
 

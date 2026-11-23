@@ -166,7 +166,20 @@ void inject_root(HANDLE process, uint32_t installed, const AgentState &host_stat
     const auto possible = state.enabled(Module::propagation)
                               ? selected_hooks(state.modules())
                               : installed;
+#ifdef MSYS_SANDBOX_COMPAT_EMBEDDED
+    (void)agent;
+    const auto resource = FindResourceW(nullptr, MAKEINTRESOURCEW(101), RT_RCDATA);
+    check(resource != nullptr, "find embedded agent DLL");
+    const auto data = LoadResource(nullptr, resource);
+    check(data != nullptr, "load embedded agent DLL");
+    const auto bytes = static_cast<const BYTE *>(LockResource(data));
+    const auto resource_size = SizeofResource(nullptr, resource);
+    if (!bytes || !resource_size)
+        throw std::runtime_error("empty embedded agent DLL");
+    auto image = load_agent_image(bytes, resource_size, possible);
+#else
     auto image = load_agent_image(agent, possible);
+#endif
     auto &mapped = image.mapped;
     auto &api = state.api;
     auto native = reinterpret_cast<uintptr_t>(GetModuleHandleW(L"ntdll.dll"));

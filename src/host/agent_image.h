@@ -20,4 +20,5 @@ struct AgentImage {
 };
 
 AgentImage load_agent_image(const std::filesystem::path &path, uint32_t required_hooks);
+AgentImage load_agent_image(const BYTE *bytes, size_t size, uint32_t required_hooks);
 } // namespace msys_sandbox_compat

@@ -25,11 +25,11 @@ hook 位于 ntdll 入口，采用 MinHook 的 HDE64 与适配的指令搬迁核�
 .\build.ps1 -Install
 
 # 在已有 PSEC 或受限令牌环境中调用
-.\build\package\bin\msys-sandbox-compat.exe `
-  'C:\Program Files\Git\usr\bin\bash.exe' --noprofile --norc -c '(echo fork); printf "b\na\n" | /usr/bin/sort'
+.\build\package\bin\msys-sandbox-compat-shim.exe -- `
+  'C:\Program Files\Git\usr\bin\bash.exe' --noprofile --norc -c 'echo ready; (echo fork-ok)'
 ```
 
-生产部署只需同目录的 `msys-sandbox-compat.exe` 和 `msys-sandbox-compat.dll`，放在原策略允许读取/执行的位置。在程序路径前加 `--no-native-relay` 可关闭原生中间进程传播。终端桥默认按标准句柄自动选择，也可用 `--conpty` 或 `--no-conpty` 指定。完整参数见 [使用说明](docs/getting-started.md)。
+生产部署只需 `msys-sandbox-compat-shim.exe`，放在原策略允许读取和执行的位置。`--` 分隔 shim 选项与目标命令。日志默认关闭，终端模式默认自动选择，`--terminal=inherit` 强制直接继承三路标准句柄。完整参数可用 `--help` 查看。见[使用说明](docs/getting-started.md)。
 
 本地演示可从允许创建 PSEC 的 Windows PowerShell 5.1 或 PowerShell 7 运行。
 

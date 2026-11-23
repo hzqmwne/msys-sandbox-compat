@@ -19,6 +19,14 @@ if ($LASTEXITCODE) { throw 'CMake configure failed' }
 & $cmake --build $buildDirectory
 if ($LASTEXITCODE) { throw 'C++ build failed' }
 if ($Install) {
-    & $cmake --install $buildDirectory --prefix (Join-Path $buildDirectory 'package')
+    $package = Join-Path $buildDirectory 'package'
+    & $cmake --install $buildDirectory --prefix $package
     if ($LASTEXITCODE) { throw 'Package installation failed' }
+    # Retire the development pair left by older installs into this staging directory.
+    foreach ($name in @('msys-sandbox-compat.exe','msys-sandbox-compat.dll')) {
+        $obsolete = Join-Path (Join-Path $package 'bin') $name
+        if (Test-Path -LiteralPath $obsolete -PathType Leaf) {
+            Remove-Item -LiteralPath $obsolete
+        }
+    }
 }

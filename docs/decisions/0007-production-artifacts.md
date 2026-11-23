@@ -10,10 +10,10 @@ Related: ADR-0001、ADR-0005、ADR-0006
 
 ## Decision
 
-默认构建和安装只交付 msys-sandbox-compat.exe、msys-sandbox-compat.dll 及文档/许可。psec-run 位于 tools，显式开启开发工具或测试时构建，不随生产安装；测试夹具拥有独立源码与输出目录。
+默认构建输出开发 EXE/DLL 和单文件 `msys-sandbox-compat-shim.exe`。发布版将校验后的 DLL 作为 PE 资源嵌入。安装交付 shim、文档与许可。显式开启开发工具或测试时独立构建 psec-run，测试夹具有独立源码与输出目录。
 
 core 保存共享识别、进程准备与 token 检查，分别按宿主和无 CRT agent 的约束编译，不新增运行库或公共 SDK。生产仍在原策略允许的位置与权限内运行。
 
 ## Consequences
 
-已有隔离启动器只需部署兼容 EXE/DLL。仓库演示入口需先构建工具；集成回归需开启测试。调整构建和安装边界，不改变默认原生范围、relay 安全上下文限制或测试初始权限。
+已有隔离启动器只需部署 shim EXE。仓库演示入口需先构建工具，集成回归需开启测试。嵌入资源随 DLL 校验构建更新，单文件测试从独立目录启动改名后的 shim。

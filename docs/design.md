@@ -18,7 +18,7 @@
 
 ## 进程创建与识别
 
-外部隔离启动器负责原有策略，生产兼容层包含兼容 EXE/DLL。可选 psec-run 开发工具用于创建 PSEC 验证环境。宿主与 agent 共享 core 源码，分别按各自 CRT/栈约束编译。宿主以 `CREATE_SUSPENDED` 创建目标。直接导入 `msys-2.0.dll` 的 EXE 按 MSYS 处理，文件名比较忽略大小写。普通令牌也可启动，命名对象和 DACL 适配按令牌条件启用。
+外部隔离启动器负责原有策略。生产 shim 将经过校验的 agent DLL 嵌入 PE 资源，开发 EXE 从同目录读取 DLL。独立 psec-run 工具用于创建 PSEC 验证环境。宿主与 agent 共享 core 源码，分别按各自 CRT/栈约束编译。宿主以 `CREATE_SUSPENDED` 创建目标。直接导入 `msys-2.0.dll` 的 EXE 按 MSYS 处理，文件名比较忽略大小写。普通令牌也可启动，命名对象和 DACL 适配按令牌条件启用。
 
 声明此导入名就是选择该 ABI 的兼容处理。识别仅读取当前 EXE 的导入表，传递依赖及延迟导入在范围外。原生 EXE 改名为 Bash 不会命中，运行中才安装的 EXE 可在首次创建时识别。
 

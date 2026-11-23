@@ -51,14 +51,31 @@ add_custom_command(OUTPUT "${agent_validation_stamp}"
   COMMENT "Checking the linked agent DLL" VERBATIM)
 add_custom_target(check-agent-image DEPENDS "${agent_validation_stamp}")
 
-add_executable(msys-sandbox-compat ${compat_core} src/host/main.cpp src/host/platform.cpp
-  src/host/security.cpp src/host/bootstrap.cpp src/host/agent_image.cpp)
-add_compat_hook_backend(msys-sandbox-compat)
-target_include_directories(msys-sandbox-compat PRIVATE include)
-target_compile_options(msys-sandbox-compat PRIVATE /EHsc)
-target_compile_definitions(msys-sandbox-compat PRIVATE MSYS_SANDBOX_COMPAT_VERSION="${PROJECT_VERSION}")
-target_link_libraries(msys-sandbox-compat PRIVATE advapi32 userenv)
-add_dependencies(msys-sandbox-compat check-agent-image)
+function(add_compat_host target)
+  add_executable(${target} ${compat_core} src/host/main.cpp src/host/platform.cpp
+    src/host/security.cpp src/host/bootstrap.cpp src/host/agent_image.cpp)
+  add_compat_hook_backend(${target})
+  target_include_directories(${target} PRIVATE include)
+  target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/EHsc>)
+  target_compile_definitions(${target} PRIVATE MSYS_SANDBOX_COMPAT_VERSION="${PROJECT_VERSION}")
+  target_link_libraries(${target} PRIVATE advapi32 userenv)
+  add_dependencies(${target} check-agent-image)
+endfunction()
+add_compat_host(msys-sandbox-compat)
+
+enable_language(RC)
+set(agent_resource_template "${CMAKE_CURRENT_BINARY_DIR}/agent-resource-$<CONFIG>.rc.in")
+set(agent_resource "${CMAKE_CURRENT_BINARY_DIR}/agent-resource-$<CONFIG>.rc")
+file(GENERATE OUTPUT "${agent_resource_template}" CONTENT
+  "101 RCDATA \"$<TARGET_FILE:msys-sandbox-compat-agent>\"\n")
+add_custom_command(OUTPUT "${agent_resource}"
+  COMMAND "${CMAKE_COMMAND}" -E copy "${agent_resource_template}" "${agent_resource}"
+  COMMAND "${CMAKE_COMMAND}" -E touch "${agent_resource}"
+  DEPENDS "${agent_resource_template}" "${agent_validation_stamp}"
+  COMMENT "Embedding the verified agent DLL" VERBATIM)
+add_compat_host(msys-sandbox-compat-shim)
+target_sources(msys-sandbox-compat-shim PRIVATE "${agent_resource}")
+target_compile_definitions(msys-sandbox-compat-shim PRIVATE MSYS_SANDBOX_COMPAT_EMBEDDED)
 option(BUILD_TESTING "Build regression suites and fixtures" OFF)
 option(MSYS_SANDBOX_COMPAT_BUILD_TOOLS "Build the local PSEC development launcher" OFF)
 if(MSYS_SANDBOX_COMPAT_BUILD_TOOLS OR BUILD_TESTING)
@@ -76,7 +93,7 @@ include(CTest)
 if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
-install(TARGETS msys-sandbox-compat msys-sandbox-compat-agent RUNTIME DESTINATION bin)
+install(TARGETS msys-sandbox-compat-shim RUNTIME DESTINATION bin)
 install(FILES README.md CHANGELOG.md DESTINATION share/msys-sandbox-compat)
 install(DIRECTORY docs/ DESTINATION share/msys-sandbox-compat/docs FILES_MATCHING PATTERN "*.md")
 install(FILES third_party/LICENSE.nlohmann third_party/LICENSE.mxc third_party/LICENSE.flatbuffers third_party/LICENSE.minhook

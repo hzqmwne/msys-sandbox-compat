@@ -377,8 +377,9 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
             send_text("\u4E2D\u6587-\u00E9-\uFF21\r");
             initialized = true;
         }
-        if (readline && !initialized && transcript.find("PS ") != std::string::npos &&
-            transcript.find("> ") != std::string::npos) {
+        const auto powershell_prompt = readline ? transcript.find("PS ") : std::string::npos;
+        if (!initialized && powershell_prompt != std::string::npos &&
+            transcript.find('>', powershell_prompt + 3) != std::string::npos) {
             const auto command_text =
                 "Write-Host 'HISTORY-CHECK-" + std::to_string(GetTickCount64()) +
                 "'; Write-Host 'SCREEN-\u4E2D\u6587-\u00E9-\uFF21'; [Console]::Write(\"CURSOR-NO\" + "
