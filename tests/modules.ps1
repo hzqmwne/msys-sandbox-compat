@@ -19,7 +19,7 @@ $exeAttempt = 'preferred EXE (mapped|mapping skipped)'
 
 function Invoke-Case([string]$Name, [string[]]$Arguments, [string[]]$Required = @(),
                      [string[]]$Absent = @(), [int]$ExitCode = 0, [string]$CompatPath = $compat) {
-    $info = New-TestProcessInfo $launcher (@($policy,$CompatPath,'--trace') + $Arguments) $state
+    $info = New-TestProcessInfo $launcher (@("--policy=$policy",'--',$CompatPath,'--trace') + $Arguments) $state
     $result = Invoke-TestProcess $info
     Save-TestOutput $result $evidence $Name
     $output = $result.Output + $result.Error

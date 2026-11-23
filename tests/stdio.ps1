@@ -19,7 +19,7 @@ Write-TestJson $policy @{filesystem = @{readonlyPaths = @($env:SystemRoot, $bina
 $launcher = Get-PsecLauncher $binaries
 $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
 $probe = Join-Path $fixtures 'stdio-probe.exe'
-$info = New-TestProcessInfo $launcher @($policy, $compat, '--terminal=inherit', '--', $probe, '--echo') $state
+$info = New-TestProcessInfo $launcher @("--policy=$policy", '--', $compat, '--terminal=inherit', '--', $probe, '--echo') $state
 $info.RedirectStandardInput = $true
 
 # Repeat every byte value, including NUL and Ctrl+Z, beyond pipe capacity.
@@ -62,7 +62,7 @@ try {
 }
 Write-Output "STDIO-PASS: $($inputBytes.Length) bytes, stderr kept separate, stdin EOF, exit=37"
 
-$info = New-TestProcessInfo $launcher @($policy, $compat, $probe, '--pipe-close') $state
+$info = New-TestProcessInfo $launcher @("--policy=$policy", '--', $compat, $probe, '--pipe-close') $state
 $process = [Diagnostics.Process]::Start($info)
 try {
     $stderr = $process.StandardError.ReadToEndAsync()
@@ -85,7 +85,7 @@ try {
 }
 Write-Output 'STDIO-PIPE-CLOSE-PASS: producer saw ERROR_BROKEN_PIPE and returned exit=37'
 
-$info = New-TestProcessInfo $launcher @($policy, $compat, '--conpty', $probe, '--conpty-burst') $state
+$info = New-TestProcessInfo $launcher @("--policy=$policy", '--', $compat, '--conpty', $probe, '--conpty-burst') $state
 $info.RedirectStandardInput = $true
 foreach ($sink in 'drain', 'close') {
     $process = [Diagnostics.Process]::Start($info)
@@ -128,7 +128,7 @@ Write-Output 'CONPTY-PIPE-CLOSE-PASS: full drain preserves target exit, closed d
 
 $inputScript = Join-Path $state 'conpty-input.txt'
 [IO.File]::WriteAllText($inputScript, 'A')
-$info = New-TestProcessInfo $launcher @($policy, $compat, '--conpty-script', $inputScript,
+$info = New-TestProcessInfo $launcher @("--policy=$policy", '--', $compat, '--conpty-script', $inputScript,
     $probe, '--conpty-read-one') $state
 $result = Invoke-TestProcess $info 30000
 Save-TestOutput $result $report 'conpty-script'
@@ -149,7 +149,7 @@ foreach ($case in '111','011','101','110','100','010','001','000','111-direct','
     $stdout = Join-Path $state "$tag.stdout.bin"
     $stderr = Join-Path $state "$tag.stderr.bin"
     $expectBridge = $mask -ne '000' -and $case -ne '111-direct'
-    $arguments = @($launcher,$policy,$compat)
+    $arguments = @($launcher,"--policy=$policy",'--',$compat)
     if ($case -eq '111-direct') { $arguments += '--no-conpty' }
     $arguments += @($probe, $(if ($expectBridge) { '--mixed-console' } else { '--mixed-direct' }), $mask)
     $command = ($arguments.ForEach({ '"' + $_.Replace('%','%%') + '"' }) -join ' ')
@@ -189,7 +189,7 @@ foreach ($case in '111','011','101','110','100','010','001','000','111-direct','
     Write-Output "STDIO-MIXED-PASS: $case preserved standard handles, terminal access and byte routing"
 }
 
-$info = New-TestProcessInfo $launcher @($policy, $compat, '--conpty', $probe, '--descendant') $state
+$info = New-TestProcessInfo $launcher @("--policy=$policy", '--', $compat, '--conpty', $probe, '--descendant') $state
 $result = Invoke-TestProcess $info 30000
 Save-TestOutput $result $report 'descendant'
 if ($result.ExitCode -ne 37 -or !$result.Output.Contains('DESCENDANT-TAIL')) {

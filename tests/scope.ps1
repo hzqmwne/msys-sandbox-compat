@@ -17,7 +17,7 @@ $probe=Join-Path $fixtureBinaries 'native-probe.exe'
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 Copy-Item -LiteralPath $probe -Destination (Join-Path $fixtures 'bash.exe')
 function Run([string]$Name,[string[]]$Arguments,[string]$Report='') {
-    $launchArgs=@($policy,$Arguments[0],'--no-native-relay') + @($Arguments | Select-Object -Skip 1)
+    $launchArgs=@("--policy=$policy",'--',$Arguments[0],'--no-native-relay') + @($Arguments | Select-Object -Skip 1)
     $info=New-TestProcessInfo $launcher $launchArgs $state
     $result=Invoke-TestProcess $info
     $err=$result.Error
@@ -55,7 +55,7 @@ if ($beforeDacl.Count -ne 1 -or $afterDacl.Count -ne 1 -or $beforeDacl[0] -ne $a
 $command = 'export MSYS2_ARG_CONV_EXCL="*"; "' + $probe.Replace('\','/') +
     '" --reenter "' + $compat.Replace('\','/') + '" "' + $bash.Replace('\','/') + '"'
 $info = New-TestProcessInfo $launcher @(
-    $policy,$compat,'--no-native-relay','--runtime',$runtime,$bash,'--noprofile','--norc','-c',$command
+    "--policy=$policy",'--',$compat,'--no-native-relay','--runtime',$runtime,$bash,'--noprofile','--norc','-c',$command
 ) $state
 $result = Invoke-TestProcess $info 30000
 Save-TestOutput $result $evidence 'msys-native-msys-reentry'

@@ -20,7 +20,7 @@ $fixtureBinaries=Get-TestFixtureDirectory $BinaryDirectory
 $bash=Join-Path $GitRoot 'usr\bin\bash.exe'
 $moduleTest=(Join-Path $PSScriptRoot 'fixtures\late-module.pl').Replace('\','/')
 $command='export PATH=/usr/bin:/bin; echo WAITING-FOR-PACKAGE; read -r ready; test "$ready" = installed || exit 80; export PATH="'+$package.Replace('\','/')+':/usr/bin:/bin"; "'+$exe.Replace('\','/')+'" "LATE-EXE-PASS\n" || exit 81; /usr/bin/perl "'+$moduleTest+'" "'+$dll.Replace('\','/')+'" "'+$helper.Replace('\','/')+'" || exit $?; echo LATE-PACKAGE-PASS'
-$launchArgs=@($policy,(Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'),'--trace','--runtime',
+$launchArgs=@("--policy=$policy",'--',(Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'),'--trace','--runtime',
     (Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$bash,'--noprofile','--norc','-c',$command)
 $info=New-TestProcessInfo (Get-PsecLauncher $BinaryDirectory) $launchArgs $state
 $info.RedirectStandardInput=$true

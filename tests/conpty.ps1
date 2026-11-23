@@ -64,7 +64,7 @@ public sealed class TerminalTest {
     }
 }
 "@
-[string[]]$prefix=if($existing){@()}elseif($restricted){@($(if($Environment -eq 'WriteRestricted'){'write'}else{'full'}),$state)}else{@($policy)}
+[string[]]$prefix=if($existing){@()}elseif($restricted){@($(if($Environment -eq 'WriteRestricted'){'write'}else{'full'}),$state)}else{@("--policy=$policy",'--')}
 $targetArguments=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),'--conpty','--conpty-size','120x40',(Join-Path $GitRoot 'usr\bin\bash.exe'),'--noprofile','--norc','-i')
 if(!$NativeRelay){$targetArguments=@('--no-native-relay')+$targetArguments}
 $arguments=if($existing){$targetArguments}else{$prefix+@((Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'))+$targetArguments}

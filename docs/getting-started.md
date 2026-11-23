@@ -1,7 +1,5 @@
 # Getting started
 
-[简体中文](zh-CN/getting-started.md)
-
 ## Build
 
 On Windows x64, use Windows PowerShell 5.1 or PowerShell 7 with the Visual Studio C++ x64 tools and Windows SDK.
@@ -48,7 +46,7 @@ msys-sandbox-compat-shim.exe -h | --help
 msys-sandbox-compat-shim.exe --version
 ```
 
-`psec-run.exe` is a standalone PSEC test tool that accepts MXC-style filesystem, enumeration, and direct network rules. It can select the native PSEC 1.0 or 1.1 contract and still accepts its original positional syntax.
+`psec-run.exe` creates a native PSEC 1.0 or 1.1 environment from a policy with MXC-style filesystem, enumeration, and direct network rules. Pass the policy with `--policy=FILE` and put the target command after `--`. Relative executable paths resolve from the working directory, and bare command names use Windows executable search.
 
 Run the shim with a normal token or inside an existing restricted environment. An existing launcher can prepend `msys-sandbox-compat-shim.exe --` to the target command. The shim passes the native command line after `--` through to the target. Relative paths resolve from the working directory, and bare command names use normal Windows search. Put both the shim and the target where the existing policy already permits read and execute access.
 

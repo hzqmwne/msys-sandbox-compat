@@ -24,7 +24,6 @@ using CheckVersion = HRESULT(WINAPI *)(DWORD, BOOLEAN *, DWORD *);
 static constexpr char usage[] =
     "Run a command in a native Windows process security environment.\n\n"
     "Usage: psec-run --policy=FILE [--psec-version=auto|1.0|1.1] -- COMMAND [ARGUMENTS...]\n"
-    "       psec-run POLICY.json PROGRAM [ARGUMENTS...]\n"
     "       psec-run -h | --help\n";
 static BOOL WINAPI wait_control(DWORD event) { return event == CTRL_C_EVENT; }
 struct Resources {
@@ -61,30 +60,24 @@ int wmain(int argc, wchar_t **argv) try {
     std::filesystem::path policy_file;
     int first = 1;
     int requested_minor = -1;
-    const bool modern = argc > 1 && std::wstring_view(argv[1]).substr(0, 2) == L"--";
-    if (modern) {
-        for (; first < argc; ++first) {
-            const std::wstring_view arg = argv[first];
-            if (arg == L"--") {
-                ++first;
-                break;
-            }
-            if (arg.substr(0, 9) == L"--policy=")
-                policy_file = arg.substr(9);
-            else if (arg == L"--psec-version=auto")
-                requested_minor = -1;
-            else if (arg == L"--psec-version=1.0")
-                requested_minor = 0;
-            else if (arg == L"--psec-version=1.1")
-                requested_minor = 1;
-            else {
-                fputs(usage, stderr);
-                return 2;
-            }
+    for (; first < argc; ++first) {
+        const std::wstring_view arg = argv[first];
+        if (arg == L"--") {
+            ++first;
+            break;
         }
-    } else if (argc > 1) {
-        policy_file = argv[1];
-        first = 2;
+        if (arg.substr(0, 9) == L"--policy=")
+            policy_file = arg.substr(9);
+        else if (arg == L"--psec-version=auto")
+            requested_minor = -1;
+        else if (arg == L"--psec-version=1.0")
+            requested_minor = 0;
+        else if (arg == L"--psec-version=1.1")
+            requested_minor = 1;
+        else {
+            fputs(usage, stderr);
+            return 2;
+        }
     }
     if (policy_file.empty() || first >= argc || !*argv[first]) {
         fputs(usage, stderr);
@@ -162,7 +155,7 @@ int wmain(int argc, wchar_t **argv) try {
                                     nullptr),
           "stdio handle list");
     const std::filesystem::path target(argv[first]);
-    const auto executable = target.has_parent_path() || !modern
+    const auto executable = target.has_parent_path()
                                 ? std::filesystem::absolute(target)
                                 : std::filesystem::path{};
     auto command = std::wstring(msys_sandbox_compat::command_tail(GetCommandLineW(), first));

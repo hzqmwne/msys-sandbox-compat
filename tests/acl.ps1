@@ -29,7 +29,7 @@ elseif($Environment -ne 'Psec'){
 else{
     $policy=Join-Path $state 'policy.json'
     Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,'C:\Program Files\Git',$root);readwritePaths=@($state);deniedPaths=@()}}
-    $info=New-TestProcessInfo (Get-PsecLauncher $BinaryDirectory) (@($policy,$compat)+$arguments) $state
+    $info=New-TestProcessInfo (Get-PsecLauncher $BinaryDirectory) (@("--policy=$policy",'--',$compat)+$arguments) $state
 }
 $result=Invoke-TestProcess $info 30000
 Save-TestOutput $result $evidence 'settings'

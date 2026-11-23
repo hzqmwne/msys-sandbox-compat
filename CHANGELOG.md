@@ -17,6 +17,7 @@ The project is in 0.1 development and has no formal release yet. The [compatibil
 - The shim uses `--` to delimit the native command, supports transparent stdio, and can write diagnostics to a separate file. Logging defaults to off.
 - The shim and `psec-run.exe` accept `-h` and `--help`. The shim also accepts `--version`.
 - The separate `psec-run.exe` tool supports native PSEC 1.0 and 1.1, including MXC-style filesystem, enumeration, and direct network fields.
+- `psec-run.exe` requires `--policy=FILE -- COMMAND`. The former positional policy syntax has been removed.
 - Build, demo, and test scripts support Windows PowerShell 5.1 and PowerShell 7. CTest prefers PowerShell 7.
 - `run.ps1` writes UTF-8 policy files without a BOM and preserves quotes and empty arguments when calling native programs from older PowerShell versions.
 

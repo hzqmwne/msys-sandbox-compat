@@ -17,6 +17,7 @@
 - shim 用 `--` 分隔原生命令，支持透明标准流和独立诊断文件。日志默认关闭。
 - shim 和 `psec-run.exe` 支持 `-h` 与 `--help`。shim 另支持 `--version`。
 - 独立 `psec-run.exe` 支持原生 PSEC 1.0 和 1.1，以及 MXC 形状的文件、枚举和直接网络策略字段。
+- `psec-run.exe` 统一使用 `--policy=FILE -- COMMAND`。旧的位置参数形式已删除。
 - 构建、演示和测试脚本支持 Windows PowerShell 5.1 和 PowerShell 7。CTest 优先选 PowerShell 7。
 - `run.ps1` 写入无 BOM 的 UTF-8 策略文件，并在旧版 PowerShell 调用原生程序时保留引号和空参数。
 

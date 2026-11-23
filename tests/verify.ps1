@@ -18,7 +18,7 @@ $supervisor=Join-Path $BinaryDirectory 'msys-sandbox-compat.exe'
 $results=[System.Collections.Generic.List[object]]::new()
 function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$Expected=0,
                      [string]$Match='',[switch]$CheckHeapHandoff) {
-    $launchArgs=@($policy,$supervisor)
+    $launchArgs=@("--policy=$policy",'--',$supervisor)
     if($CheckHeapHandoff){$launchArgs+='--trace'}
     $launchArgs+=@('--runtime',(Join-Path $GitRoot 'usr\bin\msys-2.0.dll'),$Program) + $Arguments
     $start=New-TestProcessInfo $launcher $launchArgs $state

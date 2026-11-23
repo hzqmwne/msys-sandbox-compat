@@ -1,7 +1,5 @@
 # 使用说明
 
-[English](../getting-started.md)
-
 ## 构建
 
 在 Windows AMD64 上，用 Windows PowerShell 5 或 PowerShell 7 运行构建脚本。构建需要 Visual Studio C++ AMD64 工具和 Windows SDK。
@@ -46,7 +44,9 @@ msys-sandbox-compat-shim.exe -h | --help
 msys-sandbox-compat-shim.exe --version
 ```
 
-`psec-run.exe` 是独立的 PSEC 验证工具。它接受 MXC 形状的文件、枚举和直接网络规则，按要求选择原生 PSEC 1.0 或 1.1。原有位置参数形式也可使用。shim 可用普通令牌或在既有受限上下文中调用。`--` 后的原生命令行交给目标，显式路径按当前目录解析，裸命令名使用 Windows 原生搜索。
+`psec-run.exe` 根据包含 MXC 风格的文件、枚举和直接网络规则的策略，创建原生 PSEC 1.0 或 1.1 环境。用 `--policy=FILE` 指定策略，把目标命令放在 `--` 后。相对可执行文件路径按工作目录解析，裸命令名使用 Windows 可执行文件搜索。
+
+shim 可用普通令牌或在既有受限上下文中调用。`--` 后的原生命令行交给目标，相对路径按工作目录解析，裸命令名使用 Windows 可执行文件搜索。
 
 shim 的 `--log-level=off|error|warning|info|trace` 默认是 `off`。启用后默认写 stderr，`--log-file=FILE` 将诊断追加到独立文件。`info` 提供启动和退出摘要，`trace` 还包括模块、子进程和映射诊断。见[DLL 映射范围](design.md#dll-映射范围)。
 

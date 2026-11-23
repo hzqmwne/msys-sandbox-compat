@@ -22,7 +22,7 @@ $probe = Join-Path $fixtures 'conpty-resize-probe.exe'
 foreach ($mode in 'adaptive', 'fixed', 'auto-fixed', 'disabled') {
     $fixedSize = $mode -in 'fixed', 'auto-fixed'
     $driverMode = if ($fixedSize) { '--drive-fixed' } else { '--drive' }
-    $processArgs = @($driverMode, $launcher, $policy, $compat)
+    $processArgs = @($driverMode, $launcher, "--policy=$policy", '--', $compat)
     if ($mode -in 'adaptive', 'fixed') { $processArgs += '--conpty' }
     if ($mode -eq 'disabled') { $processArgs += '--no-conpty' }
     if ($mode -ne 'adaptive') { $processArgs += @('--conpty-size', '80x24') }

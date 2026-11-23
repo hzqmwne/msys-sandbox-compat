@@ -20,7 +20,7 @@ $launcher = Get-PsecLauncher $binaries
 $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
 $shim = Join-Path $binaries 'msys-sandbox-compat-shim.exe'
 $info = New-TestProcessInfo $probe @('--drive-terminal',$probe,'--outer-state',
-    $launcher,$policy,$shim,'--terminal=conpty','--',$probe,'--screen-probe') $state
+    $launcher,"--policy=$policy",'--',$shim,'--terminal=conpty','--',$probe,'--screen-probe') $state
 $result = Invoke-TestProcess $info 30000
 Save-TestOutput $result $report 'screen'
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
@@ -30,7 +30,7 @@ Write-Output 'TERMINAL-SCREEN-PASS: preserved outer content, inherited cursor, E
 
 $missing = Join-Path $state 'missing-program.exe'
 $info = New-TestProcessInfo $probe @('--drive-terminal',$probe,'--outer-failure',
-    $launcher,$policy,$compat,'--conpty',$missing) $state
+    $launcher,"--policy=$policy",'--',$compat,'--conpty',$missing) $state
 $result = Invoke-TestProcess $info 30000
 Save-TestOutput $result $report 'launch-failure'
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
@@ -38,7 +38,7 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
 }
 Write-Output 'TERMINAL-FAILURE-PASS: outer console state restored after target launch failed'
 
-$info = New-TestProcessInfo $probe @('--drive-close',$launcher,$policy,$compat,'--conpty',
+$info = New-TestProcessInfo $probe @('--drive-close',$launcher,"--policy=$policy",'--',$compat,'--conpty',
     $probe,'--close-target') $state
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'outer-close'

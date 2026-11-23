@@ -29,7 +29,7 @@ if ($Environment -eq 'Psec') {
     Write-TestJson $policy @{filesystem = @{readonlyPaths = @($env:SystemRoot, $GitRoot, $binaries);
         readwritePaths = @($state); deniedPaths = @($denied)}}
     $launcher = Get-PsecLauncher $binaries
-    $prefix = @($policy)
+    $prefix = @("--policy=$policy",'--')
     $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
     $hooks = Join-Path $state 'hooks'
     New-Item -ItemType Directory $hooks,(Join-Path $state 'tmp'),(Join-Path $state 'home') | Out-Null

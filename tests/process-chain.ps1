@@ -31,7 +31,7 @@ $bash = Join-Path $GitRoot 'usr\bin\bash.exe'
 $runtime = Join-Path $GitRoot 'usr\bin\msys-2.0.dll'
 [string[]]$prefix = if ($restricted) {
     @($(if ($Environment -eq 'WriteRestricted') {'write'} else {'full'}),$state)
-} else { @($policy) }
+} else { @("--policy=$policy",'--') }
 function Shell-Command([object[]]$Arguments) {
     return (($Arguments | ForEach-Object { "'" + ([string]$_).Replace("'","'\''") + "'" }) -join ' ')
 }

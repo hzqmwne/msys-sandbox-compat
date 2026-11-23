@@ -42,6 +42,25 @@ $psec = Get-PsecLauncher $BinaryDirectory
 $policy = Join-Path $state 'policy.json'
 $log = Join-Path $state ('trace-' + [guid]::NewGuid().ToString('N') + '.log')
 Write-TestJson $policy @{filesystem=@{readonlyPaths=@($env:SystemRoot,$GitRoot,$fixtures);readwritePaths=@($state)}}
+foreach ($option in '-h','--help') {
+    $result = Invoke-TestProcess (New-TestProcessInfo $psec @($option) $state)
+    if ($result.ExitCode -ne 0 -or $result.Error -or $result.Output -notmatch '--policy=FILE' -or
+        $result.Output -match 'POLICY\.json') {
+        throw "Expected only the current psec-run syntax in $option output"
+    }
+}
+foreach ($policyArg in $policy,"--policy=$policy") {
+    $result = Invoke-TestProcess (New-TestProcessInfo $psec @($policyArg,'cmd','/d','/c','exit 37') $state)
+    if ($result.ExitCode -ne 2 -or $result.Output -or $result.Error -notmatch 'Usage: psec-run') {
+        throw 'psec-run must require both --policy=FILE and the command separator'
+    }
+}
+$info = New-TestProcessInfo $psec @() $state
+$info.Arguments = (ConvertTo-WindowsCommandLine @("--policy=$policy",'--')) + ' cmd /d /c "exit 37"'
+$result = Invoke-TestProcess $info
+if ($result.ExitCode -ne 37 -or $result.Output -or $result.Error -match '\[PSEC error\]') {
+    throw 'psec-run must resolve a bare command and preserve its command tail and exit code'
+}
 $bash = Join-Path $GitRoot 'usr/bin/bash.exe'
 $bridge = Join-Path $fixtures 'native-bridge.exe'
 $work = 'echo STDOUT-MARKER; echo STDERR-MARKER >&2; (echo FORK-MARKER); exit 37'
