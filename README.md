@@ -31,7 +31,7 @@ hook 位于 ntdll 入口，采用 MinHook 的 HDE64 与适配的指令搬迁核�
 
 生产部署只需同目录的 `msys-sandbox-compat.exe` 和 `msys-sandbox-compat.dll`，放在原策略允许读取/执行的位置。在程序路径前加 `--no-native-relay` 可关闭原生中间进程传播。终端桥默认按标准句柄自动选择，也可用 `--conpty` 或 `--no-conpty` 指定。完整参数见 [使用说明](docs/getting-started.md)。
 
-本地演示从允许创建 PSEC 的 PowerShell 7 运行：
+本地演示可从允许创建 PSEC 的 Windows PowerShell 5.1 或 PowerShell 7 运行。
 
 ```powershell
 .\build.ps1 -Tools

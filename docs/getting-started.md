@@ -15,7 +15,9 @@ CMake 缓存、中间文件和二进制都在 `build`，不需要复制历史构
 
 ## 示例入口
 
-先执行 `build.ps1 -Tools`，然后用 PowerShell 7 运行 `run.ps1`。演示每次创建独立的 PSEC 策略文件，将 Windows 与所选 Git 根目录设为只读，项目根目录设为可写，进程工作目录继承调用者，并明确拒绝测试 canary。HOME、临时文件和运行状态位于 `unused/runtime`。
+先执行 `build.ps1 -Tools`，然后用 Windows PowerShell 5.1 或 PowerShell 7 运行 `run.ps1`。演示每次创建独立的 PSEC 策略文件，将 Windows 与所选 Git 根目录设为只读，项目根目录设为可写，进程工作目录继承调用者，并明确拒绝测试 canary。HOME、临时文件和运行状态位于 `unused/runtime`。
+
+Windows PowerShell 5.1 和 PowerShell 7.0–7.2 下，演示程序直接继承调用进程的标准句柄。用 PowerShell 脚本管道捕获 `run.ps1` 的输出时，使用 PowerShell 7.3 或更新版本。
 
 ```powershell
 .\run.ps1 -GitRoot 'C:\Program Files\Git'

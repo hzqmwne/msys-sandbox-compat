@@ -48,7 +48,7 @@ $policy = @{ filesystem = @{
 $policyPath = Join-Path $state ('policy-' + [Guid]::NewGuid().ToString('N') + '.json')
 $previousTemp=$env:TEMP; $previousTmp=$env:TMP; $previousHome=$env:HOME
 try {
-    $policy | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8NoBOM -LiteralPath $policyPath
+    [IO.File]::WriteAllText($policyPath, ($policy | ConvertTo-Json -Depth 4))
     $env:TEMP=Join-Path $state 'tmp'; $env:TMP=$env:TEMP; $env:HOME=Join-Path $state 'home'
     $launchArgs=@($policyPath)
     if (!$Raw) {
@@ -67,8 +67,28 @@ try {
     }
     $launchArgs += $Program
     $launchArgs += $CommandArguments
-    & (Join-Path (Split-Path $BinaryDirectory -Parent) 'tools/psec-run.exe') @launchArgs
-    $result=$LASTEXITCODE
+    $launcher = Join-Path (Split-Path $BinaryDirectory -Parent) 'tools/psec-run.exe'
+    if ($PSVersionTable.PSVersion -lt [version]'7.3') {
+        # Pass a Win32 command line without the legacy native binder reinterpreting it.
+        $startInfo = [Diagnostics.ProcessStartInfo]::new($launcher)
+        $startInfo.UseShellExecute = $false
+        $startInfo.WorkingDirectory = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
+        $startInfo.Arguments = ($launchArgs | ForEach-Object {
+            $escaped = [string]$_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)\z', '$1$1'
+            '"' + $escaped + '"'
+        }) -join ' '
+        $process = [Diagnostics.Process]::Start($startInfo)
+        try {
+            $process.WaitForExit()
+            $result = $process.ExitCode
+        } finally {
+            $process.Dispose()
+        }
+    } else {
+        $PSNativeCommandArgumentPassing = 'Standard'
+        & $launcher @launchArgs
+        $result = $LASTEXITCODE
+    }
 } finally {
     $env:TEMP=$previousTemp; $env:TMP=$previousTmp; $env:HOME=$previousHome
     Remove-Item -LiteralPath $policyPath -ErrorAction SilentlyContinue

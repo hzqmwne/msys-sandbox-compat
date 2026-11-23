@@ -64,6 +64,23 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('DEMO-CTRL-C-PASS') -or
 Write-Output 'TERMINAL-BASH-PASS: no idle mouse tracking, demo PATH, arrow-key editing, size, screen and Ctrl+C survival'
 
 $winPS = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
+$inputScript = Join-Path $state 'powershell51-input.txt'
+[IO.File]::WriteAllText($inputScript, '')
+$legacyDemo = @'
+$bash = 'test "$#" = 3 && test "$1" = ''x" y'' && test -z "$2" && test "$3" = ''C:\with space\'' && echo PS51-DEMO-PASS && exit 37; exit 42'
+& $env:MSC_DEMO_SCRIPT -BinaryDirectory $env:MSC_DEMO_BIN -ConPtyScript $env:MSC_DEMO_INPUT -CommandArguments @('--noprofile','--norc','-c',$bash,'bash','x" y','','C:\with space\')
+exit $LASTEXITCODE
+'@
+$encodedDemo = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($legacyDemo))
+$info = New-TestProcessInfo $winPS @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand',$encodedDemo) $state
+$info.Environment['MSC_DEMO_SCRIPT'] = Join-Path $root 'run.ps1'
+$info.Environment['MSC_DEMO_BIN'] = $binaries
+$info.Environment['MSC_DEMO_INPUT'] = $inputScript
+$result = Invoke-TestProcess $info 35000
+Save-TestOutput $result $report 'powershell51-launch'
+if ($result.ExitCode -ne 37 -or !$result.Output.Contains('PS51-DEMO-PASS')) {
+    throw "Bash demo via Windows PowerShell 5.1 failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
+}
 $command = @'
 Write-Host 'DEMO-PS-READY'
 $line = [Console]::ReadLine()
