@@ -72,9 +72,6 @@ class SessionStdio {
     }
 
     std::wstring prepare(const StandardHandles &stdio, const ConsoleStreams &console) {
-        if (std::all_of(console.begin(), console.end(), [](bool stream) { return stream; }))
-            return {};
-
         StandardHandles forwarded{};
         std::wstring arguments = std::wstring(L" ") + session_stdio_option;
         for (size_t i = 0; i < stdio.size(); ++i) {

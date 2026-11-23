@@ -131,7 +131,8 @@ $info = New-TestProcessInfo $launcher @($policy, $compat, '--conpty-script', $in
     $probe, '--conpty-read-one') $state
 $result = Invoke-TestProcess $info 30000
 Save-TestOutput $result $report 'conpty-script'
-if ($result.ExitCode -ne 37 -or !$result.Output.Contains('CONPTY-INPUT-COMPLETE')) {
+if ($result.ExitCode -ne 37 -or !$result.Output.Contains('CONPTY-INPUT-COMPLETE') -or
+    [regex]::Matches(($result.Output + $result.Error), '\[summary\] exit=37').Count -ne 1) {
     throw "ConPTY script input did not let the target finish (exit $($result.ExitCode))`n$($result.Error)"
 }
 Write-Output 'CONPTY-SCRIPT-PASS: target consumes finite input and returns its exit code'
@@ -165,7 +166,7 @@ foreach ($case in '111','011','101','110','100','010','001','000','111-direct','
     if ($result.ExitCode -ne 37 -or $result.Output.Contains('STDIO-TERMINAL') -ne $expectBridge -or
         $result.Output.Contains('STDIO-OUT') -ne ($mask[1] -eq '1') -or
         $result.Output.Contains('STDIO-ERR') -ne ($mask[2] -eq '1') -or
-        ($mask[2] -eq '0' -and $result.Output.Contains('[summary]'))) {
+        [regex]::Matches($result.Output, '\[summary\]').Count -ne [int]($mask[2] -eq '1')) {
         throw "Mixed $case terminal routing failed (exit $($result.ExitCode))`n$($result.Output)`n$($result.Error)"
     }
     if ($case -eq '101-pipe') {

@@ -193,8 +193,8 @@ int wmain(int argc, wchar_t **argv) try {
         // recycled handle values from KernelBase's console state.
         executable = own_path();
         auto session_command = quote(executable.wstring());
-        if (auto_conpty)
-            session_command += session_stdio.prepare(stdio, console);
+        session_command += session_stdio.prepare(
+            stdio, auto_conpty ? console : ConsoleStreams{true, true, true});
         session_command += L" --no-conpty";
         session_command += native_relay ? L" --native-relay" : L" --no-native-relay";
         if (trace)
@@ -299,7 +299,8 @@ int wmain(int argc, wchar_t **argv) try {
         check(GetExitCodeProcess(child.hProcess, &result), "root exit code");
         pty.close();
         check_conpty_output();
-        fprintf(host_stderr(), "[summary] exit=%lu\n", result);
+        if (!session_owner)
+            fprintf(host_stderr(), "[summary] exit=%lu\n", result);
         CloseHandle(child.hProcess);
         return static_cast<int>(result);
     } catch (...) {

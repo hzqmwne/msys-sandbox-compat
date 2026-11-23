@@ -30,7 +30,7 @@ Windows PowerShell 5.1 和 PowerShell 7.0–7.2 下，演示程序直接继承�
 
 默认目标是 Git 的 `usr/bin/bash.exe`。不要将 Git 根目录或 `bin` 中的外层 Bash 壳启动器当作真实 MSYS 目标。
 
-`run.ps1 -ConPty` 的默认 Bash 入口初始化 `/usr/bin:/bin`、`TERM=xterm-256color` 和 UTF-8 locale，然后启动交互 Bash。显式传入 `-CommandArguments` 时使用调用者的参数。其他 `-Program` 使用其自身默认参数。其他构建目录可通过 `-BinaryDirectory` 指定该构建的 `bin` 目录。
+`run.ps1` 默认用 Bash 执行一次启动、fork 和 `uname` 检查，随后退出。它仍按标准句柄自动选择是否启用 ConPTY。`run.ps1 -ConPty` 显式启用 ConPTY，默认 Bash 入口初始化 `/usr/bin:/bin`、`TERM=xterm-256color` 和 UTF-8 locale，然后进入交互会话。显式传入 `-CommandArguments` 时使用调用者的参数。其他 `-Program` 使用其自身默认参数。其他构建目录可通过 `-BinaryDirectory` 指定该构建的 `bin` 目录。
 
 通过 `-Program` 启动交互式 `powershell.exe` 或 `pwsh.exe`，且参数仅含 `-NoProfile`、`-NoLogo`、`-NoExit` 时，演示入口在首次交互读取前将 PSReadLine 历史配置到 `unused/runtime/powershell-history`，实际保存会话命令。含显式 `-Command`、`-File` 等参数的调用沿用其自定义初始化。默认用户历史文件仍受 PSEC 文件策略约束。
 
