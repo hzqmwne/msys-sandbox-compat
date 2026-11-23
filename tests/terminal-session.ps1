@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$BinaryDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'build/bin'),
     [string]$EvidenceDirectory = ''
 )
@@ -60,8 +60,9 @@ if ($result.Output.Contains('Cannot query console owner') -or
     $result.Error.Contains('Cannot query console owner')) {
     throw "Bash could not open its console owner for synchronization. See $report/bash-demo.*.txt"
 }
+$edited = 'EDITED={0}{1}Xb' -f [char]0x4E2D, [char]0x6587
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('DEMO-CTRL-C-PASS') -or
-    !$result.Output.Contains('OUTER-STATE-PASS') -or !$result.Output.Contains('EDITED=中文Xb')) {
+    !$result.Output.Contains('OUTER-STATE-PASS') -or !$result.Output.Contains($edited)) {
     throw "Bash demo failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
 Write-Output 'TERMINAL-BASH-PASS: no idle mouse tracking, demo PATH, arrow-key editing, size, screen and Ctrl+C survival'
@@ -87,22 +88,21 @@ if ($result.ExitCode -ne 37 -or !$result.Output.Contains('PS51-DEMO-PASS')) {
 $command = @'
 Write-Host 'DEMO-PS-READY'
 $line = [Console]::ReadLine()
-if ($line -cne '中文-é-Ａ') { exit 84 }
+$sample = '{0}{1}-{2}-{3}' -f [char]0x4E2D, [char]0x6587, [char]0x00E9, [char]0xFF21
+if ($line -cne $sample) { exit 84 }
 [Console]::WriteLine('SCREEN-' + $line)
-[Console]::Write("CURSOR-NO`e[2DOK`r`n")
+[Console]::Write("CURSOR-NO$([char]27)[2DOK`r`n")
 exit 0
 '@
-# Windows PowerShell 5.1 has no backtick-e escape.
-$command = $command.Replace('`e', [string][char]27)
-$entry = Join-Path $state 'powershell-demo.ps1'
 $rootQuoted = $root.Replace("'", "''")
 $programQuoted = $winPS.Replace("'", "''")
 $binaryQuoted = $binaries.Replace("'", "''")
-$scriptEncoding = [Text.UTF8Encoding]::new($true)
-[IO.File]::WriteAllLines($entry, [string[]]@(
+$entry = @(
     '$command = @''', $command, '''@',
-    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-Command',`$command)"), $scriptEncoding)
-$info = New-TestProcessInfo $probe (@('--drive-powershell',$probe,$outerCheck) + $shellArgs + @('-File',$entry)) $state
+    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-Command',`$command)",
+    'exit $LASTEXITCODE') -join "`r`n"
+$encodedEntry = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($entry))
+$info = New-TestProcessInfo $probe (@('--drive-powershell',$probe,$outerCheck) + $shellArgs + @('-EncodedCommand',$encodedEntry)) $state
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'powershell-demo'
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
@@ -111,16 +111,15 @@ if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
 Write-Output 'TERMINAL-POWERSHELL-PASS: real console Unicode input/output and rendered screen'
 
 # Run the same interactive PSReadLine entry used during manual acceptance.
-$entry = Join-Path $state 'readline-demo.ps1'
-[IO.File]::WriteAllText($entry,
-    "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-NoLogo')", $scriptEncoding)
-$info = New-TestProcessInfo $probe (@('--drive-readline',$probe,$outerCheck) + $shellArgs + @('-File',$entry)) $state
+$entry = "& '$rootQuoted/run.ps1' -ConPty -BinaryDirectory '$binaryQuoted' -Program '$programQuoted' -CommandArguments @('-NoProfile','-NoLogo'); exit `$LASTEXITCODE"
+$encodedEntry = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($entry))
+$info = New-TestProcessInfo $probe (@('--drive-readline',$probe,$outerCheck) + $shellArgs + @('-EncodedCommand',$encodedEntry)) $state
 $result = Invoke-TestProcess $info 35000
 Save-TestOutput $result $report 'readline-demo'
 $history = Join-Path $root 'unused/runtime/powershell-history/powershell_history.txt'
 $marker = [regex]::Match($result.Output, 'HISTORY-CHECK-\d+').Value
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS') -or
-    $result.Output.Contains('ConsoleHost_history.txt') -or $result.Output.Contains('ưm') -or
+    $result.Output.Contains('ConsoleHost_history.txt') -or $result.Output.Contains("$([char]0x01B0)m") -or
     !$marker -or !(Test-Path -LiteralPath $history) -or
     ![IO.File]::ReadAllText($history).Contains($marker)) {
     throw "Interactive PSReadLine history failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"

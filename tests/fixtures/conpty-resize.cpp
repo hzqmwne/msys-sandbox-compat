@@ -106,7 +106,7 @@ static int screen_probe() {
               "read standalone Escape");
     } while (key.EventType != KEY_EVENT || !key.Event.KeyEvent.bKeyDown);
     check(key.Event.KeyEvent.wVirtualKeyCode == VK_ESCAPE, "target received standalone Escape");
-    constexpr wchar_t text[] = L"SCREEN-中文-é-Ａ\r\n";
+    constexpr wchar_t text[] = L"SCREEN-\u4E2D\u6587-\u00E9-\uFF21\r\n";
     check(WriteConsoleW(output, text, _countof(text) - 1, &count, nullptr), "write Unicode screen");
     DWORD mode = 0;
     check(GetConsoleMode(output, &mode) &&
@@ -179,7 +179,7 @@ static int outer_state(int argc, wchar_t **argv, bool failure, bool check_modes)
     check(ReadConsoleOutputCharacterW(output, screen.data(), static_cast<DWORD>(screen.size()),
                                       {0, 0}, &count),
           "read rendered outer screen");
-    check(screen.find(L"SCREEN-中文-é-Ａ") != std::wstring::npos, "render Unicode screen");
+    check(screen.find(L"SCREEN-\u4E2D\u6587-\u00E9-\uFF21") != std::wstring::npos, "render Unicode screen");
     check(screen.find(L"CURSOR-OK") != std::wstring::npos, "render cursor movement");
     puts("OUTER-STATE-PASS");
     return 0;
@@ -356,12 +356,12 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
             transcript.find("DEMO-READY> ", demo_input) != std::string::npos) {
             check(!mouse_tracking(), "idle Bash prompt enabled all-motion mouse tracking");
             // Move left inside a quoted argument, insert X, then execute the edited line.
-            send_text("printf 'EDITED=%s\\n' '中文b\x1b[DX\x1b[C'\r");
+            send_text("printf 'EDITED=%s\\n' '\u4E2D\u6587b\x1b[DX\x1b[C'\r");
             edit_sent = true;
         }
-        if (bash && !wait_sent && transcript.find("EDITED=中文Xb") != std::string::npos) {
+        if (bash && !wait_sent && transcript.find("EDITED=\u4E2D\u6587Xb") != std::string::npos) {
             send_text(
-                "printf 'SCREEN-中文-é-Ａ\\n'; printf 'CURSOR-NO\\033[2DOK\\n'; "
+                "printf 'SCREEN-\u4E2D\u6587-\u00E9-\uFF21\\n'; printf 'CURSOR-NO\\033[2DOK\\n'; "
                 "test \"$(stty size)\" = '28 96' || exit 82; "
                 "perl -e '$SIG{INT}=sub {exit 130}; $|=1; print \"CONTROL-READY\\n\"; sleep 30'\r");
             wait_sent = true;
@@ -374,14 +374,14 @@ static int drive(int argc, wchar_t **argv, std::wstring_view mode) {
         }
         if (powershell && !initialized &&
             transcript.find("DEMO-PS-READY\r\n") != std::string::npos) {
-            send_text("中文-é-Ａ\r");
+            send_text("\u4E2D\u6587-\u00E9-\uFF21\r");
             initialized = true;
         }
         if (readline && !initialized && transcript.find("PS ") != std::string::npos &&
             transcript.find("> ") != std::string::npos) {
             const auto command_text =
                 "Write-Host 'HISTORY-CHECK-" + std::to_string(GetTickCount64()) +
-                "'; Write-Host 'SCREEN-中文-é-Ａ'; [Console]::Write(\"CURSOR-NO\" + "
+                "'; Write-Host 'SCREEN-\u4E2D\u6587-\u00E9-\uFF21'; [Console]::Write(\"CURSOR-NO\" + "
                 "[char]27 + \"[2DOK\" + [Environment]::NewLine); exit 0\r";
             send_text(command_text.c_str());
             initialized = true;

@@ -1,4 +1,4 @@
-﻿param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
+param([string]$GitRoot='C:\Program Files\Git',[string]$EvidenceDirectory='',
       [string]$BinaryDirectory=(Join-Path (Split-Path $PSScriptRoot -Parent) 'build\bin'),
       [ValidateSet('Psec','WriteRestricted','FullRestricted','Existing')][string]$Environment='Psec',
       [switch]$NativeRelay,
@@ -78,8 +78,9 @@ $terminalWritePath=$null
 try {
     $t.Send("export PS1='MSYS-SANDBOX-COMPAT> '; export PATH=/usr/bin:/bin; /usr/bin/stty -echo; printf '\nREADY-INPUT\n'`r")
     $t.Await("READY-INPUT`r`n")
-    $t.Send('export LC_ALL=C.UTF-8; printf "CONPTY-UNICODE-%s\n" "中文-é-Ａ"'+"`r")
-    $t.Await("CONPTY-UNICODE-中文-é-Ａ`r`n")
+    $unicodeSample = '{0}{1}-{2}-{3}' -f [char]0x4E2D, [char]0x6587, [char]0x00E9, [char]0xFF21
+    $t.Send(('export LC_ALL=C.UTF-8; printf "CONPTY-UNICODE-%s\n" "{0}"' -f $unicodeSample)+"`r")
+    $t.Await("CONPTY-UNICODE-$unicodeSample`r`n")
     if($restricted -or $existing){
         $fork=(Join-Path $(if($restricted){$BinaryDirectory}else{(Join-Path $PSScriptRoot 'fixtures')}) 'fork.pl').Replace('\','/').Replace("'","'\''")
         $workload=''
