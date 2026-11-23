@@ -28,6 +28,7 @@
 
 - 自动 ConPTY 逐路保留文件、管道和 `NUL` 重定向。有可用的外层控制台且至少一路接着控制台时启用桥，以兼容 Low IL 目标读屏幕和写输入事件。见 [ADR-0014](docs/decisions/0014-conpty-preserve-redirected-stdio.md)。
 - 修正控制台方向的 UTF-8 代码页与 VT 模式，并在输出排空和启动失败后恢复外层状态。
+- 内层 ConPTY 继承可用的外层控制台光标位置，保留启动前已显示的内容。
 - 兼容宿主和 PSEC 演示工具的等待进程处理 Ctrl+C 通知，保留前台应用自己的中断处理。
 - MSYS 冷启动设置当前进程对象的 DACL 时沿用现有 ACL 转换规则，使新运行时能检查控制台所有者是否存活。
 - 演示入口为默认交互 Bash 初始化 GNU 工具 PATH、TERM 和 UTF-8 locale。

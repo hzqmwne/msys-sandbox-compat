@@ -18,14 +18,15 @@ Write-TestJson $policy @{filesystem = @{readonlyPaths = @($env:SystemRoot, $bina
 $probe = Join-Path $fixtures 'conpty-resize-probe.exe'
 $launcher = Get-PsecLauncher $binaries
 $compat = Join-Path $binaries 'msys-sandbox-compat.exe'
+$shim = Join-Path $binaries 'msys-sandbox-compat-shim.exe'
 $info = New-TestProcessInfo $probe @('--drive-terminal',$probe,'--outer-state',
-    $launcher,$policy,$compat,'--conpty',$probe,'--screen-probe') $state
+    $launcher,$policy,$shim,'--terminal=conpty','--',$probe,'--screen-probe') $state
 $result = Invoke-TestProcess $info 30000
 Save-TestOutput $result $report 'screen'
 if ($result.ExitCode -ne 0 -or !$result.Output.Contains('OUTER-STATE-PASS')) {
     throw "Nested terminal rendering/state test failed ($($result.ExitCode))`n$($result.Output)`n$($result.Error)"
 }
-Write-Output 'TERMINAL-SCREEN-PASS: standalone Escape, Unicode, cursor movement, native mouse events and restored console state'
+Write-Output 'TERMINAL-SCREEN-PASS: preserved outer content, inherited cursor, Escape, Unicode, cursor movement, mouse and restored console state'
 
 $missing = Join-Path $state 'missing-program.exe'
 $info = New-TestProcessInfo $probe @('--drive-terminal',$probe,'--outer-failure',

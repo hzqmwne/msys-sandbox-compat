@@ -31,6 +31,7 @@ ConPTY 桥用于兼容 Low IL 客户端连接外层 Medium IL conhost 时受限�
 - 启动目标时逐路选句柄。原本指向控制台的标准流使用内层控制台句柄，文件、管道和 `NUL` 保留调用方已打开的句柄及访问权。保留 `2>&1` 的共享输出目标、原字节和 EOF。重定向流不经过 VT 转码或中间转发。
 - 桥从外层控制台读取键盘输入，将内层渲染写到外层控制台。必要时使用外层 `CONIN$` 和 `CONOUT$`，独立于重定向的 stdin、stdout、stderr。只剩 stderr 接着控制台时，这对端点仍要支持 `/dev/tty` 读写。只剩 stdin 时，键盘回显或 `/dev/tty` 的绘制仍可出现在屏幕上。
 - 保留原生会话宿主的控制台句柄所有权。先让 Windows 为会话宿主建立内层控制台标准句柄，通过显式继承列表另外传递需要直通的句柄，再由会话宿主为实际目标设置三路标准句柄。直通副本在交给目标后关闭，避免额外持有管道写端。ConPTY 的会话输出已合并，句柄去向在创建目标时确定。 [Win32 继承列表](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute) · [ConPTY 接口](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
+- 外层控制台光标可在内层尺寸内表示时，以 `PSEUDOCONSOLE_INHERIT_CURSOR` 创建内层。输出线程用外层视口内的坐标应答一次启动查询，保留已有画面，也适用于标准输入重定向。外层输出是管道时沿用独立 VT 会话的初始画面。应用自己的清屏及退出尾段照常转发。 [ConPTY 光标继承](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
 
 ## 验证范围
 

@@ -4,9 +4,12 @@
 #include <windows.h>
 #include <winternl.h>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <stdexcept>
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <atomic>
 #include <climits>
 
@@ -18,10 +21,7 @@ class Pseudoconsole {
     HANDLE resize_stop = nullptr;
     std::atomic<DWORD> output_error_code{ERROR_SUCCESS};
 
-    static COORD viewport_size(HANDLE output) {
-        CONSOLE_SCREEN_BUFFER_INFO info{};
-        if (!GetConsoleScreenBufferInfo(output, &info))
-            return {};
+    static COORD viewport_size(const CONSOLE_SCREEN_BUFFER_INFO &info) {
         const auto width = info.srWindow.Right - info.srWindow.Left + 1;
         const auto height = info.srWindow.Bottom - info.srWindow.Top + 1;
         if (width <= 0 || width > SHRT_MAX || height <= 0 || height > SHRT_MAX)
@@ -71,9 +71,8 @@ class Pseudoconsole {
             if (!SetConsoleMode(input_source, mode) || !original_input_cp ||
                 !SetConsoleCP(CP_UTF8))
                 throw std::runtime_error("configure ConPTY terminal input");
-            if (follow_viewport)
-                viewport = viewport_size(output);
         }
+        COORD cursor{};
         if (GetConsoleMode(output, &original_output_mode)) {
             restore_output_mode = true;
             original_output_cp = GetConsoleOutputCP();
@@ -83,32 +82,77 @@ class Pseudoconsole {
                 !SetConsoleOutputCP(CP_UTF8))
                 throw std::runtime_error("configure ConPTY terminal output");
             SetConsoleMode(output, mode | DISABLE_NEWLINE_AUTO_RETURN);
+            CONSOLE_SCREEN_BUFFER_INFO info{};
+            if (GetConsoleScreenBufferInfo(output, &info)) {
+                if (follow_viewport && restore_input_mode)
+                    viewport = viewport_size(info);
+                const auto size = viewport.X ? viewport : dimensions;
+                const auto column = info.dwCursorPosition.X - info.srWindow.Left + 1;
+                const auto row = info.dwCursorPosition.Y - info.srWindow.Top + 1;
+                if (column > 0 && row > 0 && column <= size.X && row <= size.Y &&
+                    info.dwCursorPosition.X <= info.srWindow.Right &&
+                    info.dwCursorPosition.Y <= info.srWindow.Bottom)
+                    cursor = {static_cast<SHORT>(column), static_cast<SHORT>(row)};
+            }
         }
         if (viewport.X)
             dimensions = viewport;
         if (!CreatePipe(&input_read, &input_write, nullptr, 0) ||
             !CreatePipe(&output_read, &output_write, nullptr, 0))
             throw std::runtime_error("ConPTY pipes");
-        auto result = CreatePseudoConsole(dimensions, input_read, output_write, 0, &handle);
+        // A cursor-inheriting ConPTY can ask for a reply during startup.
+        reader = std::thread([this, completion, cursor] {
+            constexpr std::string_view request = "\x1b[6n";
+            char buffer[8192 + request.size() - 1];
+            bool awaiting_cursor = cursor.X != 0;
+            DWORD held = 0, count = 0;
+            bool forwarding = true;
+            const auto forward = [&](std::string_view bytes) {
+                if (forwarding && !msys_sandbox_compat::write_all(
+                                      output_sink, bytes.data(), static_cast<DWORD>(bytes.size()))) {
+                    output_error_code = GetLastError();
+                    PostQueuedCompletionStatus(completion, 0, output_failure_key, nullptr);
+                    // Keep draining while the session host tears down the job and ConPTY.
+                    forwarding = false;
+                }
+            };
+            while (ReadFile(output_read, buffer + held, 8192, &count, nullptr) && count) {
+                std::string_view bytes(buffer, held + count);
+                if (awaiting_cursor) {
+                    // Answer the startup cursor query on our own pipes. The outer console
+                    // supplies the position even when keyboard input is redirected.
+                    const auto match = bytes.find(request);
+                    if (match != std::string_view::npos) {
+                        char reply[16];
+                        const auto length = snprintf(reply, sizeof(reply), "\x1b[%d;%dR", cursor.Y,
+                                                     cursor.X);
+                        msys_sandbox_compat::write_all(input_write, reply, static_cast<DWORD>(length));
+                        forward(bytes.substr(0, match));
+                        bytes.remove_prefix(match + request.size());
+                        awaiting_cursor = false;
+                        held = 0;
+                    } else {
+                        // ReadFile can split the four-byte query across reads.
+                        held = static_cast<DWORD>(std::min(bytes.size(), request.size() - 1));
+                        while (held && bytes.substr(bytes.size() - held) != request.substr(0, held))
+                            --held;
+                        bytes.remove_suffix(held);
+                    }
+                }
+                forward(bytes);
+                if (held)
+                    memmove(buffer, bytes.data() + bytes.size(), held);
+            }
+            forward(std::string_view(buffer, held));
+        });
+        const auto flags = cursor.X ? PSEUDOCONSOLE_INHERIT_CURSOR : 0;
+        const auto result = CreatePseudoConsole(dimensions, input_read, output_write, flags, &handle);
         if (FAILED(result)) {
             char detail[64];
             snprintf(detail, sizeof(detail), "CreatePseudoConsole: HRESULT %08lx",
                      static_cast<ULONG>(result));
             throw std::runtime_error(detail);
         }
-        reader = std::thread([this, completion] {
-            char buffer[8192];
-            DWORD count = 0;
-            bool forwarding = true;
-            while (ReadFile(output_read, buffer, sizeof(buffer), &count, nullptr) && count) {
-                if (forwarding && !msys_sandbox_compat::write_all(output_sink, buffer, count)) {
-                    output_error_code = GetLastError();
-                    PostQueuedCompletionStatus(completion, 0, output_failure_key, nullptr);
-                    // Keep draining while the session host tears down the job and ConPTY.
-                    forwarding = false;
-                }
-            }
-        });
         writer = std::thread([this] {
             msys_sandbox_compat::ConptyInput terminal_input;
             char buffer[4096];
@@ -137,7 +181,10 @@ class Pseudoconsole {
             resizer = std::thread([this, output, viewport] {
                 auto applied = viewport;
                 while (WaitForSingleObject(resize_stop, 20) == WAIT_TIMEOUT && !stopping) {
-                    const auto current = viewport_size(output);
+                    CONSOLE_SCREEN_BUFFER_INFO info{};
+                    if (!GetConsoleScreenBufferInfo(output, &info))
+                        continue;
+                    const auto current = viewport_size(info);
                     if (current.X && (current.X != applied.X || current.Y != applied.Y) &&
                         SUCCEEDED(ResizePseudoConsole(handle, current)))
                         applied = current;
@@ -172,13 +219,14 @@ class Pseudoconsole {
         }
         if (owns_input)
             CloseHandle(input_source);
-        if (input_write)
-            CloseHandle(input_write);
         if (handle)
             ClosePseudoConsole(handle);
         connected();
         if (reader.joinable())
             reader.join();
+        // The reader can still answer the startup query while ConPTY closes.
+        if (input_write)
+            CloseHandle(input_write);
         if (restore_input_mode)
             SetConsoleMode(input_source, original_input_mode);
         if (restore_output_mode)

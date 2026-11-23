@@ -88,6 +88,10 @@ static void screen_mouse_probe() {
 }
 
 static int screen_probe() {
+    CONSOLE_SCREEN_BUFFER_INFO initial_screen{};
+    check(GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &initial_screen) &&
+              initial_screen.dwCursorPosition.X == 13 && initial_screen.dwCursorPosition.Y == 1,
+          "inherit outer cursor column and row");
     check(SetConsoleCtrlHandler(probe_control, TRUE), "target Ctrl+C handler");
     DWORD count = 0;
     const auto output = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -145,11 +149,31 @@ static int outer_state(int argc, wchar_t **argv, bool failure, bool check_modes)
     check(SetConsoleMode(output, out_mode) && SetConsoleCP(437) && SetConsoleOutputCP(437),
           "set outer initial state");
     check(SetConsoleCtrlHandler(wait_control, TRUE), "protect test owner from Ctrl+C");
+    const bool check_cursor = std::wstring_view(argv[argc - 1]) == L"--screen-probe";
+    if (check_cursor) {
+        constexpr wchar_t previous[] = L"OUTER-BEFORE\r\nOUTER-PROMPT>";
+        DWORD count = 0;
+        check(WriteConsoleW(output, previous, _countof(previous) - 1, &count, nullptr),
+              "write outer console content before launch");
+    }
     auto command = msys_sandbox_compat::quote(argv[2]);
     for (int i = 3; i < argc; ++i)
         command += L" " + msys_sandbox_compat::quote(argv[i]);
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
+    std::unique_ptr<void, decltype(&CloseHandle)> quiet_error(nullptr, CloseHandle);
+    if (check_cursor) {
+        // Keep the PSEC launcher's status line from moving the test cursor.
+        SECURITY_ATTRIBUTES inherit{sizeof(inherit), nullptr, TRUE};
+        const auto sink = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, &inherit,
+                                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        check(sink != INVALID_HANDLE_VALUE, "open quiet launcher stderr");
+        quiet_error.reset(sink);
+        startup.dwFlags = STARTF_USESTDHANDLES;
+        startup.hStdInput = input;
+        startup.hStdOutput = output;
+        startup.hStdError = sink;
+    }
     PROCESS_INFORMATION child{};
     check(CreateProcessW(argv[2], command.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr,
                          &startup, &child),
@@ -179,6 +203,10 @@ static int outer_state(int argc, wchar_t **argv, bool failure, bool check_modes)
     check(ReadConsoleOutputCharacterW(output, screen.data(), static_cast<DWORD>(screen.size()),
                                       {0, 0}, &count),
           "read rendered outer screen");
+    if (check_cursor)
+        check(screen.find(L"OUTER-BEFORE") != std::wstring::npos &&
+                  screen.find(L"OUTER-PROMPT>CONTROL-READY") != std::wstring::npos,
+              "keep outer content and continue writing at the inherited cursor");
     check(screen.find(L"SCREEN-\u4E2D\u6587-\u00E9-\uFF21") != std::wstring::npos, "render Unicode screen");
     check(screen.find(L"CURSOR-OK") != std::wstring::npos, "render cursor movement");
     puts("OUTER-STATE-PASS");
