@@ -1,6 +1,6 @@
 # 架构决策记录
 
-[English](../../decisions/README.md)
+[English](../../decisions/README.md) | 简体中文
 
 当前实现见 [design.md](../design.md)，已落地变更见 [CHANGELOG](../../../CHANGELOG.zh-CN.md)。这里记录代码无法充分说明、维护者可能重新追问的重要取舍。
 

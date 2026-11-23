@@ -1,6 +1,6 @@
 # Changelog
 
-[简体中文](CHANGELOG.zh-CN.md)
+English | [简体中文](CHANGELOG.zh-CN.md)
 
 The [compatibility matrix](docs/compatibility.md) records where the changes have been tested.
 

@@ -1,6 +1,6 @@
 # MSYS Sandbox Compat
 
-[简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md)
 
 Run MSYS2 and Git for Windows tools inside an existing Windows sandbox. The x64 shim helps unmodified Bash, Perl, and GNU tools run workloads that rely on `fork`, pipes, signals, and interactive terminals.
 

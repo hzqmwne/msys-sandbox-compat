@@ -1,6 +1,6 @@
 # MSYS Sandbox Compat
 
-[English](README.md)
+[English](README.md) | 简体中文
 
 在已有的 Windows 沙箱中运行 MSYS2 和 Git for Windows 工具。这个 x64 shim 帮助未修改的 Bash、Perl 和 GNU 工具运行依赖 `fork`、管道、信号和交互终端的工作负载。
 

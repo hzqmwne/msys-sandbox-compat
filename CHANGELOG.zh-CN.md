@@ -1,6 +1,6 @@
 # 变更记录
 
-[English](CHANGELOG.md)
+[English](CHANGELOG.md) | 简体中文
 
 [兼容矩阵](docs/zh-CN/compatibility.md)记录了实际验收的环境。
 

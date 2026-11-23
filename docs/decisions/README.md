@@ -1,6 +1,6 @@
 # Architecture decisions
 
-[简体中文](../zh-CN/decisions/README.md)
+English | [简体中文](../zh-CN/decisions/README.md)
 
 These records describe the decisions in effect at the time. For current behavior, see the [design](../design.md) and [changelog](../../CHANGELOG.md).
 

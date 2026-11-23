@@ -1,11 +1,12 @@
 # 文档索引
 
-[English](../README.md)
+[English](../README.md) | 简体中文
 
 | 文档 | 内容 |
 |---|---|
 | [使用说明](getting-started.md) | 构建、调用和配置 shim |
 | [兼容范围](compatibility.md) | 已验收配置和已知限制 |
+| [MXC ProcessContainer](mxc-compatibility.md) | 实测命令、上游技术对照与已知问题 |
 | [设计](design.md) | 映像布局、进程传播、对象访问与 ConPTY |
 | [测试说明](testing.md) | 回归套件、夹具和基线 |
 | [架构决策](decisions/README.md) | 重要设计的背景与取舍 |
