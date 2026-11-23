@@ -1,27 +1,26 @@
-# ADR-0013：默认启用原生创建 relay，覆盖混合位数启动链
+# ADR-0013 — Enable native relay by default and cover WoW64 intermediaries
+
+[简体中文](../zh-CN/decisions/0013-default-relay-with-wow64.md)
 
 Status: Accepted
-
 Date: 2026-11-23
 
-Partially supersedes: [ADR-0006](0006-opt-in-native-relay.md) 的默认值和位数范围。
+Updates the default and architecture scope in [ADR-0006](0006-opt-in-native-relay.md). [ADR-0016](0016-drop-relay-default-dacl-baseline.md) later removed default DACL comparison. [ADR-0018](0018-resolve-acl-context-in-each-process.md) removed token comparison and the WoW64 exception.
 
-Partially superseded by: [ADR-0016](0016-drop-relay-default-dacl-baseline.md) 移除默认 DACL 比较。
+## Context
 
-Partially superseded by: [ADR-0018](0018-resolve-acl-context-in-each-process.md) 移除父子 token 比较及 WoW64 特例。
+A native root or intermediary can be AMD64 or WoW64. Default propagation needs to cover chains that alternate between them and preserve the caller's suspend request.
 
-## 背景
+## Decision
 
-原生首进程或中间进程可能是 AMD64，也可能是 WoW64。默认自动传播需要覆盖两种位数交替的启动链，并保留调用者请求的挂起状态。
+Enable native relay by default. Turning off relay or the propagation module stops it. The inner ConPTY host inherits the outer settings. An explicitly nested shim reuses the existing relay.
 
-## 决定
+WoW64 uses the same AMD64 agent through the AMD64 process creation entry in its transition layer. Native processes install only the creation hook. Full MSYS runtime adaptation continues to apply to AMD64 MSYS images.
 
-默认启用原生 relay。用 `--no-native-relay` 关闭，或关闭整个 `propagation` 模块。ConPTY 内层宿主沿用外层选项。链内显式调用 compat 时复用继承的 relay。
+At this stage, token comparison across WoW64 accepted a difference only in the UAC virtualization bit confirmed by `TokenVirtualizationEnabled`. Other access flags, token fields, and restricted default DACLs were still compared.
 
-WoW64 的 AMD64 转换层调用原生进程创建入口，沿用同一份 AMD64 agent。原生进程只启用创建 hook。MSYS 运行时适配仍适用于 AMD64 MSYS 映像。
+## Validation
 
-对于涉及 WoW64 的父子令牌比较，只接受经 `TokenVirtualizationEnabled` 确认的 UAC 虚拟化启用位差异。其他访问标志、令牌字段及受限环境的默认 DACL 仍参与比较。
+Normal-token and native PSEC 1.0 tests passed Bash fork and exit status with a WoW64 root, AMD64-to-WoW64 re-entry, and alternating AMD64 and WoW64 processes. Both caller architectures retained their requested suspend state.
 
-## 验证
-
-普通令牌与原生 PSEC 1.0 下，WoW64 首进程、AMD64 经 WoW64 回入、WoW64 与 AMD64 交替三种链路均通过 Bash fork 和退出码检查。两种位数的调用者均保留请求的初始挂起状态。
+See the [command-line reference](../getting-started.md#native-relay) for the current flag.

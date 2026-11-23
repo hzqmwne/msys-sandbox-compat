@@ -1,25 +1,28 @@
-# ADR-0009：以 MinHook 核心搬迁 ntdll 入口，隔离后端接口
+# ADR-0009 — Use MinHook's relocation core for ntdll entry points
 
-状态：Accepted，2026-10-26。接续 [ADR-0008](0008-adapt-requested-object-acls.md) 的早期运行依赖约束。
+[简体中文](../zh-CN/decisions/0009-minhook-relocation-backend.md)
 
-## 背景
+Status: Accepted
+Date: 2026-10-26
 
-原安装器只接受 `mov r10,rcx; mov eax,imm32`，固定搬迁八字节。它未硬编码 syscall 编号，但仍依赖 ntdll 入口的特定机器码，无法处理其他合法前导及已有 inline hook。用户选择先以 MinHook 成熟的解码与搬迁核心解决当前 ntdll 入口，同时保留未来切换 Detours 的选择。
+Continues the early-runtime constraints in [ADR-0008](0008-adapt-requested-object-acls.md).
 
-## 决定
+## Context
 
-固定 MinHook v1.3.4，revision `c3fcafdc10146beb5919319d0683e44e3c30d537`。vendor 原样 HDE64 源码及相关头，基于其 `trampoline.c` 适配 AMD64 搬迁后端；不引入完整 hook 管理器、分配器和线程管理。保留完整 BSD 两条款许可及 HDE 版权，随安装包交付。
+The original installer relocated eight bytes starting with `mov r10,rcx; mov eax,imm32`. The syscall number could vary, but other valid prologues and existing inline hooks were unsupported. MinHook provided the decoder and relocation code needed for these cases.
 
-解码与搬迁后端只接收有界字节和逻辑地址，输出计划，不暴露 MinHook 类型或解引用远程地址。远程安装由调用方负责，CMake 集中选择后端；未来可替换为 Detours，进程传播逻辑沿用同一接口。宿主与 agent 按各自运行时约束分别编译。
+## Decision
 
-安装器只处理尚未恢复的新进程。失败由调用方终止目标，不提供恢复运行或入口回滚；成功路径恢复页面保护。这个生命周期约束使安装器无需承担通用在线 hook 管理器的复杂度。
+Vendor MinHook v1.3.4 at revision `c3fcafdc10146beb5919319d0683e44e3c30d537`. Keep HDE64 and headers as supplied and adapt the AMD64 parts of `trampoline.c`. Ship MinHook's BSD 2-Clause license and HDE notices. The runtime manager, allocator, and thread management code are outside this backend.
 
-每个子进程读取自身入口并保留已有 hook 的执行路径，不沿用父进程私有跳板地址，不自动深入第三方模块下补丁。现有 MSYS 与 native relay 的入口范围保持原有规则。
+The backend takes bounded source bytes and logical addresses and produces a plan. The caller installs it in the child. The interface exposes no MinHook types or remote pointer dereferences, and CMake selects the backend. Host and agent build it under their own constraints.
 
-agent 继续无 CRT 初始化、普通/延迟导入、TLS、全局构造、DllMain 或附加 DLL 依赖。没有新增动态库部署要求。
+The installer handles newly created, suspended processes. Preparation failure terminates the target. Successful writes restore page protections. Read each child's own entry bytes, preserve existing jump paths, and build its trampolines without reusing private parent addresses. The existing MSYS and native relay scopes continue to apply.
 
-## 后果
+The agent has no CRT initialization, normal or delay imports, TLS, global constructors, `DllMain`, or additional DLL dependencies.
 
-指令与缓冲边界、相对地址可达性及内部跳转正确性属于后端必要检查。不支持的输入明确失败；具体指令覆盖与上游适配差异集中在源码的 `third_party/minhook/README.md`。
+## Consequences
 
-已有 hook 的合成执行测试不等于特定安全产品的兼容承诺。验收入口见 [测试说明](../testing.md)，不将缓冲大小、内部字段及测试数量固化为架构约定。
+The backend checks decode and buffer limits, displacement reach, and internal branches. Unsupported input returns an error. Instruction coverage and upstream changes are documented in the source tree's `third_party/minhook/README.md`.
+
+Synthetic tests exercise chaining and execution. Compatibility with specific security software requires its own validation. [Testing](../testing.md)

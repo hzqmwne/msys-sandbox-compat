@@ -1,23 +1,26 @@
-# ADR-0001：挂起创建、按导入名识别与严格原生边界
+# ADR-0001 — Prepare suspended MSYS processes and identify them by import name
+
+[简体中文](../zh-CN/decisions/0001-suspended-msys-preparation.md)
 
 Status: Accepted
-Partially superseded by: ADR-0004 更新 token 默认 DACL 的处理，ADR-0006 增加显式原生 relay，[ADR-0012](0012-prefer-dll-image-base-at-map.md) 将 EXE 识别收窄到直接普通导入，[ADR-0015](0015-initialize-at-child-loader-entry.md) 将正式初始化移到子进程的加载器入口。
 Date: 2026-10-20
+
+Partially superseded by [ADR-0004](0004-preserve-sandbox-object-policy.md) for default token DACLs, [ADR-0006](0006-opt-in-native-relay.md) for native relay, [ADR-0012](0012-prefer-dll-image-base-at-map.md) for direct-import recognition, and [ADR-0015](0015-initialize-at-child-loader-entry.md) for child-side initialization.
 
 ## Context
 
-原始 MSYS 在受测 PSEC 中遇到对象授权、强制 ASLR 与固定堆布局障碍。fork 需要父子共享一致的映像地址；修复必须发生在运行时初始化前，并覆盖运行后出现的新包。原型依赖的调试事件/INT3 会占用目标调试通道，静态目录名单不能自然覆盖新安装内容。
+In the tested PSEC environment, stock MSYS encountered object access failures, forced ASLR, and conflicts with its fixed heap layout. Fork requires matching parent and child image addresses. Preparation has to occur before runtime initialization, including for programs installed after launch. The prototype occupied the debug channel with debug events and INT3. A fixed list of installation paths would miss newly installed programs.
 
 ## Decision
 
-由兼容宿主以初始挂起状态创建目标，读取实际映像普通导入表。直接或间接导入 `msys-2.0.dll` 即按该 ABI 处理，忽略大小写，不另做身份指纹或安装目录预扫描；有界依赖遍历分别返回状态和命中结果。
+Create the target initially suspended and inspect its actual PE import table. At the time of this decision, a direct or transitive import of `msys-2.0.dll` selected that ABI. The dependency walk was bounded, compared names without regard to case, and returned status separately from a match.
 
-仅向确认的 MSYS 进程映射无 CRT、普通导入、TLS 或 DllMain 初始化依赖的 agent，在恢复前准备地址布局和八个条件 inline hook。MSYS 子进程在创建边界继续传播，保留调用方原有挂起状态。确认命中后的准备失败终止本次子进程并返回错误；分类未知的子进程不猜测注入，根进程分类失败直接报错。
+Map an agent with no CRT, normal imports, TLS, or `DllMain` dependency into confirmed MSYS images. Prepare the address layout and eight conditional hooks before resume. Propagate at MSYS child creation while preserving the caller's suspend state. If preparation fails after a positive match, terminate the child and return the error. Report an unclassifiable root as an error and leave unclassifiable descendants untouched.
 
-原生进程不注入、不安装兼容 hook。兼容层不修改安装目录文件、ACL、rebase 数据或目标 token，也不占用 debug port/INT3 通道。PSEC 创建工具独立于已有受限环境内的兼容入口。
+At this stage, native processes received no agent or compatibility hooks. The shim preserved installation files, ACLs, rebase data, and the target token. The debugger port remained available. PSEC creation used a separate tool.
 
 ## Consequences
 
-保留原始 MSYS 分发文件和调试能力，新包在首次创建或映射时识别。实现依赖 AMD64 Native API 入口与 MSYS 内部布局，版本变化需要实际回归。
+New packages can be recognized on first launch or mapping without modifying the distribution. AMD64 Native API entries and MSYS internals require regression tests when they change.
 
-原生桥接中的后续创建不会经过 MSYS 父进程 hook，因而没有任意原生桥接透明传播保证。原生根显式进入兼容入口已经验证；MSYS 创建的原生后代存在额外 token/命名对象访问限制，当前支持边界必须如实记录。Job 通知管理生命周期，不作为初始线程恢复前准备的时序保证。
+Native intermediaries then ended automatic propagation. A native root could enter the shim explicitly. Native descendants of MSYS had additional token and named-object limits. Job notifications track lifetime, while the process creation path controls preparation timing.

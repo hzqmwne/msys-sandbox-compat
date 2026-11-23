@@ -1,114 +1,113 @@
-# MSYS Sandbox Compat 当前设计
+# Design
 
-本文描述当前实现，重要取舍见 [架构决策](decisions/README.md)，使用入口见 [使用说明](getting-started.md)，已落地变更见 [CHANGELOG](../CHANGELOG.md)。
+[简体中文](zh-CN/design.md)
 
-## 生产约束
+This page describes the current implementation. See the [architecture decisions](decisions/README.md) for its rationale, the [user guide](getting-started.md) for CLI behavior, and the [changelog](../CHANGELOG.md) for changes.
 
-兼容层不修改任何磁盘文件或目录 ACL，不为兼容而放宽原 restricted token 的限制。文件读取、执行、写入及其他资源访问继续受原隔离策略约束；遇到拒绝时保留失败，不通过更大权限的 token、非受限代理或预开句柄绕过。兼容产物应位于原策略已允许的位置。
+## Production constraints
 
-对象描述符处理覆盖 MSYS IPC、创建进程和线程时的显式 DACL，以及 MSYS 运行时设置的进程和主 token 默认 DACL。各进程以自己的主 token 识别适用的受限主体，按当次输入补充对象 DACL。测试夹具设置的文件 ACL 只定义该夹具的初始策略。
+The shim leaves disk file and directory ACLs and the existing token restrictions in place. File reads, execution, writes, and other resource access are governed by the original sandbox. The program reports access denials from that policy. Deploy the shim where the policy already permits read and execute access.
 
-## 适配方向与依赖
+Object security descriptor adaptation covers MSYS IPC, explicit process and thread DACLs supplied at creation, and the process and primary-token default DACLs set by MSYS. Each process uses its own primary token to select the restricted principal and adapts the caller's current descriptor. Fixture file ACLs define the tests' initial policy.
 
-兼容层参照合理的受限环境版运行时行为，分别处理对象授权、fork 布局、创建传播和终端会话。残余影响、hook/进程数量及不改默认值均是取舍维度，由维护者结合功能和维护成本决定。保留 ntdll hook 通用接入，不限定 MSYS 模块/IAT/内部 RVA；当前识别和注入范围不因此扩大。
+## Components and dependencies
 
-最终仍交付兼容 EXE/DLL。宿主静态链接 CRT；早期 agent 无 CRT、普通/延迟导入、TLS、全局构造或 DllMain 依赖。当前采用 MinHook v1.3.4 的 HDE64 与适配的搬迁核心，不引入其完整运行时管理器。后端与安装器以独立的有界字节/逻辑地址/搬迁计划接口分开，CMake 集中选择后端，保留未来切换 Detours 的空间。见 [ADR-0009](decisions/0009-minhook-relocation-backend.md)。
+The shim treats object access, fork image layout, process propagation, and terminal I/O as separate compatibility problems. Hooks use ntdll entry points so they can see the relevant Windows calls without depending on an MSYS import slot or internal RVA. The scope of EXE recognition and process preparation remains bounded by the rules below.
 
-构建 launcher 前使用同一 PE 读取器校验已链接的 agent DLL，检查入口点、导入、TLS、所需导出、数据与执行节和 unwind 目录。校验器不随产品安装。部署时 launcher 继续验证从磁盘读取的 DLL、同构建 ABI，以及后续实际访问的 PE 文件与映像范围。冷启动与继承 relay 使用同一映像大小上限。
+The release is a single EXE with an embedded agent DLL. The development build also keeps the EXE and DLL as separate files. The host statically links the CRT. The early agent has no CRT, ordinary or delay imports, TLS, global constructors, or `DllMain`. The relocation backend uses MinHook v1.3.4's HDE64 and adapted relocation code. A bounded plan interface keeps relocation separate from installation and lets CMake select the backend. [ADR-0009](decisions/0009-minhook-relocation-backend.md)
 
-## 进程创建与识别
+The build uses the same PE reader as the host to verify the linked agent DLL. It checks the entry point, imports, TLS, required exports, data and executable sections, and unwind directory. At launch the host validates the agent image and matching ABI, checking the file and image ranges it accesses. Standalone launch and inherited relay use the same image size limit. The build validator is a development tool.
 
-外部隔离启动器负责原有策略。生产 shim 将经过校验的 agent DLL 嵌入 PE 资源，开发 EXE 从同目录读取 DLL。独立 psec-run 工具用于创建 PSEC 验证环境。宿主与 agent 共享 core 源码，分别按各自 CRT/栈约束编译。宿主以 `CREATE_SUSPENDED` 创建目标。直接导入 `msys-2.0.dll` 的 EXE 按 MSYS 处理，文件名比较忽略大小写。普通令牌也可启动，命名对象和 DACL 适配按令牌条件启用。
+## Process creation and recognition
 
-声明此导入名就是选择该 ABI 的兼容处理。识别仅读取当前 EXE 的导入表，传递依赖及延迟导入在范围外。原生 EXE 改名为 Bash 不会命中，运行中才安装的 EXE 可在首次创建时识别。
+The external sandbox launcher sets the policy. The shim reads its verified DLL from a PE resource. The development EXE reads it from its own directory. The optional `psec-run` tool creates PSEC test environments. The host and agent share core sources compiled under their respective CRT and stack constraints.
 
-为使内核创建 PEB 和初始线程栈时避开 MSYS 的栈和堆地址区，创建时先按 Native 参数中的映像路径做一次导入预检。命中后追加 `PS_ATTRIBUTE_MEMORY_RESERVE`，短暂预留 24–64 GiB 窗口。agent 使用已有的创建 hook。独立宿主仅在本次直接启动期间替换自身 KernelBase 的一个导入槽，仍由 `CreateProcessW` 处理标准句柄、环境与控制台。已继承 relay 的宿主调用由 relay 处理。
+The host starts the target with `CREATE_SUSPENDED`. An EXE whose normal import table directly names `msys-2.0.dll` selects the MSYS ABI, with a case-insensitive name comparison. Recognition reads only that EXE's import table. Transitive dependencies, delay imports, and renaming a native program to Bash do not match. Newly installed executables can be recognized on their first launch. The host can also start under a normal token. IPC and DACL adaptation apply only where the token calls for them.
 
-识别返回状态码与命中结果。导入表越界或读取失败会返回错误。启用 relay 时，已确认的 WoW64 进程走原生传播路径。其他无法分类或准备的目标按失败回收。关闭 relay 时，无法确认的后代保持原样，trace 标明识别不可用。
+With the heap-window module enabled, a preflight reads the EXE imports at the path given by the native creation request. A match adds `PS_ATTRIBUTE_MEMORY_RESERVE` for the 24–64 GiB window so Windows places the PEB and initial thread stack elsewhere. The agent uses its process creation hook. A standalone host temporarily replaces one of its own KernelBase import slots for this launch while `CreateProcessW` sets up standard handles, environment, and console state. The inherited relay handles that call for a host already in the tree.
 
-实际挂起映像仍决定是否注入。创建前追加过预留的进程必须再次确认为 MSYS 才能恢复。完成挂起准备后，父进程在恢复或交还线程句柄前释放自己追加的预留。调用者已有的创建属性和预留原样保留。仅在创建后识别到 MSYS 时，继续准备实际映像及对象兼容，堆由 MSYS 自行分配。决定见 [ADR-0011](decisions/0011-release-heap-reservations-before-start.md)。
+Recognition reports both status and match. An invalid import range or a failed read returns an error. With relay enabled, confirmed WoW64 processes use the native propagation path. Other unclassifiable or unpreparable targets are terminated on failure. With relay disabled, an unclassifiable descendant is left alone and trace logging notes the missing classification.
 
-## 初始准备
+The suspended image determines whether to prepare the agent. A process that received a preflight reservation must still match MSYS before it can run. The parent releases only its own reservation before resuming or returning the thread to the caller. If recognition first succeeds after creation, the host still prepares the image and object compatibility and MSYS allocates its own heaps. [ADR-0011](decisions/0011-release-heap-reservations-before-start.md)
 
-宿主按模块和令牌条件准备命名空间和传播策略。普通令牌使用 Windows 自身的对象路径和 ACL。
+## Initialization
 
-宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。创建阶段的显式对象 DACL 适配以调用者的主 token 和当前请求为准。IPC 模块使用启动树传入的目录名，各进程自行确定 ACL 适配需要的 SID。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
+The host prepares the namespace and propagation settings according to the enabled modules and the token. Normal-token processes use the Windows object paths and ACLs. The host and agent use the same module settings. The process creation DACL rule uses the caller's primary token and the current request. IPC uses the directory name passed down by the launch tree. Each process resolves its own ACL principal. With all modules disabled, the host creates the root suspended, adds it to the job, and resumes it.
 
-父端准备 agent 和模块配置，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。独立 launcher 冷启动传入空的父映像数据。由 agent 传播时传入其所在进程已记录的映像数据，供 MSYS fork 使用。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。见 [ADR-0015](decisions/0015-initialize-at-child-loader-entry.md)。
+The parent prepares the agent and its settings and arranges for initialization on the child's first entry to `LdrInitializeThunk`. A standalone cold launch sends empty parent-image data. An agent that propagates into a child sends its recorded image data for MSYS fork. The creator can still read or update the application startup context while the child is suspended. On first resume the agent restores the loader entry, selects and installs the hooks required by the child image and token, then returns control to the loader. Initialization errors after resume surface as the child exit status. [ADR-0015](decisions/0015-initialize-at-child-loader-entry.md)
 
-冷启动与 exec 时，未设置 `DYNAMIC_BASE` 的 MSYS 主 EXE 可尝试一次 PE 首选基址。首选址已使用时直接继续，尝试失败时沿用 Windows 已选定的基址。设置该标志的映像沿用 Windows 选址。fork 子进程仍在基址不同于父端实载基址时按父端路径对齐。新视图验证成功后才更新 PEB 和应用启动上下文，原视图继续保留。MSYS 启动后自行分配 cygheap 和 userheap。
+For cold startup and exec, the shim can try the PE preferred base once for an MSYS main EXE without `DYNAMIC_BASE`. It keeps the original base if the preferred address is occupied or mapping fails. Windows places images marked `DYNAMIC_BASE`. For fork, if the child base differs from the parent's actual base, the child uses the parent's image path and base to align its view. It updates the PEB and application startup context after validating the new view, and retains the original view. MSYS allocates cygheap and userheap when it starts.
 
-## DLL 映射范围
+## DLL mapping
 
-完整 MSYS 兼容进程在 `NtMapViewOfSection` 入口处理后续 DLL 映射。调用方传入 `*BaseAddress == 0` 时，兼容层用 `NtQuerySection` 从当次 section 取得映像类型、长度、PE 标志和首选基址。首选基址必须非零且按 64 KiB 对齐，映像必须是未设置 `DYNAMIC_BASE` 的 AMD64 `SEC_IMAGE` DLL。按同一规则处理各路径下的 DLL，包括原生 DLL、主 EXE 的传递依赖和运行时加载的扩展。
+A recognized AMD64 MSYS process handles subsequent DLL mappings at `NtMapViewOfSection`. When `*BaseAddress == 0`, the hook uses `NtQuerySection` to read the image type, length, PE flags, and preferred base from the caller's section. The preferred base must be nonzero and 64 KiB aligned. The image must be an AMD64 `SEC_IMAGE` DLL without `DYNAMIC_BASE`. The same rule applies to native DLLs, transitive dependencies, and runtime-loaded extensions at any path.
 
-在受测 AMD64 路径上，非零 `ZeroBits` 的数量编码以低 32 位为基准，例如 `1` 要求映像落在 2 GiB 以下。位图编码按最高置位确定上限。整个首选映像区间都必须落在上限内，原始 `ZeroBits` 继续传给内核。
+On the tested AMD64 path, a nonzero count-form `ZeroBits` is relative to the low 32 bits. A value of `1` requires an address below 2 GiB. In mask form the highest set bit determines the upper bound. The full preferred image range must fit under that bound. The original `ZeroBits` goes to Windows.
 
-不满足条件或查询失败时直接使用原请求。首选址映射失败时将 `*BaseAddress` 恢复为零，再用原请求重试一次。如果无法写回原基址则返回恢复错误。`--log-level=trace` 记录请求的首选址、该次映射状态和成功时的实址。首选址失败并恢复入参时会另记重试事件。当前决策及范围见 [ADR-0012](decisions/0012-prefer-dll-image-base-at-map.md)。
+A failed query or ineligible section uses the original request. If the preferred-base attempt fails, the hook restores `*BaseAddress` to zero and retries once. Failure to restore that input is returned as an error. Trace logging records the requested preferred base, status, actual address on success, and any retry after restoring the input. [ADR-0012](decisions/0012-prefer-dll-image-base-at-map.md)
 
-MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启动期间调用 `dll_dllcrt0` 登记的 MSYS DLL 进入 `DLL_LINK`，已登记的原生 `DLL_NATIVE` 也经过重载后的基址核对。PE 导入表用于给已登记的模块排序。动态登记的 `DLL_LOAD` 可以在父进程偏离 PE 首选地址，MSYS 会尝试在子进程重载到父进程实际使用的地址，再复制所需的数据段。即使自动选址让 DLL 加载继续，父子实载基址不同仍可能导致 fork 失败。见 [测试说明](testing.md#映像地址对照)。
+On fork, MSYS checks the parent and child addresses of the modules registered with its runtime. MSYS DLLs registered through `dll_dllcrt0` at startup enter `DLL_LINK`. MSYS also checks registered `DLL_NATIVE` modules after reloading them. The PE import table orders registered modules. A dynamic `DLL_LOAD` can load away from its preferred base in the parent. MSYS tries to reload it at that actual base in the child before copying data. A successful load at a different address can still break fork. [Image mapping experiments](testing.md#image-mapping-experiments)
 
-## Hook 的职责
+## Object access and hooks
 
-| 入口 | 兼容职责 |
+| Entry point | Role |
 |---|---|
-| `NtCreateDirectoryObject` | MSYS 私有对象目录与授权 |
-| `NtCreateSection` | 共享 section 授权 |
-| `NtCreateMutant` | mutex 授权 |
-| `NtCreateSymbolicLinkObject` | MSYS 目录链接与授权 |
-| `NtCreateNamedPipeFile` | MSYS 管道授权 |
-| `NtMapViewOfSection` | 对基址未指定、未设置 `DYNAMIC_BASE` 且符合 `ZeroBits` 的 `SEC_IMAGE` DLL 尝试首选基址，失败时恢复原请求 |
-| `NtCreateUserProcess` | 创建前按需暂留堆窗口并适配显式进程和线程 DACL，挂起创建后传播并释放窗口 |
-| `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体 |
-| `NtSetSecurityObject` | 当前进程伪句柄单独设置 DACL 时，按当次输入补受限主体 |
+| `NtCreateDirectoryObject` | MSYS private object directory and access |
+| `NtCreateSection` | Shared section access |
+| `NtCreateMutant` | Mutex access |
+| `NtCreateSymbolicLinkObject` | MSYS directory links and access |
+| `NtCreateNamedPipeFile` | MSYS pipe access |
+| `NtMapViewOfSection` | Preferred base for eligible `SEC_IMAGE` DLLs, with a retry of the original request |
+| `NtCreateUserProcess` | Temporary heap window and explicit process/thread DACL adaptation, then suspended child preparation and reservation release |
+| `NtSetInformationToken` | Adapt the current primary token's requested default DACL |
+| `NtSetSecurityObject` | Adapt a DACL-only request on the current-process pseudo-handle |
 
-对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。
+For ordinary allow ACLs, the transform retains the original ACEs and adds only access bits already allowed to the current user and enabled, non-deny-only groups and still missing for the restricted principal. AppContainer uses the package SID. Otherwise the rule prefers a logon SID present among both enabled and restricting SIDs, or a single identifiable, non-broad restricting principal from the ACL. Denies and flagged or complex ACEs pass through. Empty ACLs receive no grant. A NULL DACL is represented as Everyone:GA and restricted-principal:GA to retain its open intent and allow the tested shared-section case. Windows supplies missing or default descriptors. Owner, group, SACL, and control semantics are preserved for absolute and self-relative descriptors.
 
-受限上下文启用 `process-dacl` 时，`NtCreateUserProcess` 在调用内核前用同一转换器检查 `process_attributes` 和 `thread_attributes` 的显式描述符。需要调整时只替换临时副本中的 `SecurityDescriptor`，适配无需识别目标映像。MSYS fork 显式提供创建 DACL，恢复时会跳过冷启动的设置调用，之后信号投递仍要按 PID 以 `PROCESS_DUP_HANDLE` 重开目标。显式适配在创建时一次完成。独立启动器传入空的进程和线程安全属性，由 Windows 使用默认 DACL。见 [ADR-0017](decisions/0017-adapt-process-dacl-at-creation.md)。
+With `process-dacl` active in a restricted context, `NtCreateUserProcess` applies the same transform to an explicit descriptor in `process_attributes` or `thread_attributes` before submitting the request. It changes only the descriptor pointer in a temporary copy. The target need not be classified. MSYS fork provides explicit creation DACLs and skips the cold-start DACL update when it resumes. Later signal delivery requires reopening the target by PID with `PROCESS_DUP_HANDLE`. The adaptation occurs once at creation. A standalone shim passes null process and thread security attributes and uses Windows defaults. [ADR-0017](decisions/0017-adapt-process-dacl-at-creation.md)
 
-默认设置同样使用当次 ACL，不恢复启动快照。仅匹配当前主 token 的 TokenDefaultDacl；NtCompareObjects 不要求输入句柄有查询权限，最终由原 NtSetInformationToken 检查设置权限。默认值对后续采用默认 SD 的对象有连带影响，作为已接受的兜底取舍；不修改已有磁盘/注册表 ACL。显式对象仍需创建路径适配。决定见 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
+Default DACL updates use the ACL in the current request. Only `TokenDefaultDacl` for the current primary token matches. `NtCompareObjects` itself needs no query access on the supplied handle. The original `NtSetInformationToken` checks permission to set it. The resulting default applies to later objects that use it. Explicit object descriptors still use the creation hooks. [ADR-0008](decisions/0008-adapt-requested-object-acls.md)
 
-MSYS 冷启动分别设置 token 默认 DACL 和当前进程对象的 DACL。当前进程伪句柄的独立 DACL 设置复用同一转换器，原系统调用执行授权检查。Git for Windows 的新运行时通过进程句柄检查控制台所有者是否仍存活，这条设置路径会影响该检查。
-宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄。PSEC 对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化。查询取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
+MSYS cold startup separately sets the token's default DACL and the current process object's DACL. A DACL-only call on the current-process pseudo-handle uses the same transform, and the original system call checks authorization. Recent Git for Windows runtimes use a process handle to check that the console owner is still alive.
 
-非 AppContainer 受限令牌使用当前 Windows 会话的 `BaseNamedObjects`。宿主按自身 PID 命名兼容目录，沿用启动器默认 DACL，并持有目录句柄直到进程树退出。实际对象按当次输入适配。agent 在兼容树内传递目录路径。关闭 relay 时，经过原生中间程序后的显式兼容入口建立新树和新目录。默认 ConPTY 由内层宿主创建目录。AppContainer 使用 Windows 提供的 package 命名空间。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
+The host reads its primary token with the `GetCurrentProcessToken` pseudo-handle. For PSEC, `GetAppContainerNamedObjectPath` and the token session identify the object namespace without requiring a token reopen or a test named event. [ADR-0003](decisions/0003-read-only-security-context.md)
 
-## fork 与进程链
+Non-AppContainer restricted processes use the current session's `BaseNamedObjects`. The host names a private directory by its PID, uses the launcher's default DACL, and keeps the handle until the process tree exits. Objects use the descriptors in their current requests. The agent shares the directory path within the tree. With relay off, a shim explicitly invoked beyond a native intermediary starts a new tree and directory. In default ConPTY mode, the inner host creates the directory. AppContainer uses the package namespace provided by Windows. [ADR-0005](decisions/0005-restricted-token-context.md)
 
-MSYS 自身仍负责 fork 的复制、同步和恢复语义。兼容层解决环境导致的对象访问和地址布局障碍，并在相关子进程的初始线程恢复前复制 agent。它保留调用者原有的挂起状态，不用调试事件截获创建。
+## Fork and process chains
 
-关闭 relay 时，自动传播在原生子进程处结束。Job 仍管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
+MSYS still copies, synchronizes, and restores its own fork state. The shim prepares object access, address layout, and the agent before the relevant child resumes. The caller's suspension state stays intact. The job tracks process lifetime and notifications, while creation handling controls the timing of preparation.
 
-MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时基于当次请求补充受限主体，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。
+A native descendant created by MSYS can invoke the shim explicitly to start a native or MSYS target. The default object ACL set by MSYS at cold startup retains the access needed by native descendants and re-entered MSYS. End-to-end tests check Bash, Perl, secondary-thread fork, pipes, file access, and exit codes after one or three native intermediaries. [Compatibility](compatibility.md)
 
-## 原生 relay
+## Native relay
 
-relay 默认覆盖原生根和后代，可通过 `--native-relay=off` 关闭。原生进程仅启用创建 hook，并与 MSYS 调用者使用同一规则处理创建时的显式 DACL。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与 IPC 适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
+Relay is on by default in native roots and descendants. Use `--native-relay=off` to end automatic propagation at a native process. A native process installs the creation hook only, with the same explicit creation DACL rule as an MSYS parent. WoW64 reaches AMD64 `NtCreateUserProcess` through its Windows transition layer and uses the same AMD64 agent. Full image layout and IPC adaptation apply only to recognized AMD64 MSYS.
 
-原生创建 hook 在恢复前传播 agent，子端再识别映像和所需模块，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用模块配置及 IPC 目录名。创建 hook 已负责准备子进程。首次映射在独立的 agent 状态副本中绑定 trampoline。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代。
+The creation hook prepares descendants before resume, allowing the runtime to re-enter MSYS through multiple native processes. An explicitly nested shim recognizes the existing agent from the local creation hook and reuses the module settings and IPC directory. The creation hook prepares the child. Initial mapping binds trampolines in a separate agent state copy. This also applies to the native ConPTY session host.
 
-各进程只为自身实际安装的 hook 读取入口和生成 trampoline。未改写的入口由当前进程直接调用，以便原生 relay 执行后代准备。复制 agent 时根据子进程的 hook 集合重新绑定其原入口调用。启用传播时，agent 同时保存后代可能启用的 handler 位置。宿主通过版本标记核对配套 DLL 和继承的 relay 状态。
+Entry points and trampolines are read or built for the hooks each process actually installs. Unmodified entry points remain callable so a native relay can prepare descendants. A copied agent rebinds original calls for the child's hooks. When propagation is enabled, the agent also records handler locations that descendants may use. Version markers identify the matching DLL and inherited relay state.
 
-子端 agent 使用自身主 token 的只读伪句柄取得 ACL 适配所需的主体。MSYS 在启用 ACL 模块时初始化本进程的主体，原生 relay 则在第一次适配显式 DACL 时才查询。SID 保存在进程自己的内存里，新进程从空的本地状态开始。默认 DACL 继承和实际访问检查由 Windows 负责。IPC 目录名是启动树的配置，访问仍由目录 ACL 决定。见 [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)。
+Each agent reads its own primary token through a read-only pseudo-handle. MSYS initializes the ACL principal when an ACL module is enabled. The native relay waits for its first explicit DACL adaptation. The SID belongs to the local process and starts empty in each new process. Windows handles default DACL inheritance and final access checks. The IPC directory name belongs to the launch tree, and the directory's ACL controls access. [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)
 
 ## ConPTY
 
-外层控制台可用且 stdin、stdout、stderr 至少一路是控制台句柄时，自动模式启用 ConPTY。在已有 Windows Terminal 标签页里，外层会话继续由 Terminal 管理，compat 在既有受限上下文内通过系统 `CreatePseudoConsole` 创建内层。宿主再启动同一 EXE 的原生会话宿主持有 Windows 初始化的三个内层控制台句柄。外层通过显式句柄继承列表只传重定向句柄的副本。会话宿主用内层控制台句柄和直通句柄为真实目标逐路设置 stdio，随后释放直通副本。Windows 初始句柄由会话宿主保留，避免 MSYS 关闭并复用句柄值后，控制台清理关掉其他对象。混合模式下，宿主日志仍跟随外层 stderr。见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md)。
+Auto mode starts ConPTY when an outer console is available and at least one standard handle is a console handle. In a Windows Terminal tab, Windows Terminal continues to own the outer session. The shim calls `CreatePseudoConsole` inside the existing restricted context and starts another instance of the EXE as the native session host. That instance owns the three handles Windows initializes for the inner console. The outer host sends only duplicates of redirected handles through the explicit inheritance list. The session host supplies the appropriate console or inherited handle for each target stream and closes its passthrough copies. Keeping the original console handles in the session host prevents console cleanup from closing a value MSYS has released and reused. Host diagnostics follow outer stderr in mixed mode. [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md)
 
-外层终端输入和输出使用可用的控制台句柄，必要时由外层宿主打开 `CONIN$` 或 `CONOUT$`。因此，即使目标 stdin 来自文件也可通过 `/dev/tty` 接收键盘输入，stdout 和 stderr 都重定向时仍可显示内层终端的键盘回显。agent 本身不打开控制台设备。
+The outer bridge uses the console handles it has and opens `CONIN$` or `CONOUT$` if needed. This allows `/dev/tty` keyboard input with stdin redirected and permits console echo when both output streams are redirected. The agent itself opens neither device.
 
-提供 VT 管道的前端可以显式调用 `--terminal=conpty --conpty-size=120x40 -- COMMAND`，将 UTF-8 按键写入 stdin，从 stdout 读取内层 ConPTY 输出并直接渲染。该路径省去外层控制台对 VT 的再次转换，尺寸由启动参数指定。
+A frontend with VT pipes can use `--terminal=conpty --conpty-size=120x40 -- COMMAND`. It sends UTF-8 keystrokes to stdin and renders the inner VT stream received on stdout, bypassing the outer console's VT conversion.
 
-外层输出是控制台且当前光标能在内层尺寸内表示时，桥通过 `PSEUDOCONSOLE_INHERIT_CURSOR` 启动内层。输出线程从内层 VT 管道接收一次启动查询，用外层视口内的光标行列应答。内层由此从已有光标处输出，应用后续的 VT 序列照常转发。外层输出是管道时采用独立 VT 会话的初始画面。 [ConPTY 光标继承](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
+With a console output handle and an outer cursor that fits the inner dimensions, the bridge starts ConPTY with `PSEUDOCONSOLE_INHERIT_CURSOR`. The output thread answers the inner startup query once with the cursor's outer viewport coordinates. The inner session starts at the existing cursor, and application VT output is forwarded as usual. With pipe output, ConPTY emits its ordinary initial frame. [Cursor inheritance](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
 
-在受测 PSEC 配置中，Low IL 客户端连接外部 Medium IL conhost 时，控制台连接策略拒绝 MSYS 所需的读屏和输入事件写回。外部普通 conhost 降至 Low 后，打开客户端进程时又会遇到目标进程 DACL 中的 AppContainer package SID 所触发的访问限制。普通 Untrusted 调用者在同一 PSEC 配置下也无法打开客户端进程。同一 PSEC 内创建的 conhost 已验证可以查询客户端 token，并通过后续控制台策略检查。[微软控制台访问规则](https://learn.microsoft.com/en-us/windows/console/console-buffer-security-and-access-rights#wrong-way-verbs)
+In the tested PSEC configuration, an external Medium IL conhost denied the screen reads and input event writes that Low IL MSYS requires. Lowering an external conhost to Low IL still produced a process-open denial in the tested configuration, where the client DACL included the AppContainer package SID. A normal Untrusted caller also could not open the client. A conhost created inside the same PSEC could query the client token and pass console policy checks. [Windows console access rules](https://learn.microsoft.com/en-us/windows/console/console-buffer-security-and-access-rights#wrong-way-verbs)
 
-输入和输出由独立的阻塞 I/O 线程转发。读到可转发的字节就立即写出，短写时继续写入剩余字节。桥接从终端句柄或显式 VT 数据源读取输入，脚本只打开一次。显式 VT 数据源耗尽后，桥停止转发输入，目标继续持有内层控制台 stdin。在受测 Windows 上，关闭 conhost 的 VT 输入管道会向目标发出 `CTRL_CLOSE_EVENT`。桥因此把该管道保留到会话收尾，以便目标继续处理输入和输出结果。下游写入失败或零进展时，读取线程通过 job 的完成端口通知宿主结束进程树，同时继续读取并丢弃剩余 ConPTY 输出，直到终端退出。正常收尾取消阻塞输入并转发剩余输出。
+Input and output use separate blocking I/O threads. The bridge writes bytes as soon as they are available and retries short writes. Input comes from the terminal handle or an explicit VT source. An input script is opened once. EOF ends that input pump while the target retains its console stdin. Closing conhost's VT input pipe sends `CTRL_CLOSE_EVENT` on the tested Windows versions, so the bridge keeps it open until teardown. If downstream output fails or writes zero bytes, the reader signals the job's completion port to end the process tree, then drains remaining ConPTY output. Normal teardown cancels the blocked input read and forwards the remaining output.
 
-交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。关闭时唤醒正在等待的尺寸采样线程，待其结束后再释放 ConPTY。显式尺寸、脚本输入和缺少可用窗口的显式会话采用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
+The initial interactive size comes from the outer output console's `srWindow`. A separate thread samples it and calls `ResizePseudoConsole` on changes, even when input is idle. Teardown wakes and joins the resize thread before closing ConPTY. An explicit size, scripted input, or forced ConPTY without an outer viewport uses a fixed size. [Console viewport](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ResizePseudoConsole](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
 
-外层控制台的鼠标跟踪由内层应用协商。普通 UTF-8、Win32 按键报告和原生 VT 可直接从读缓冲区转发。只有可能跨读取的旧式封装鼠标报告需要暂存，确认封装后才重建 SGR 序列，并复用转发缓冲区。内层 ConPTY 按应用的输入模式处理 SGR 序列。脚本和重定向输入保持原字节流。
+The inner application negotiates mouse tracking. UTF-8, Win32 key reports, and native VT pass directly from the read buffer. The bridge buffers only an incomplete legacy mouse report and reconstructs SGR once it confirms the wrapper, reusing its forwarding buffer. The inner console interprets that input in the application's input mode. Scripts and redirected input keep their original bytes.
 
-对真实控制台句柄，桥接前保存各方向的 mode 与代码页，输入设置 raw VT / UTF-8，输出启用 processed / VT / UTF-8。收尾在最后一批输出排空之后恢复，包括目标启动失败的路径。compat 的等待实例和开发工具 psec-run 各自注册 Ctrl+C handler，防止控制台广播先终止等待宿主并触发 job 回收。该 handler 处理当前宿主的通知，子进程沿用自己的处理器。[控制台模式](https://learn.microsoft.com/en-us/windows/console/setconsolemode) · [控制事件处理](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
+When using console handles, the bridge saves the relevant modes and code pages before setting raw VT input and processed VT output in UTF-8. It drains output before restoring them, including after a failed launch. The waiting shim and `psec-run` handle their own Ctrl+C notifications so a broadcast does not close the job prematurely. The foreground target keeps its own handler. [Console modes](https://learn.microsoft.com/en-us/windows/console/setconsolemode) · [Control handlers](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
 
-该路径已在 PSEC 和两种固定非 AppContainer 受限令牌中完成交互验收。受限令牌回归在终端内完成 Perl/线程 fork、原生命令、Ctrl+C、作业控制和退出码，并在交互前后验证原有文件访问拒绝。实际 harness 的完整性等级、desktop 和句柄条件仍以其自身验收为准。
+Interactive tests passed under PSEC and both fixed non-AppContainer restricted tokens. They exercise Perl and secondary-thread fork, native commands, Ctrl+C, job control, and exit status, with access-denied checks before and after. The harness's integrity levels, desktop, and handles must be checked in its own environment. [Testing](testing.md)

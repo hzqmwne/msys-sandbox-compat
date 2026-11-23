@@ -1,14 +1,14 @@
-# 文档索引
+# Documentation
 
-`docs` 保存长期维护的当前设计、使用方式、已验证边界与架构决策。变更摘要见 [CHANGELOG](../CHANGELOG.md)；研究过程和演进计划仅留在本地，不作为正式文档的依赖。
+[简体中文](zh-CN/README.md)
 
-| 顺序 | 文档 | 内容 |
-|---|---|---|
-| 01 | [使用说明](getting-started.md) | 构建、入口和运行参数 |
-| 02 | [当前设计](design.md) | EXE 识别、DLL 映射、进程链与 ConPTY |
-| 03 | [兼容范围](compatibility.md) | 已验证组合、支持能力与限制 |
-| 04 | [测试说明](testing.md) | 回归、基线与产物位置 |
-| 05 | [架构决策](decisions/README.md) | 已接受的重要取舍、原因与后果 |
-| 06 | [贡献约定](contributing.md) | 代码、文档与本地研究的维护规则 |
+| Page | Contents |
+|---|---|
+| [Getting started](getting-started.md) | Build, run, and configure the shim |
+| [Compatibility](compatibility.md) | Tested configurations and known limits |
+| [Design](design.md) | Image layout, process propagation, object access, and ConPTY |
+| [Testing](testing.md) | Regression suites, fixtures, and baselines |
+| [Architecture decisions](decisions/README.md) | The context and trade-offs behind the implementation |
+| [Contributing](contributing.md) | Code, documentation, and test conventions |
 
-接口、参数或当前行为变化时，在同一提交中更新当前设计、相关使用说明与变更记录。决定变化时新增 ADR 并注明替代关系；已接受的 ADR 正文不反复改写。实验成功只计入实际覆盖的环境和场景。
+See the [changelog](../CHANGELOG.md) for changes to the project.

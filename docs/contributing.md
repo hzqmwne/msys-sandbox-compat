@@ -1,15 +1,17 @@
-# 贡献约定
+# Contributing
 
-生产代码位于 `src/core`、`src/host`、`src/agent` 和内部头文件目录 `include/msys_sandbox_compat`。`tools/psec-run` 是可选开发工具；`tests` 保存回归入口，夹具和负载在 `tests/fixtures`，识别单测在 `tests/unit`。
+[简体中文](zh-CN/contributing.md)
 
-优先直接控制流和已有类型，字段、参数与辅助函数只服务当前需求。core 源码按宿主与 agent 的不同选项分别编译；agent 无 CRT、普通导入和 DllMain，注意 MSYS 管理的二级线程栈。不要为了复用引入普通运行库、通用注入框架或缓存跨调用临时状态。
+The production code is in `src/core`, `src/host`, `src/agent`, and `include/msys_sandbox_compat`. The optional PSEC tool is in `tools/psec-run`. Test scripts are in `tests`, fixtures in `tests/fixtures`, and unit tests in `tests/unit`.
 
-生产约束以 [当前设计](design.md#生产约束) 为准。原生 relay 仅启用创建 hook，现有文件访问策略和令牌权限继续生效。MSYS 按实际导入名识别。测试可在标记目录建立固定初始 ACL，验收同时要求真实工作负载成功与原限制保留。
+Prefer direct control flow and reuse existing types. The host and agent compile shared code with different options. The early agent has no CRT, normal imports, or `DllMain`, and it runs on MSYS-managed stacks on secondary threads.
 
-正式文档从 `docs/README.md` 进入，`docs/design.md` 是唯一当前主设计。接口或行为变化同时更新相关使用、支持范围、测试说明和 CHANGELOG；重要决定变化新增 ADR 并注明替代关系，不反复改写已接受 ADR 正文。
+Follow the [production constraints](design.md#production-constraints). The native relay installs only the process creation hook. The test fixtures may set ACLs on marked test directories to define the initial policy. A passing test requires the workload to succeed and the original restrictions to remain in force.
 
-`build` 保存可重建产物和 `build/package` 安装布局。公开文档引用可从仓库或上游获取的复现材料；生产构建从干净检出开始。
+English is the default language, and the matching Simplified Chinese pages are under `docs/zh-CN/`. Update both versions in the same change when commands, behavior, compatibility claims, or changelog entries change. Keep ADR numbers aligned. Record a changed decision in a new ADR and link the decision it supersedes.
 
-按改动运行 [相关回归](testing.md)，涉及多个运行机制或发布时运行完整矩阵；文档改动只检查文档。权限拒绝检查随相关负载执行。安装目录完整性比较仅在部署写入逻辑变化、异常修改迹象或发布确有需要时运行，不在每轮重复全量哈希。
+Use repository or upstream material that readers can access when linking to evidence or reproduction instructions. Build outputs belong under `build`, with the install layout under `build/package`. A clean checkout must build independently.
 
-提交按可独立理解和验证的变化组织，只暂存本次明确路径，不提交本机策略、生成输出或本地研究。诊断与实验退出默认产品构建；全新检出须能独立构建和测试。
+Run the [relevant regressions](testing.md) for the change. Use the full matrix for cross-cutting runtime changes and release qualification. For documentation changes, check links and command examples. Exercise access-denied controls alongside the workloads they protect. Check installation integrity when deployment behavior changes or when there is evidence of unexpected file changes.
+
+Keep commits focused on changes that can be understood and verified independently. Leave machine-specific policies, generated output, and local research out of commits.

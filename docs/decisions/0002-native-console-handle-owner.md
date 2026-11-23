@@ -1,22 +1,24 @@
-# ADR-0002：PSEC 内公开 ConPTY 与原生标准句柄所有者
+# ADR-0002 — Use public ConPTY APIs inside PSEC and keep a native handle owner
+
+[简体中文](../zh-CN/decisions/0002-native-console-handle-owner.md)
 
 Status: Accepted
 Date: 2026-10-20
-Related: ADR-0001、[ADR-0014](0014-conpty-preserve-redirected-stdio.md)
-Partially superseded by: [ADR-0013](0013-default-relay-with-wow64.md) 在原生会话宿主默认启用 relay。
+
+Related: [ADR-0001](0001-suspended-msys-preparation.md), [ADR-0014](0014-conpty-preserve-redirected-stdio.md). [ADR-0013](0013-default-relay-with-wow64.md) later enabled native relay by default in the session host.
 
 ## Context
 
-受测环境中，重定向宿主的标准句柄可能影响 ConPTY 的初始句柄来源；首次 PSEC 创建同时指定外部 ConPTY 还出现控制台引用不一致。外部普通 conhost 即使具备可读写句柄，也不能完成 MSYS 所需的输入事件写回。
+Redirecting host stdio affected where ConPTY took its initial handles in the tested environment. Combining the first PSEC creation with an external ConPTY also produced inconsistent console references. An ordinary conhost outside PSEC could not write input events as MSYS required, even with readable and writable console handles.
 
-Windows 自动生成的初始控制台标准句柄还被控制台清理状态持有。MSYS 关闭并复用句柄值后，退出清理可能再次关闭该值；只验证交互输出不能发现这一问题。
+Windows retains the initial console standard handles in its console cleanup state. After MSYS closes and reuses one of those handle values, cleanup can close the reused value. Rendering tests alone do not detect this.
 
 ## Decision
 
-正式路径在 PSEC 内调用公开 ConPTY API，由兼容宿主 EXE 的另一个原生实例连接控制台并持有自动初始标准句柄。真实 MSYS 目标通过明确的启动参数和继承句柄获得副本。
+Call the public ConPTY API inside PSEC. A native instance of the compatibility host attaches to the console and owns the initial standard handles. It gives copies to the actual MSYS target through explicit startup and inheritance settings.
 
-agent 不重开 `CONIN$`/`CONOUT$`，不安装额外控制台 hook。原生会话宿主和 conhost 不注入。完全外部创建、复制受限主令牌与修正 reference 的私有接口路线留在本地实验。
+The agent does not reopen `CONIN$` or `CONOUT$` or add console hooks. At this stage neither the native session host nor conhost received the agent. Out-of-sandbox creation, token duplication, and private console-reference manipulation stayed experimental.
 
 ## Consequences
 
-标准句柄所有权清楚，MSYS 可关闭自身副本而不与初始句柄清理冲突；正式路径使用公开 API，增加一个原生宿主实例而不增加产品文件。控制台、管道、fork、作业控制和退出码需一起回归；当前不提供完整终端 GUI、VT 渲染器或动态 resize 事件循环。
+MSYS can close its copies safely. The added native host is another instance of the same EXE. Regression tests exercise console I/O, pipes, fork, job control, and exit status together. This decision did not provide a GUI or VT renderer. Dynamic resize was added later.

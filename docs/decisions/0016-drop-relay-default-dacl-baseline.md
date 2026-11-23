@@ -1,15 +1,14 @@
-# ADR-0016：relay 沿用 Windows 的默认 DACL 继承
+# ADR-0016 — Let Windows inherit the default DACL during relay
+
+[简体中文](../zh-CN/decisions/0016-drop-relay-default-dacl-baseline.md)
 
 Status: Accepted
-
 Date: 2026-11-23
 
-Partially supersedes: [ADR-0006](0006-opt-in-native-relay.md)、[ADR-0008](0008-adapt-requested-object-acls.md) 和 [ADR-0013](0013-default-relay-with-wow64.md) 的默认 DACL 比较。
+Updates default DACL comparison in [ADR-0006](0006-opt-in-native-relay.md), [ADR-0008](0008-adapt-requested-object-acls.md), and [ADR-0013](0013-default-relay-with-wow64.md). [ADR-0018](0018-resolve-acl-context-in-each-process.md) later removed the remaining parent-child token comparison.
 
-Partially superseded by: [ADR-0018](0018-resolve-acl-context-in-each-process.md) 移除其余父子 token 比较。
+## Decision
 
-## 决定
+When MSYS sets the current primary token's default DACL through `NtSetInformationToken`, adapt the current input and let Windows authorize and execute the call. Relay relies on normal Windows inheritance so legitimate default DACL changes can reach descendants. Remove the baseline, readback after a successful set, and the creation lock that synchronized them.
 
-MSYS 调用 `NtSetInformationToken` 设置当前主 token 的默认 DACL 时，兼容层按当次输入适配，由 Windows 检查权限并执行设置。relay 沿用 Windows 对子 token 默认 DACL 的继承语义，合法的默认 DACL 变化可以随进程继续传播。删除历史 DACL 基准、设置后的读回和用于同步该基准的创建锁。
-
-relay 当前仍携带用户 SID、受限主体 SID 和命名空间等配置，因此继续比较父子安全上下文。进程和初始线程对象的 DACL 适配仍按 `process-dacl` 模块执行。
+At this stage, relay still carried the user SID, restricted principal, and namespace and compared parent and child contexts. The `process-dacl` module continued to handle process and initial-thread object DACLs.

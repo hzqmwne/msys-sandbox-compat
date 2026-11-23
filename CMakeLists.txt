@@ -94,7 +94,8 @@ if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 install(TARGETS msys-sandbox-compat-shim RUNTIME DESTINATION bin)
-install(FILES README.md CHANGELOG.md DESTINATION share/msys-sandbox-compat)
+install(FILES README.md README.zh-CN.md CHANGELOG.md CHANGELOG.zh-CN.md
+  DESTINATION share/msys-sandbox-compat)
 install(DIRECTORY docs/ DESTINATION share/msys-sandbox-compat/docs FILES_MATCHING PATTERN "*.md")
 install(FILES third_party/LICENSE.nlohmann third_party/LICENSE.mxc third_party/LICENSE.flatbuffers third_party/LICENSE.minhook
   DESTINATION share/msys-sandbox-compat/licenses)

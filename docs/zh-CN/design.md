@@ -1,0 +1,116 @@
+# MSYS Sandbox Compat 当前设计
+
+[English](../design.md)
+
+本文描述当前实现，重要取舍见 [架构决策](decisions/README.md)，使用入口见 [使用说明](getting-started.md)，已落地变更见 [CHANGELOG](../../CHANGELOG.zh-CN.md)。
+
+## 生产约束
+
+兼容层不修改任何磁盘文件或目录 ACL，不为兼容而放宽原 restricted token 的限制。文件读取、执行、写入及其他资源访问继续受原隔离策略约束；遇到拒绝时保留失败，不通过更大权限的 token、非受限代理或预开句柄绕过。兼容产物应位于原策略已允许的位置。
+
+对象描述符处理覆盖 MSYS IPC、创建进程和线程时的显式 DACL，以及 MSYS 运行时设置的进程和主 token 默认 DACL。各进程以自己的主 token 识别适用的受限主体，按当次输入补充对象 DACL。测试夹具设置的文件 ACL 只定义该夹具的初始策略。
+
+## 适配方向与依赖
+
+兼容层参照合理的受限环境版运行时行为，分别处理对象授权、fork 布局、创建传播和终端会话。残余影响、hook/进程数量及不改默认值均是取舍维度，由维护者结合功能和维护成本决定。保留 ntdll hook 通用接入，不限定 MSYS 模块/IAT/内部 RVA；当前识别和注入范围不因此扩大。
+
+发布产物为内嵌 agent DLL 的单文件 EXE。开发构建也保留独立的 EXE 和 DLL。宿主静态链接 CRT；早期 agent 无 CRT、普通/延迟导入、TLS、全局构造或 DllMain 依赖。当前采用 MinHook v1.3.4 的 HDE64 与适配的搬迁核心，不引入其完整运行时管理器。后端与安装器以独立的有界字节/逻辑地址/搬迁计划接口分开，CMake 集中选择后端。见 [ADR-0009](decisions/0009-minhook-relocation-backend.md)。
+
+构建 launcher 前使用同一 PE 读取器校验已链接的 agent DLL，检查入口点、导入、TLS、所需导出、数据与执行节和 unwind 目录。校验器不随产品安装。部署时 launcher 继续验证从磁盘读取的 DLL、同构建 ABI，以及后续实际访问的 PE 文件与映像范围。冷启动与继承 relay 使用同一映像大小上限。
+
+## 进程创建与识别
+
+外部隔离启动器负责原有策略。生产 shim 将经过校验的 agent DLL 嵌入 PE 资源，开发 EXE 从同目录读取 DLL。独立 psec-run 工具用于创建 PSEC 验证环境。宿主与 agent 共享 core 源码，分别按各自 CRT/栈约束编译。宿主以 `CREATE_SUSPENDED` 创建目标。直接导入 `msys-2.0.dll` 的 EXE 按 MSYS 处理，文件名比较忽略大小写。普通令牌也可启动，命名对象和 DACL 适配按令牌条件启用。
+
+声明此导入名就是选择该 ABI 的兼容处理。识别仅读取当前 EXE 的导入表，传递依赖及延迟导入在范围外。原生 EXE 改名为 Bash 不会命中，运行中才安装的 EXE 可在首次创建时识别。
+
+为使内核创建 PEB 和初始线程栈时避开 MSYS 的栈和堆地址区，创建时先按 Native 参数中的映像路径做一次导入预检。命中后追加 `PS_ATTRIBUTE_MEMORY_RESERVE`，短暂预留 24–64 GiB 窗口。agent 使用已有的创建 hook。独立宿主仅在本次直接启动期间替换自身 KernelBase 的一个导入槽，仍由 `CreateProcessW` 处理标准句柄、环境与控制台。已继承 relay 的宿主调用由 relay 处理。
+
+识别返回状态码与命中结果。导入表越界或读取失败会返回错误。启用 relay 时，已确认的 WoW64 进程走原生传播路径。其他无法分类或准备的目标按失败回收。关闭 relay 时，无法确认的后代保持原样，trace 标明识别不可用。
+
+实际挂起映像仍决定是否注入。创建前追加过预留的进程必须再次确认为 MSYS 才能恢复。完成挂起准备后，父进程在恢复或交还线程句柄前释放自己追加的预留。调用者已有的创建属性和预留原样保留。仅在创建后识别到 MSYS 时，继续准备实际映像及对象兼容，堆由 MSYS 自行分配。决定见 [ADR-0011](decisions/0011-release-heap-reservations-before-start.md)。
+
+## 初始准备
+
+宿主按模块和令牌条件准备命名空间和传播策略。普通令牌使用 Windows 自身的对象路径和 ACL。
+
+宿主和 agent 使用相同的模块配置。创建前预检由堆窗口模块触发。创建阶段的显式对象 DACL 适配以调用者的主 token 和当前请求为准。IPC 模块使用启动树传入的目录名，各进程自行确定 ACL 适配需要的 SID。关闭所有模块时，宿主挂起创建根进程，纳入 Job 后恢复。
+
+父端准备 agent 和模块配置，并安排子进程首次进入 `LdrInitializeThunk` 时执行初始化。独立 launcher 冷启动传入空的父映像数据。由 agent 传播时传入其所在进程已记录的映像数据，供 MSYS fork 使用。挂起期间的应用启动上下文仍可由创建者读取或更新。首次恢复后，agent 恢复加载器入口，按实际子进程映像和令牌条件选择并安装正式 hook，再把控制权交回 Windows 加载器。恢复后的初始化失败通过子进程退出状态报告。见 [ADR-0015](decisions/0015-initialize-at-child-loader-entry.md)。
+
+冷启动与 exec 时，未设置 `DYNAMIC_BASE` 的 MSYS 主 EXE 可尝试一次 PE 首选基址。首选址已使用时直接继续，尝试失败时沿用 Windows 已选定的基址。设置该标志的映像沿用 Windows 选址。fork 子进程仍在基址不同于父端实载基址时按父端路径对齐。新视图验证成功后才更新 PEB 和应用启动上下文，原视图继续保留。MSYS 启动后自行分配 cygheap 和 userheap。
+
+## DLL 映射范围
+
+完整 MSYS 兼容进程在 `NtMapViewOfSection` 入口处理后续 DLL 映射。调用方传入 `*BaseAddress == 0` 时，兼容层用 `NtQuerySection` 从当次 section 取得映像类型、长度、PE 标志和首选基址。首选基址必须非零且按 64 KiB 对齐，映像必须是未设置 `DYNAMIC_BASE` 的 AMD64 `SEC_IMAGE` DLL。按同一规则处理各路径下的 DLL，包括原生 DLL、主 EXE 的传递依赖和运行时加载的扩展。
+
+在受测 AMD64 路径上，非零 `ZeroBits` 的数量编码以低 32 位为基准，例如 `1` 要求映像落在 2 GiB 以下。位图编码按最高置位确定上限。整个首选映像区间都必须落在上限内，原始 `ZeroBits` 继续传给内核。
+
+不满足条件或查询失败时直接使用原请求。首选址映射失败时将 `*BaseAddress` 恢复为零，再用原请求重试一次。如果无法写回原基址则返回恢复错误。`--log-level=trace` 记录请求的首选址、该次映射状态和成功时的实址。首选址失败并恢复入参时会另记重试事件。当前决策及范围见 [ADR-0012](decisions/0012-prefer-dll-image-base-at-map.md)。
+
+MSYS 在 fork 时按运行时登记的模块清单核对父子实载基址。启动期间调用 `dll_dllcrt0` 登记的 MSYS DLL 进入 `DLL_LINK`，已登记的原生 `DLL_NATIVE` 也经过重载后的基址核对。PE 导入表用于给已登记的模块排序。动态登记的 `DLL_LOAD` 可以在父进程偏离 PE 首选地址，MSYS 会尝试在子进程重载到父进程实际使用的地址，再复制所需的数据段。即使自动选址让 DLL 加载继续，父子实载基址不同仍可能导致 fork 失败。见 [测试说明](testing.md#映像地址对照)。
+
+## Hook 的职责
+
+| 入口 | 兼容职责 |
+|---|---|
+| `NtCreateDirectoryObject` | MSYS 私有对象目录与授权 |
+| `NtCreateSection` | 共享 section 授权 |
+| `NtCreateMutant` | mutex 授权 |
+| `NtCreateSymbolicLinkObject` | MSYS 目录链接与授权 |
+| `NtCreateNamedPipeFile` | MSYS 管道授权 |
+| `NtMapViewOfSection` | 对基址未指定、未设置 `DYNAMIC_BASE` 且符合 `ZeroBits` 的 `SEC_IMAGE` DLL 尝试首选基址，失败时恢复原请求 |
+| `NtCreateUserProcess` | 创建前按需暂留堆窗口并适配显式进程和线程 DACL，挂起创建后传播并释放窗口 |
+| `NtSetInformationToken` | 当前主 token 默认 DACL 按当次输入补受限主体 |
+| `NtSetSecurityObject` | 当前进程伪句柄单独设置 DACL 时，按当次输入补受限主体 |
+
+对象路径规则保持不变。普通 allow ACL 保留原 ACE，只补当前用户及 enabled、非 deny-only 组已有、受限主体尚未具有的权限位。AppContainer 使用 package SID；非 AppContainer 优先使用同时属于 enabled/restricting 列表的 logon SID，或初始 ACL 中唯一可确定的非宽泛 restricting 主体。deny、带 flags 和复杂 ACE 原样传递；空 ACL 不补权。NULL DACL 用 Everyone:GA 加受限主体:GA 表达其开放意图，支持受测 PSEC 的共享 section。未指定 SD/缺省 DACL 仍由系统形成；absolute/self-relative SD 的 owner/group/SACL/control 语义保留。
+
+受限上下文启用 `process-dacl` 时，`NtCreateUserProcess` 在调用内核前用同一转换器检查 `process_attributes` 和 `thread_attributes` 的显式描述符。需要调整时只替换临时副本中的 `SecurityDescriptor`，适配无需识别目标映像。MSYS fork 显式提供创建 DACL，恢复时会跳过冷启动的设置调用，之后信号投递仍要按 PID 以 `PROCESS_DUP_HANDLE` 重开目标。显式适配在创建时一次完成。独立启动器传入空的进程和线程安全属性，由 Windows 使用默认 DACL。见 [ADR-0017](decisions/0017-adapt-process-dacl-at-creation.md)。
+
+默认设置同样使用当次 ACL，不恢复启动快照。仅匹配当前主 token 的 TokenDefaultDacl；NtCompareObjects 不要求输入句柄有查询权限，最终由原 NtSetInformationToken 检查设置权限。默认值对后续采用默认 SD 的对象有连带影响，作为已接受的兜底取舍；不修改已有磁盘/注册表 ACL。显式对象仍需创建路径适配。决定见 [ADR-0008](decisions/0008-adapt-requested-object-acls.md)。
+
+MSYS 冷启动分别设置 token 默认 DACL 和当前进程对象的 DACL。当前进程伪句柄的独立 DACL 设置复用同一转换器，原系统调用执行授权检查。Git for Windows 的新运行时通过进程句柄检查控制台所有者是否仍存活，这条设置路径会影响该检查。
+宿主只读查询自身主 token 时使用 `GetCurrentProcessToken` 伪句柄。PSEC 对象命名空间通过 `GetAppContainerNamedObjectPath` 与 token session 查询取得，不创建命名事件探针。该路径避免将宿主启动依赖于实际 token 对象可重开或 Win32 命名对象初始化。查询取舍见 [ADR-0003](decisions/0003-read-only-security-context.md)。
+
+非 AppContainer 受限令牌使用当前 Windows 会话的 `BaseNamedObjects`。宿主按自身 PID 命名兼容目录，沿用启动器默认 DACL，并持有目录句柄直到进程树退出。实际对象按当次输入适配。agent 在兼容树内传递目录路径。关闭 relay 时，经过原生中间程序后的显式兼容入口建立新树和新目录。默认 ConPTY 由内层宿主创建目录。AppContainer 使用 Windows 提供的 package 命名空间。取舍及受测边界见 [ADR-0005](decisions/0005-restricted-token-context.md)。
+
+## fork 与进程链
+
+MSYS 自身仍负责 fork 的复制、同步和恢复语义。兼容层解决环境导致的对象访问和地址布局障碍，并在相关子进程的初始线程恢复前复制 agent。它保留调用者原有的挂起状态，不用调试事件截获创建。
+
+关闭 relay 时，自动传播在原生子进程处结束。Job 仍管理生命周期并接收退出通知。进程链支持范围见 [兼容范围](compatibility.md)。
+
+MSYS 创建的原生后代可显式调用兼容宿主启动原生或 MSYS 目标。默认对象 ACL 在 MSYS 冷启动时基于当次请求补充受限主体，因此原生后代及再次进入的 MSYS 仍能重开所需对象。端到端回归覆盖一层和三层原生桥接后的 Bash、Perl、线程中 fork、管道、文件边界与退出码。
+
+## 原生 relay
+
+relay 默认覆盖原生根和后代，可通过 `--native-relay=off` 关闭。原生进程仅启用创建 hook，并与 MSYS 调用者使用同一规则处理创建时的显式 DACL。WoW64 通过其 AMD64 转换层调用原生 `NtCreateUserProcess`，因此复用同一份 AMD64 agent。完整布局与 IPC 适配只用于已识别的 AMD64 MSYS。调用者原有的挂起状态保留。
+
+原生创建 hook 在恢复前传播 agent，子端再识别映像和所需模块，因而覆盖 MSYS → 多层普通原生程序 → MSYS。已处于 relay 中的显式兼容启动器从本进程创建 hook 对应的 agent 映像识别继承状态，复用模块配置及 IPC 目录名。创建 hook 已负责准备子进程。首次映射在独立的 agent 状态副本中绑定 trampoline。ConPTY 的原生会话宿主同样适用。该模式继承到进程树后代。
+
+各进程只为自身实际安装的 hook 读取入口和生成 trampoline。未改写的入口由当前进程直接调用，以便原生 relay 执行后代准备。复制 agent 时根据子进程的 hook 集合重新绑定其原入口调用。启用传播时，agent 同时保存后代可能启用的 handler 位置。宿主通过版本标记核对配套 DLL 和继承的 relay 状态。
+
+子端 agent 使用自身主 token 的只读伪句柄取得 ACL 适配所需的主体。MSYS 在启用 ACL 模块时初始化本进程的主体，原生 relay 则在第一次适配显式 DACL 时才查询。SID 保存在进程自己的内存里，新进程从空的本地状态开始。默认 DACL 继承和实际访问检查由 Windows 负责。IPC 目录名是启动树的配置，访问仍由目录 ACL 决定。见 [ADR-0018](decisions/0018-resolve-acl-context-in-each-process.md)。
+
+## ConPTY
+
+外层控制台可用且 stdin、stdout、stderr 至少一路是控制台句柄时，自动模式启用 ConPTY。在已有 Windows Terminal 标签页里，外层会话继续由 Terminal 管理，compat 在既有受限上下文内通过系统 `CreatePseudoConsole` 创建内层。宿主再启动同一 EXE 的原生会话宿主持有 Windows 初始化的三个内层控制台句柄。外层通过显式句柄继承列表只传重定向句柄的副本。会话宿主用内层控制台句柄和直通句柄为真实目标逐路设置 stdio，随后释放直通副本。Windows 初始句柄由会话宿主保留，避免 MSYS 关闭并复用句柄值后，控制台清理关掉其他对象。混合模式下，宿主日志仍跟随外层 stderr。见 [ADR-0014](decisions/0014-conpty-preserve-redirected-stdio.md)。
+
+外层终端输入和输出使用可用的控制台句柄，必要时由外层宿主打开 `CONIN$` 或 `CONOUT$`。因此，即使目标 stdin 来自文件也可通过 `/dev/tty` 接收键盘输入，stdout 和 stderr 都重定向时仍可显示内层终端的键盘回显。agent 本身不打开控制台设备。
+
+提供 VT 管道的前端可以显式调用 `--terminal=conpty --conpty-size=120x40 -- COMMAND`，将 UTF-8 按键写入 stdin，从 stdout 读取内层 ConPTY 输出并直接渲染。该路径省去外层控制台对 VT 的再次转换，尺寸由启动参数指定。
+
+外层输出是控制台且当前光标能在内层尺寸内表示时，桥通过 `PSEUDOCONSOLE_INHERIT_CURSOR` 启动内层。输出线程从内层 VT 管道接收一次启动查询，用外层视口内的光标行列应答。内层由此从已有光标处输出，应用后续的 VT 序列照常转发。外层输出是管道时采用独立 VT 会话的初始画面。 [ConPTY 光标继承](https://learn.microsoft.com/en-us/windows/console/createpseudoconsole)
+
+在受测 PSEC 配置中，Low IL 客户端连接外部 Medium IL conhost 时，控制台连接策略拒绝 MSYS 所需的读屏和输入事件写回。外部普通 conhost 降至 Low 后，打开客户端进程时又会遇到目标进程 DACL 中的 AppContainer package SID 所触发的访问限制。普通 Untrusted 调用者在同一 PSEC 配置下也无法打开客户端进程。同一 PSEC 内创建的 conhost 已验证可以查询客户端 token，并通过后续控制台策略检查。[微软控制台访问规则](https://learn.microsoft.com/en-us/windows/console/console-buffer-security-and-access-rights#wrong-way-verbs)
+
+输入和输出由独立的阻塞 I/O 线程转发。读到可转发的字节就立即写出，短写时继续写入剩余字节。桥接从终端句柄或显式 VT 数据源读取输入，脚本只打开一次。显式 VT 数据源耗尽后，桥停止转发输入，目标继续持有内层控制台 stdin。在受测 Windows 上，关闭 conhost 的 VT 输入管道会向目标发出 `CTRL_CLOSE_EVENT`。桥因此把该管道保留到会话收尾，以便目标继续处理输入和输出结果。下游写入失败或零进展时，读取线程通过 job 的完成端口通知宿主结束进程树，同时继续读取并丢弃剩余 ConPTY 输出，直到终端退出。正常收尾取消阻塞输入并转发剩余输出。
+
+交互模式默认从外层输出控制台的 `srWindow` 取得初始行列数。独立线程采样窗口尺寸，在变化时调用 `ResizePseudoConsole`，因而空闲时也能传递调整。关闭时唤醒正在等待的尺寸采样线程，待其结束后再释放 ConPTY。显式尺寸、脚本输入和缺少可用窗口的显式会话采用固定尺寸。[控制台窗口尺寸查询](https://learn.microsoft.com/en-us/windows/console/getconsolescreenbufferinfo) · [ConPTY 调整尺寸](https://learn.microsoft.com/en-us/windows/console/resizepseudoconsole)
+
+外层控制台的鼠标跟踪由内层应用协商。普通 UTF-8、Win32 按键报告和原生 VT 可直接从读缓冲区转发。只有可能跨读取的旧式封装鼠标报告需要暂存，确认封装后才重建 SGR 序列，并复用转发缓冲区。内层 ConPTY 按应用的输入模式处理 SGR 序列。脚本和重定向输入保持原字节流。
+
+对真实控制台句柄，桥接前保存各方向的 mode 与代码页，输入设置 raw VT / UTF-8，输出启用 processed / VT / UTF-8。收尾在最后一批输出排空之后恢复，包括目标启动失败的路径。compat 的等待实例和开发工具 psec-run 各自注册 Ctrl+C handler，防止控制台广播先终止等待宿主并触发 job 回收。该 handler 处理当前宿主的通知，子进程沿用自己的处理器。[控制台模式](https://learn.microsoft.com/en-us/windows/console/setconsolemode) · [控制事件处理](https://learn.microsoft.com/en-us/windows/console/setconsolectrlhandler)
+
+该路径已在 PSEC 和两种固定非 AppContainer 受限令牌中完成交互验收。受限令牌回归在终端内完成 Perl/线程 fork、原生命令、Ctrl+C、作业控制和退出码，并在交互前后验证原有文件访问拒绝。实际 harness 的完整性等级、desktop 和句柄条件仍以其自身验收为准。

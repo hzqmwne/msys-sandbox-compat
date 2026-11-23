@@ -1,26 +1,24 @@
-# ADR-0003：只读安全上下文查询与 MSYS token 前置检查
+# ADR-0003 — Read the security context without reopening the token
+
+[简体中文](../zh-CN/decisions/0003-read-only-security-context.md)
 
 Status: Accepted
-Partially superseded by: ADR-0004，原生桥接后的 MSYS 冷启动已有成功兼容处理；ADR-0006 增加显式原生 relay。只读上下文查询和恢复前检查继续保留。
-
-Partially superseded by: [ADR-0018](0018-resolve-acl-context-in-each-process.md) 移除根进程恢复前的 token 预检。
 Date: 2026-10-20
-Related: ADR-0001
+
+Related: [ADR-0001](0001-suspended-msys-preparation.md). Subsequent decisions added cold-start compatibility after native intermediaries and native relay. [ADR-0018](0018-resolve-acl-context-in-each-process.md) removed the root token precheck.
 
 ## Context
 
-在受测 PSEC/MSYS 组合中，MSYS 创建的原生后代仍是 AppContainer、保留 package SID，却无法重开自身真实 token。原生匿名事件可以创建，Win32 命名事件即使显式提供私有描述符也拒绝；查询命名空间路径和在同一路径直接创建 NT 事件则成功。
+Native descendants of MSYS kept their AppContainer package SID in the tested PSEC, but could not reopen their own token. Anonymous native events worked. Win32 named events were denied even with an explicit private descriptor. Querying the namespace path and creating an NT event at that path worked.
 
-实际对象 SD 的只读采样表明：初始 Bash 的 token 对象包含 package ACE，而原生后代及其再创建的冷启动 Bash token 对象缺少它。宿主仅改用伪句柄并跳过事件探针后，第二个 Bash 已能恢复，但在 MSYS 初始化时报告 token 查询失败并停住。
+Read-only samples showed a package ACE on the first Bash token object, with that ACE absent from a native descendant and the next cold-start Bash. Switching the host to a pseudo-handle and removing its event probe let the second Bash resume. It still stopped at a token query during initialization.
 
 ## Decision
 
-宿主使用 `GetCurrentProcessToken` 完成自身只读查询，用 `GetAppContainerNamedObjectPath` 和 `TokenSessionId` 取得本次对象路径；不创建用于发现路径的命名事件，不修改 token、token 对象 SD 或默认 DACL。
+Use `GetCurrentProcessToken` for the host's own read-only queries. Use `GetAppContainerNamedObjectPath` and `TokenSessionId` to obtain the object path directly. Leave the token, its object security descriptor, and its default DACL alone.
 
-对确认关联 MSYS 的根映像，在恢复初始线程前检查该进程真实 token 的 `TOKEN_QUERY` 访问。拒绝就沿现有失败路径终止目标、关闭句柄并返回明确错误。原生目标继续保持无注入，能够在继承的原生后代安全上下文中运行。
+For a recognized MSYS root, check whether its actual token can be opened for `TOKEN_QUERY` before resuming the thread. On denial, use the existing failure path to terminate the target and close the handles. Native targets continue without agent preparation.
 
 ## Consequences
 
-移除宿主对可重开 token 和 Win32 命名事件准备的非必要依赖；原生工作负载回入可用，同时 MSYS 冷启动的已知失败可在初始化前定位并回收。真实 token 前置检查是已复现拒绝的必要条件检查，不保证其余初始化步骤全部成功。
-
-MSYS 原生桥接透明传播和受限 token 下的冷启动兼容仍不在支持范围。不能把宿主查询成功、预期拒绝通过或保留 package SID 当作整条 MSYS 链路成功。
+The host no longer depends on reopening its own token or creating a Win32 named event. Native re-entry works. The root token precheck identifies an observed MSYS initialization failure and allows early cleanup. Successful token queries or a preserved package SID are insufficient to establish that an entire MSYS chain works.
