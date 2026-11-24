@@ -29,7 +29,7 @@ function Invoke-Case([string]$Name,[string]$Program,[string[]]$Arguments,[int]$E
     $pass=($result.ExitCode -eq $Expected -and !$diagnosticFailure -and (!$Match -or $out -match $Match))
     if($CheckHeapHandoff){
         $launcherLine=$err.IndexOf('[launcher]')
-        $release='(?m)^\[agent\] released MSYS heap window 0000000600000000\r?$'
+        $release='(?m)^\[agent\] released MSYS heap window 0000000200000000\r?$'
         $pass=$pass -and $launcherLine -ge 0 -and
             $err.Substring(0,$launcherLine) -match $release -and
             $err.Substring($launcherLine) -match $release

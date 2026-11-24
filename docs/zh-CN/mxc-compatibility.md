@@ -16,7 +16,7 @@ MSYS Sandbox Compat 通过 hook 让已安装的 x64 MSYS2 运行时在 MXC Proce
 
 上游补丁直接修改 MSYS 运行时中的 fork、spawn 和 AppContainer 对象处理。v0.1.0 shim 保留原安装的 `msys-2.0.dll`，通过 `ntdll.dll` 层的 hook 处理相关调用。控制台桥接使用 Windows ConPTY API。 [MSYS2 runtime PR #403](https://github.com/msys2/msys2-runtime/pull/403) · [Git for Windows runtime PR #148](https://github.com/git-for-windows/msys2-runtime/pull/148)
 
-| 问题 | 上游修复方向 | shim 的处理 |
+| 问题 | 上游修复方向 | v0.1.0 shim 的处理 |
 | --- | --- | --- |
 | **栈和堆。** 加载器可能占用 MSYS 的栈和堆所需的地址。 | 用 `CREATE_SUSPENDED` 启动受影响的 fork/spawn 子进程，在恢复子进程前用 `VirtualAllocEx` 预留 cygheap 区间 `[0x800000000, 0xA00000000)`（32–40 GiB）。 | 在 `NtCreateUserProcess` 的属性列表中加入 `PS_ATTRIBUTE_MEMORY_RESERVE`，预留 `[0x600000000, 0x1000000000)`（24–64 GiB）。`CreateProcessW` 没有对应的属性。创建者在恢复子进程或交回挂起进程前释放自己的预留。 |
 | **EXE 与 DLL 选址。** 映像重定位可能导致 fork 失败。 | 按父进程实载地址映射 fork 子进程的 EXE，并更新 PEB 和启动入口。MSYS2 3.6.12 另行恢复了运行时 DLL 的 `DYNAMIC_BASE`。 [MSYS2 runtime PR #381](https://github.com/msys2/msys2-runtime/pull/381) | fork 时，`prepare_exe_layout` 使用父进程记录的 EXE 基址。冷启动和 exec 时，对未设置 `DYNAMIC_BASE` 的 EXE 尝试 PE 头中的 `ImageBase`。调用者未指定 `BaseAddress` 时，`NtMapViewOfSection` hook 对符合条件且未设置 `DYNAMIC_BASE` 的 DLL 尝试 `ImageBase`，失败时重试原请求。 |

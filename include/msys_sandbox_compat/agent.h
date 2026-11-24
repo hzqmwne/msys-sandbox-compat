@@ -30,7 +30,7 @@ constexpr uint32_t acl_modules = bit(Module::ipc) | bit(Module::process_dacl) | 
 
 // AMD64 MSYS uses the range below mmap for runtime stacks, cygheap and userheap.
 // Keep that address window clear only through kernel process creation.
-constexpr uintptr_t msys_heap_base = 0x600000000ULL;
+constexpr uintptr_t msys_heap_base = 0x200000000ULL;
 constexpr size_t msys_heap_extent = 0x1000000000ULL - msys_heap_base;
 
 class HeapReservation {

@@ -22,7 +22,7 @@
 
 声明此导入名就是选择该 ABI 的兼容处理。识别仅读取当前 EXE 的导入表，传递依赖及延迟导入在范围外。原生 EXE 改名为 Bash 不会命中，运行中才安装的 EXE 可在首次创建时识别。
 
-为使内核创建 PEB 和初始线程栈时避开 MSYS 的栈和堆地址区，创建时先按 Native 参数中的映像路径做一次导入预检。命中后追加 `PS_ATTRIBUTE_MEMORY_RESERVE`，短暂预留 24–64 GiB 窗口。agent 使用已有的创建 hook。独立宿主仅在本次直接启动期间替换自身 KernelBase 的一个导入槽，仍由 `CreateProcessW` 处理标准句柄、环境与控制台。已继承 relay 的宿主调用由 relay 处理。
+创建时先按 Native 参数中的映像路径做一次导入预检。命中后追加 `PS_ATTRIBUTE_MEMORY_RESERVE`，短暂预留 `[8,64)` GiB，使内核在窗口之外分配 PEB 和初始线程栈。窗口覆盖许多 MSYS DLL 的低位首选地址、运行时线程栈池、cygheap 和 userheap 起始区。agent 使用已有的创建 hook。独立宿主仅在本次直接启动期间替换自身 KernelBase 的一个导入槽，仍由 `CreateProcessW` 处理标准句柄、环境与控制台。已继承 relay 的宿主调用由 relay 处理。
 
 识别返回状态码与命中结果。导入表越界或读取失败会返回错误。启用 relay 时，已确认的 WoW64 进程走原生传播路径。其他无法分类或准备的目标按失败回收。关闭 relay 时，无法确认的后代保持原样，trace 标明识别不可用。
 

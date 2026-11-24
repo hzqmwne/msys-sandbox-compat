@@ -4,6 +4,12 @@ English | [简体中文](CHANGELOG.zh-CN.md)
 
 The [compatibility matrix](docs/compatibility.md) records where the changes have been tested.
 
+## 0.1.1
+
+- Extend the temporary MSYS process-creation reservation from `[24,64)` to `[8,64)` GiB. This keeps early Windows allocations out of the low preferred addresses used by the affected MSYS DLLs. The creator releases the reservation before handing off the child thread. [Design decision](docs/decisions/0011-release-heap-reservations-before-start.md)
+- On Windows 11 x64 with native PSEC 1.0 and official MSYS2, the eight-lane Perl fork comparison went from 795/800 to 800/800 passing rounds. The test covers one host and its installed runtime. [Test results](docs/testing.md#psec-fork-stress-and-address-sampling)
+- Version tags now publish the GitHub Release and attach the verified Windows x64 ZIP, standalone executables, and SHA-256 checksums. [Release verification](docs/testing.md#release-verification)
+
 ## 0.1.0
 
 ### Compatibility modules

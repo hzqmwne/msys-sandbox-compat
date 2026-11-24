@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(msys_sandbox_compat VERSION 0.1.0 LANGUAGES CXX ASM_MASM)
+project(msys_sandbox_compat VERSION 0.1.1 LANGUAGES CXX ASM_MASM)
 if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "MSVC AMD64 is required")
 endif()

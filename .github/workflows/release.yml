@@ -43,14 +43,14 @@ jobs:
           Get-ChildItem -LiteralPath $output.FullName -File | Sort-Object Name | ForEach-Object {
             '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
           } | Set-Content -LiteralPath (Join-Path $output.FullName 'SHA256SUMS.txt') -Encoding ascii
-          'Native PSEC acceptance runs on Windows 11 x64 using this release artifact.' >> $env:GITHUB_STEP_SUMMARY
+          'The hosted checks cover the packaged Windows x64 binaries. Native PSEC regression and stress results are recorded separately in the testing notes.' >> $env:GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@v7
         with:
           name: windows-x64-release
           path: build/release/
           if-no-files-found: error
 
-  draft:
+  release:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-24.04
@@ -65,11 +65,11 @@ jobs:
         with:
           name: windows-x64-release
           path: release
-      - name: Create GitHub Release draft
+      - name: Publish GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           (cd release && sha256sum --check SHA256SUMS.txt)
-          gh release create "$GITHUB_REF_NAME" release/* --draft --verify-tag \
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag \
             --title "$GITHUB_REF_NAME" --notes-file ".github/release-notes/$GITHUB_REF_NAME.md"

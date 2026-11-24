@@ -64,9 +64,9 @@ Integration scripts default to `build/bin` for `-BinaryDirectory` and find `tool
 
 ## Release verification
 
-The Windows release workflow runs on `windows-2025`. It builds and installs Release, runs seven selected CTest cases, then checks both executables from the extracted ZIP. A manual run uploads the candidate files and `SHA256SUMS.txt` as an Actions artifact. A version tag also creates a GitHub Release draft. [Windows release workflow](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
+The Windows release workflow runs on `windows-2025`. It builds and installs Release, runs seven selected CTest cases, then checks both executables from the extracted ZIP. A manual run uploads the release files and `SHA256SUMS.txt` as an Actions artifact. On a version tag push, a second job verifies the artifact checksums and publishes the GitHub Release with those files attached. [Windows release workflow](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
 
-For native PSEC acceptance, verify the candidate against `SHA256SUMS.txt`, then run the same extracted package on a Windows 11 x64 host with native PSEC. The v0.1.0 check used both Git for Windows and official MSYS2.
+Native PSEC regression and fork stress run on a Windows 11 x64 host that supports native PSEC. The hosted release workflow exercises the extracted package with an ordinary token. To reproduce the separate v0.1.0 package comparison under PSEC, verify its checksums and run these commands.
 
 ```powershell
 .\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec
@@ -92,6 +92,26 @@ Relay tests require only the creation hook in native intermediaries and check th
 Run `Existing` explicitly from the actual harness. It is outside the ordinary host CTest matrix. The existing policy must permit reading and executing the shim, MSYS, and the Perl fixture and writing the test workspace. Check the harness's own deny cases and token and ACL behavior separately. Fixture grants define test conditions. Production checks use paths allowed by the original policy and verify denials for read-only writes, WRITE_DAC, and forbidden reads as applicable. A few canaries cannot establish the entire policy of another environment.
 
 Use `integrity.ps1` if deployment writes change, if an unexpected install-tree change is suspected, or during release qualification. Use `tests/integrity.ps1 -CaptureBaseline -Baseline <FILE>` once to capture the baseline and pass the same file on subsequent comparisons. The integrity check is independent of CTest.
+
+## PSEC fork stress and address sampling
+
+The November 24–25, 2026 baseline used Windows 11 x64 `26300.9974`, native PSEC 1.0, the shim, and the official MSYS2 installation at `C:\msys64` (runtime 3.6.12-1, Bash 5.3.20-3, Perl 5.44.0-1). Each round started a fresh Perl root and ran `tests/fixtures/fork.pl 100`. A pass required exit code 0, all 114 TAP assertions including 100 secondary-thread forks, and no fork diagnostics.
+
+| Creation window | Parallel rounds | Passed | Wall time |
+| --- | --- | --- | --- |
+| `[24,64)` GiB | 4 × 100 | 399/400 | 20 min 22 s |
+| `[24,64)` GiB | 8 × 100 | 795/800 | 28 min 30 s |
+| `[8,64)` GiB | 8 × 100 | 800/800 | 34 min 16 s |
+
+The four-lane failure occurred when a child could not reserve the parent's stack range. In the eight-lane run, two failures reported different parent and child DLL bases, one reported an occupied address for a Perl XS DLL, and two reported a child exit status of `0xc0000018` without the conflicting range. All three identified DLL targets were in `[8,24)` GiB. The failed Perl rounds lacked an address map captured at the collision.
+
+All eight lanes passed with the expanded window, with 80,000 successful secondary-thread forks and no fork diagnostics. The launcher, runtime, Perl executable, and fixture hashes matched the previous eight-lane run. The wall times reflect each run's host workload.
+
+A separate trace on the old window captured 846 fork children with a ready snapshot. Windows initially placed 24 stacks below 24 GiB and none inside the temporary window. MSYS later created 22 worker stacks inside the range, after release. In every measured child, the worker thread was created after the two DLL maps and the XS DLL reservation identified by the stress logs.
+
+An independent native PSEC cold-start comparison sampled 64 launches per layout for MSYS2 Bash and Git for Windows Bash. With layout handling disabled, one MSYS2 startup failed when both the Windows initial stack and the PEB/TEB reservation landed near 36.49 GiB and blocked the runtime's `[32,40)` GiB cygheap reservation. The other 255 starts succeeded. Across successful samples, Windows placed the original Bash images at about 1.10–2.92 TiB and initial stacks at about 4–1023 GiB. All processes used high-entropy ASLR. The sample covered one host boot and did not include third-party DLL injection.
+
+An independent probe verified single-span creation reservations of up to 64 TiB with zero committed bytes on this host. The installed non-`DYNAMIC_BASE` AMD64 DLLs fit in `[14,24)` GiB for MSYS2 and `[8,24)` GiB for Git for Windows. A larger window placed over the original EXE can prevent process creation, and the window can only protect against allocations made before the parent releases it. [ADR-0011](decisions/0011-release-heap-reservations-before-start.md)
 
 ## Image mapping experiments
 

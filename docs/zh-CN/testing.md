@@ -71,9 +71,9 @@ ctest --test-dir build --output-on-failure
 
 ## 发布验证
 
-Windows 发布工作流在 `windows-2025` 上构建并安装 Release，运行七项定向 CTest，再用解压后的 ZIP 验证两个可执行文件。手动触发会将候选文件和 `SHA256SUMS.txt` 上传为 Actions 产物。推送版本标签还会创建 GitHub Release 草稿。 [Windows 发布工作流](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
+Windows 发布工作流在 `windows-2025` 上构建并安装 Release，运行七项定向 CTest，再用解压后的 ZIP 验证两个可执行文件。手动触发会将发布文件和 `SHA256SUMS.txt` 上传为 Actions 产物。推送版本标签时，后续任务核对产物校验和，然后带附件直接公开发布 GitHub Release。 [Windows 发布工作流](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
 
-原生 PSEC 验收先用 `SHA256SUMS.txt` 验证候选包，再在支持原生 PSEC 的 Windows 11 x64 主机上运行同一份解压包。v0.1.0 分别用 Git for Windows 和官方 MSYS2 完成了验收。
+原生 PSEC 回归和 fork 压测在支持原生 PSEC 的 Windows 11 x64 宿主上进行。托管发布工作流使用普通令牌验证解压包。如需复现 v0.1.0 解压包的原生 PSEC 对照，先核对校验和，再运行以下命令。
 
 ```powershell
 .\tests\release.ps1 -PackageDirectory PATH_TO_EXTRACTED_ZIP -Version 0.1.0 -Psec
@@ -95,6 +95,26 @@ relay 链路要求原生桥接只存在一个创建 hook，其余入口与 MSYS 
 `restricted-run` 只修改带 `.restricted-fixture` 标记的测试目录及其受控文件 ACL。暂存副本包含兼容产物与测试夹具，MSYS 分发文件保持原位。非 AppContainer 受限令牌的进程链测试将同令牌下原版 Bash 的执行结果保存为 `raw-baseline.*`，并要求 `native-depth-*` 完成真实工作负载。PSEC 的 `verify` 按兼容负载和权限边界验收。两种非 AppContainer 令牌的固定 SID、对象 ACL 和能力边界见 [兼容范围](compatibility.md)。
 
 测试设置的 ACL 是夹具初始条件，不能要求生产复制这些 ACL 操作。生产验收应使用原有策略已允许的部署位置，保留原 token、文件与对象访问限制；对只读写入、WRITE_DAC 和拒绝读取等行为同时检查拒绝。当前检查覆盖固定夹具，不能仅凭文件内容完整性或几个 canary 宣称任意生产环境的全部限制均已验证。
+
+## PSEC fork 压测与地址采样
+
+2026-11-24 至 25 日的对照使用 Windows 11 x64 `26300.9974`、原生 PSEC 1.0、shim 和 `C:\msys64` 的官方 MSYS2（运行时 3.6.12-1、Bash 5.3.20-3、Perl 5.44.0-1）。每轮新建 Perl 根进程并运行 `tests/fixtures/fork.pl 100`。通过条件包括退出码 0、完整 114 项 TAP（含 100 项副线程 fork）和无 fork 诊断。
+
+| 创建窗口 | 并行轮数 | 通过 | 墙钟耗时 |
+| --- | --- | --- | --- |
+| `[24,64)` GiB | 4 × 100 | 399/400 | 20 分 22 秒 |
+| `[24,64)` GiB | 8 × 100 | 795/800 | 28 分 30 秒 |
+| `[8,64)` GiB | 8 × 100 | 800/800 | 34 分 16 秒 |
+
+4 路组的失败发生在子进程为父线程栈预留地址时。8 路组两次报告父子 DLL 基址不同，一次报告 Perl XS DLL 的目标地址已被占用，两次只得到子进程退出状态 `0xc0000018`。三条已知 DLL 目标区间都落在 `[8,24)` GiB。Perl 失败轮没有在冲突时采到地址图。
+
+扩大窗口后，8 路全部通过，完成 80,000 次副线程 fork，无 fork 诊断。启动器、运行时、Perl 和夹具的文件哈希与上一轮 8 路对照相同。耗时按两轮各自的宿主负载实测。
+
+旧窗口下，独立诊断采集了 846 个到达就绪阶段的 fork 子进程。Windows 初始栈有 24 个落在 24 GiB 以下，暂留窗口内为零。窗口释放后，MSYS 的工作线程栈有 22 个落在原窗口内。受测子进程中的工作线程均在两次相关 DLL 映射和 XS DLL 目标预留之后创建。
+
+原生 PSEC 冷启动对照为两套 Bash 的每种布局各采样 64 次。其中一次官方 MSYS2 在关闭地址布局处理时启动失败，Windows 初始栈和 PEB/TEB 保留都落在约 36.49 GiB，挡住运行时的 `[32,40)` GiB cygheap 预留。其余 255 次成功。成功样本的 Windows 初始 Bash 映像落在约 1.10–2.92 TiB，初始栈落在约 4–1023 GiB。全部是高熵 ASLR，同一次开机采样，未涉及第三方 DLL 注入。
+
+独立探针在本机验证了至多 64 TiB 的单段创建时预留，提交量为零。已安装的非 `DYNAMIC_BASE` AMD64 DLL 在官方 MSYS2 中落在 `[14,24)` GiB，在 Git for Windows 中落在 `[8,24)` GiB。窗口与初始 EXE 相交可阻止进程创建，窗口保护的时间也止于父进程释放它。见 [ADR-0011](decisions/0011-release-heap-reservations-before-start.md)。
 
 ## 映像地址对照
 
