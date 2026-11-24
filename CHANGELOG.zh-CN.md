@@ -7,7 +7,7 @@
 ## 0.1.1
 
 - 将 MSYS 创建时的临时预留从 `[24,64)` 扩大到 `[8,64)` GiB，使早期 Windows 分配避开受影响 DLL 的低位首选地址。创建者在交还子线程前释放预留。 [设计决定](docs/zh-CN/decisions/0011-release-heap-reservations-before-start.md)
-- Windows 11 x64、原生 PSEC 1.0 和官方 MSYS2 下，8 路 Perl fork 压测由 795/800 提升到 800/800。结果对应这台宿主及其安装的运行时。 [测试结果](docs/zh-CN/testing.md#psec-fork-压测与地址采样)
+- Windows 11 x64、原生 PSEC 1.0 和官方 MSYS2 下，旧窗口的 Perl fork 压测通过 795/800 轮。扩大窗口后，在同一宿主两次均通过 800/800 轮。 [测试结果](docs/zh-CN/testing.md#psec-fork-压测与地址采样)
 - 推送版本标签后自动公开发布 GitHub Release，附带已验证的 Windows x64 ZIP、独立程序和 SHA-256 校验清单。 [发布验证](docs/zh-CN/testing.md#发布验证)
 
 ## 0.1.0

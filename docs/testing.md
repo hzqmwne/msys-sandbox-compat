@@ -102,10 +102,11 @@ The November 24–25, 2026 baseline used Windows 11 x64 `26300.9974`, native PSE
 | `[24,64)` GiB | 4 × 100 | 399/400 | 20 min 22 s |
 | `[24,64)` GiB | 8 × 100 | 795/800 | 28 min 30 s |
 | `[8,64)` GiB | 8 × 100 | 800/800 | 34 min 16 s |
+| `[8,64)` GiB, v0.1.1 repeat | 8 × 100 | 800/800 | 35 min 58 s |
 
 The four-lane failure occurred when a child could not reserve the parent's stack range. In the eight-lane run, two failures reported different parent and child DLL bases, one reported an occupied address for a Perl XS DLL, and two reported a child exit status of `0xc0000018` without the conflicting range. All three identified DLL targets were in `[8,24)` GiB. The failed Perl rounds lacked an address map captured at the collision.
 
-All eight lanes passed with the expanded window, with 80,000 successful secondary-thread forks and no fork diagnostics. The launcher, runtime, Perl executable, and fixture hashes matched the previous eight-lane run. The wall times reflect each run's host workload.
+All eight lanes passed in both expanded-window runs, each with 80,000 successful secondary-thread forks and no fork diagnostics. The launcher, runtime, Perl executable, and fixture hashes matched the eight-lane baseline. The local v0.1.1 source build passed all 32 Release CTest cases before the final stress run. The wall times reflect each run's host workload.
 
 A separate trace on the old window captured 846 fork children with a ready snapshot. Windows initially placed 24 stacks below 24 GiB and none inside the temporary window. MSYS later created 22 worker stacks inside the range, after release. In every measured child, the worker thread was created after the two DLL maps and the XS DLL reservation identified by the stress logs.
 
