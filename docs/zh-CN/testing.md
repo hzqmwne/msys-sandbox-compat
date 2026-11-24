@@ -71,7 +71,7 @@ ctest --test-dir build --output-on-failure
 
 ## 发布验证
 
-Windows 发布工作流在 `windows-2025` 上构建并安装 Release，运行七项定向 CTest，再用解压后的 ZIP 验证两个可执行文件。手动触发会将发布文件和 `SHA256SUMS.txt` 上传为 Actions 产物。推送版本标签时，后续任务核对产物校验和，然后带附件直接公开发布 GitHub Release。 [Windows 发布工作流](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
+Windows 发布工作流在 `windows-2025` 上构建 Release，运行七项定向 CTest，并将 CMake 的 `Runtime` 组件打包。ZIP 内含两个独立程序、项目许可证和第三方许可声明。使用和设计文档在仓库中查阅。工作流在解压后检查文件清单并验证两个程序。手动触发会将发布文件和 `SHA256SUMS.txt` 上传为 Actions 产物。推送版本标签时，后续任务核对产物校验和，然后带附件直接公开发布 GitHub Release。 [Windows 发布工作流](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
 
 原生 PSEC 回归和 fork 压测在支持原生 PSEC 的 Windows 11 x64 宿主上进行。托管发布工作流使用普通令牌验证解压包。如需复现 v0.1.0 解压包的原生 PSEC 对照，先核对校验和，再运行以下命令。
 

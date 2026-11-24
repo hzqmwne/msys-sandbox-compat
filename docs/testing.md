@@ -64,7 +64,7 @@ Integration scripts default to `build/bin` for `-BinaryDirectory` and find `tool
 
 ## Release verification
 
-The Windows release workflow runs on `windows-2025`. It builds and installs Release, runs seven selected CTest cases, then checks both executables from the extracted ZIP. A manual run uploads the release files and `SHA256SUMS.txt` as an Actions artifact. On a version tag push, a second job verifies the artifact checksums and publishes the GitHub Release with those files attached. [Windows release workflow](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
+The Windows release workflow runs on `windows-2025`. It builds Release, runs seven selected CTest cases, and packages the CMake `Runtime` component. The ZIP contains both standalone executables, the project license, and the third-party license notices. The repository hosts the usage and design documentation. The workflow checks the file list and both executables after extraction. A manual run uploads the release files and `SHA256SUMS.txt` as an Actions artifact. On a version tag push, a second job verifies the artifact checksums and publishes the GitHub Release with those files attached. [Windows release workflow](https://github.com/hzqmwne/msys-sandbox-compat/blob/main/.github/workflows/release.yml)
 
 Native PSEC regression and fork stress run on a Windows 11 x64 host that supports native PSEC. The hosted release workflow exercises the extracted package with an ordinary token. To reproduce the separate v0.1.0 package comparison under PSEC, verify its checksums and run these commands.
 

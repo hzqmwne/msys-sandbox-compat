@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$PackageDirectory,
     [Parameter(Mandatory)][string]$Version,
     [string]$GitRoot = 'C:\Program Files\Git',
-    [switch]$Psec
+    [switch]$Psec,
+    [switch]$RuntimeOnly
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'common.ps1')
@@ -18,11 +19,18 @@ if ((@(Get-ChildItem -LiteralPath $bin -Force).Name | Sort-Object) -join ' ' -ne
     'msys-sandbox-compat-shim.exe psec-run.exe') {
     throw 'Expected exactly the two standalone programs in bin'
 }
-foreach ($file in 'LICENSE','share/msys-sandbox-compat/README.md','share/msys-sandbox-compat/README.zh-CN.md',
-    'share/msys-sandbox-compat/CHANGELOG.md','share/msys-sandbox-compat/CHANGELOG.zh-CN.md',
+$runtimeFiles = @('bin/msys-sandbox-compat-shim.exe','bin/psec-run.exe','LICENSE',
     'share/msys-sandbox-compat/licenses/LICENSE.minhook','share/msys-sandbox-compat/licenses/LICENSE.mxc',
-    'share/msys-sandbox-compat/licenses/LICENSE.flatbuffers','share/msys-sandbox-compat/licenses/LICENSE.nlohmann') {
+    'share/msys-sandbox-compat/licenses/LICENSE.flatbuffers','share/msys-sandbox-compat/licenses/LICENSE.nlohmann')
+foreach ($file in $runtimeFiles) {
     if (!(Test-Path -LiteralPath (Join-Path $package $file) -PathType Leaf)) { throw "Missing $file" }
+}
+if ($RuntimeOnly) {
+    $actualFiles = Get-ChildItem -LiteralPath $package -Recurse -File -Force | ForEach-Object {
+        $_.FullName.Substring($package.Length + 1).Replace('\', '/')
+    }
+    $differences = Compare-Object $runtimeFiles $actualFiles
+    if ($differences) { throw ('Unexpected release package contents: ' + ($differences.InputObject -join ', ')) }
 }
 $result = Invoke-TestProcess (New-TestProcessInfo $shim @('--version') $state)
 if ($result.ExitCode -ne 0 -or $result.Output.Trim() -cne $Version -or $result.Error) {
