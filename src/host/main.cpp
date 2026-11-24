@@ -422,7 +422,7 @@ int wmain(int argc, wchar_t **argv) try {
             const auto installed = selected_hooks(modules);
             if (installed || ((modules & bit(Module::exe_placement)) && !image.dynamic_base))
                 inject_root(child.hProcess, installed, *state,
-                            allow_legacy_cli ? own_path().parent_path() / L"msys-sandbox-compat.dll"
+                            allow_legacy_cli ? own_path().parent_path() / L"msys-sandbox-compat-agent.dll"
                                              : fs::path{});
             if (reserved)
                 check_nt(release_heap_reservation(state->api, child.hProcess, *state),

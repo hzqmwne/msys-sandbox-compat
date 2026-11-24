@@ -33,8 +33,6 @@ add_library(msys-sandbox-compat-agent SHARED ${compat_core}
   src/agent/security_hooks.cpp src/agent/startup.cpp src/agent/memory.cpp src/agent/stack_probe.asm)
 add_compat_hook_backend(msys-sandbox-compat-agent)
 target_include_directories(msys-sandbox-compat-agent PRIVATE include)
-set_target_properties(msys-sandbox-compat-agent PROPERTIES OUTPUT_NAME msys-sandbox-compat
-  ARCHIVE_OUTPUT_NAME msys-sandbox-compat-agent PDB_NAME msys-sandbox-compat-agent)
 target_compile_options(msys-sandbox-compat-agent PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/GS-> $<$<COMPILE_LANGUAGE:CXX>:/GR-> $<$<COMPILE_LANGUAGE:CXX>:/Zl> $<$<COMPILE_LANGUAGE:CXX>:/Oi-> $<$<COMPILE_LANGUAGE:CXX>:/EHs-c->)
 target_link_options(msys-sandbox-compat-agent PRIVATE /NODEFAULTLIB /NOENTRY /INCREMENTAL:NO /GUARD:NO /DYNAMICBASE)
 # Keep the normal probe threshold: do not call __chkstk in every small hook

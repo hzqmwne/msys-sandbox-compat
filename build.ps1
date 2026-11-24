@@ -18,6 +18,11 @@ $configureArgs = @(
 if ($LASTEXITCODE) { throw 'CMake configure failed' }
 & $cmake --build $buildDirectory
 if ($LASTEXITCODE) { throw 'C++ build failed' }
+# Retire the former agent filename after rebuilding successfully.
+$oldAgent = Join-Path $buildDirectory 'bin/msys-sandbox-compat.dll'
+if (Test-Path -LiteralPath $oldAgent -PathType Leaf) {
+    Remove-Item -LiteralPath $oldAgent
+}
 if ($Install) {
     $package = Join-Path $buildDirectory 'package'
     & $cmake --install $buildDirectory --prefix $package
